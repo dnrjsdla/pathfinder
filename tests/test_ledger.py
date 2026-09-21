@@ -1,0 +1,201 @@
+import json
+import tempfile
+import threading
+import unittest
+from pathlib import Path
+from unittest import mock
+
+from pathfinder import ledger as ledger_mod
+from pathfinder.ledger import Ledger
+
+
+class LedgerClosedVocabTest(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.ledger = Ledger(Path(self._tmp.name))
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_ledger_closed_vocab(self):
+        with self.assertRaises(ValueError):
+            self.ledger.append("not_a_type")
+        with self.assertRaises(ValueError):
+            self.ledger.append("user", origin="not_an_origin")
+        with self.assertRaises(ValueError):
+            self.ledger.append("user", trust="not_a_trust")
+
+    def test_reserved_field_collision_rejected(self):
+        with self.assertRaises(ValueError):
+            self.ledger.append("user", seq=999)
+
+
+class PartitionRoundtripTest(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.home = Path(self._tmp.name)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_partition_roundtrip(self):
+        base = 1_700_000_000.0  # arbitrary fixed UTC instant
+        days = iter(base + i * 86400 for i in range(13))
+        ledger = Ledger(self.home)
+        with mock.patch.object(ledger_mod.time, "time", lambda: next(days)):
+            appended = [
+                ledger.append("user", session="s", origin="user", trust="user", text=f"day{i}")
+                for i in range(13)
+            ]
+
+        files = sorted((self.home / "events").glob("*.jsonl"))
+        self.assertEqual(len(files), 13)  # one partition per day
+
+        read_back = list(ledger.read())
+        self.assertEqual([e["seq"] for e in read_back], [e["seq"] for e in appended])
+        self.assertEqual([e["text"] for e in read_back], [f"day{i}" for i in range(13)])
+        self.assertEqual(ledger.last_seq, 13)
+
+        reopened = Ledger(self.home)
+        self.assertEqual(reopened.last_seq, 13)  # last_seq survives reopening
+
+        # hand-append a truncated half-line to the newest partition file, as a crash mid-write would
+        with files[-1].open("a") as f:
+            f.write('{"seq": 14, "type": "user", "trunc')  # no closing brace, no newline
+
+        self.assertEqual(len(list(reopened.read())), 13)  # reading tolerates it
+
+        healed = Ledger(self.home)
+        self.assertEqual(healed.last_seq, 13)  # reopening tolerates it too
+        next_event = healed.append("user", session="s", origin="user", trust="user", text="after")
+        self.assertEqual(next_event["seq"], 14)  # and the next seq continues correctly
+
+
+class LedgerConcurrencyTest(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.home = Path(self._tmp.name)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_concurrent_appends_unique_and_valid(self):
+        ledger = Ledger(self.home)
+        results = []
+        results_lock = threading.Lock()
+
+        def worker():
+            for _ in range(50):
+                event = ledger.append("user", session="s", origin="user", trust="user", text="x")
+                with results_lock:
+                    results.append(event["seq"])
+
+        threads = [threading.Thread(target=worker) for _ in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        self.assertEqual(len(results), 400)
+        self.assertEqual(len(set(results)), 400)  # 400 unique seqs
+        self.assertEqual(sorted(results), list(range(1, 401)))  # strictly increasing, no gaps
+
+        lines = []
+        for path in sorted((self.home / "events").glob("*.jsonl")):
+            lines.extend(path.read_text().splitlines())
+        self.assertEqual(len(lines), 400)
+        for line in lines:
+            json.loads(line)  # every line is valid JSON
+
+
+class TwoLedgersTest(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.home = Path(self._tmp.name)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_two_ledgers_never_duplicate_seq(self):
+        # simulates two processes (e.g. the daemon and a `pathfinder config set` CLI call)
+        # sharing one home directory, each with its own Ledger instance and in-memory last_seq
+        a = Ledger(self.home)
+        b = Ledger(self.home)
+        seqs = []
+        for i in range(20):
+            src = a if i % 2 == 0 else b
+            event = src.append("user", session="s", origin="user", trust="user", text=str(i))
+            seqs.append(event["seq"])
+
+        self.assertEqual(len(seqs), len(set(seqs)))
+        self.assertEqual(seqs, list(range(1, 21)))  # unique and strictly increasing in write order
+
+        self.assertEqual([e["seq"] for e in a.read()], list(range(1, 21)))
+        self.assertEqual([e["seq"] for e in b.read()], list(range(1, 21)))
+
+    def test_two_ledgers_interleaved_threads(self):
+        """The sequential version never actually races; this one does."""
+        ledgers = [Ledger(self.home) for _ in range(4)]
+
+        def worker(led):
+            for i in range(40):
+                led.append("user", session="s", origin="user", trust="user", text=str(i))
+
+        threads = [threading.Thread(target=worker, args=(led,)) for led in ledgers]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        self.assertEqual([e["seq"] for e in Ledger(self.home).read()], list(range(1, 161)))
+
+
+class CrashRecoveryTest(unittest.TestCase):
+    """The predecessor died at a day boundary, silently, with every test green. These are
+    the two ways this ledger could have done the same."""
+
+    DAY = 86400
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.home = Path(self._tmp.name)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _append_at(self, led, ts, text):
+        with mock.patch.object(ledger_mod.time, "time", lambda: ts):
+            return led.append("user", session="s", origin="user", trust="user", text=text)
+
+    def test_last_seq_survives_an_empty_or_truncated_newest_partition(self):
+        t0 = 1_700_000_000
+        led = Ledger(self.home)
+        for i in range(3):
+            self._append_at(led, t0, f"a{i}")
+        for leftover in ("", '{"seq": 4, "ts"'):  # crash on the first append after UTC midnight
+            newest = self.home / "events" / f"{ledger_mod.partition(t0 + self.DAY)}.jsonl"
+            newest.write_text(leftover)
+            reopened = Ledger(self.home)
+            self.assertEqual(reopened.last_seq, 3, f"newest partition holds {leftover!r}")
+            event = self._append_at(reopened, t0 + self.DAY, "after the crash")
+            self.assertEqual(event["seq"], 4)
+            self.assertEqual([e["seq"] for e in Ledger(self.home).read()], [1, 2, 3, 4])
+            newest.unlink()
+
+    def test_append_after_a_truncated_line_in_the_same_file_is_readable(self):
+        t0 = 1_700_000_000
+        led = Ledger(self.home)
+        for i in range(3):
+            self._append_at(led, t0, f"a{i}")
+        path = self.home / "events" / f"{ledger_mod.partition(t0)}.jsonl"
+        with path.open("a") as f:
+            f.write('{"seq": 4, "ts"')  # fragment without a newline, same partition
+        reopened = Ledger(self.home)
+        event = self._append_at(reopened, t0 + 60, "must not be glued to the fragment")
+        self.assertEqual(event["seq"], 4)
+        read_back = list(Ledger(self.home).read())
+        self.assertEqual([e["seq"] for e in read_back], [1, 2, 3, 4])
+        self.assertEqual(read_back[-1]["text"], "must not be glued to the fragment")
+
+
+if __name__ == "__main__":
+    unittest.main()

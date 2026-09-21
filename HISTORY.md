@@ -70,3 +70,54 @@ as read from the provider's pricing page on 2026-09-22 (input / cached input / o
   the response headers (read 0.00 s), and the user-turn fit mixed multi-request turn totals
   (negative slope, negative tokens/day). Raw per-turn metrics are now saved so the formula can be
   corrected later without paying for the requests again.
+
+## 2026-09-22 — Partition 1: the minimal round trip
+
+"It runs" was checked against a live model through the unix socket: one turn streams, a second
+turn in the same session recalls the first, and after stopping the daemon and deleting `state.db`
+the restarted daemon answered "four exchanges so far, the word was plum" - restored from the
+ledger alone. 47 offline tests. Core so far about 800 lines against a 5,500 budget.
+
+### What changed against the plan
+
+- **D1, honestly: the Mark.5 loop could not be transplanted.** `react.py` is code-mode through and
+  through (it pulls a Python block out of the answer and hands it to an executor). With native tool
+  calling (D11) only its ideas carried over: a closed set of outcomes, a loop that knows nothing of
+  origin or policy, a budget that is a cost ceiling, exceptions that propagate. The transplant
+  value of D1 sits in later partitions (MCP client, policy table, rules engine) and is unchanged.
+- The contract gained three things while the daemon was being written: the ledger must be safe
+  across PROCESSES, not just behind one function (the CLI appends while the daemon runs; an
+  in-memory `last_seq` would hand out duplicates) - now an `flock` plus tail re-derivation; the
+  content key of `user`/`assistant` events is `text`; `State.session()` exists for the `attached`
+  reply.
+
+### Defects found, by whom
+
+- Lead, during integration: deltas arrived AFTER `turn.end` (ordering had been left to event-loop
+  scheduling; now one queue with an end marker put by the worker thread); `close()` hung forever
+  with a client attached.
+- Implementer: the contract's function name `set` shadowed the builtin inside `config.py`, so
+  `load()` called itself; two leaked sockets in the adapter and its tests.
+- **Reviewer (opus), NO-GO with two reproduced blockers - the predecessor's death, again:**
+  1. `last_seq` was recovered from the newest partition only. A crash on the first append after
+     UTC midnight leaves that file empty or holding one truncated line, `last_seq` restarts at 0,
+     new events reuse old seqs, and `State.apply` drops every one of them as already applied.
+     A day boundary, silent, every test green. Fixed: walk partitions newest-first.
+  2. An append after a fragment without a newline glued the new event onto the fragment and both
+     were skipped on read, unrecoverably. Fixed: close the fragment with a newline first.
+  Also fixed from the same review: mid-stream timeouts and resets escaped the `LLMError` contract;
+  an exhausted turn showed the user eight steps of text and recorded none of it; a non-string
+  session id dropped the connection without an error line; `State.apply` read the cursor outside
+  its transaction (two processes counted a turn twice) - now `BEGIN IMMEDIATE` plus a lock, which
+  is also what partition 2's worker threads need; `max_steps 0` ran the model zero times with no
+  output and no error; an existing home directory kept its loose mode; `reindex` dropped tables
+  under a live daemon; and the "one definition of the day" source scan only looked inside
+  `ledger.py` - it now scans the whole package.
+- Seam added on the reviewer's advice (D8, one step ahead): every turn owns a cancel `Event` that
+  reaches the HTTP stream, so interrupt and steer in partition 2 extend the signatures instead of
+  ripping them up.
+
+### Left open on purpose
+
+`flush()` without `fsync`; `_write` without `drain()` (a slow client grows memory); an unbounded
+session queue; sessions are never evicted. None loses data; each is a note for partition 7.

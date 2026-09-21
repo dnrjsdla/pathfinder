@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+dist/
+build/
+
+# Machine state lives in the user's home, never in the repo. Block the types anyway.
+*.db
+*.db-shm
+*.db-wal
+events/
+vault/
+bench/results/
+
+# Secrets
+.env
+.env.*
+*.pem
+
+# Local tooling
+.claude/worktrees/
+.claude/settings.local.json
+.claude/agent-memory/
+.DS_Store

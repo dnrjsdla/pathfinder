@@ -1,0 +1,440 @@
+<title>PATHFINDER Blueprint</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --ground:#EEF2F6; --surface:#FFFFFF; --ink:#14233A; --muted:#5A6B82;
+  --accent:#1F5FBF; --mark:#C2571A; --rule:#CBD5E1; --tint:#E1E9F4; --marktint:#FBEDE3;
+  --sans:"IBM Plex Sans KR","Apple SD Gothic Neo","Malgun Gothic",system-ui,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --ground:#0F1B2D; --surface:#16253B; --ink:#E3EAF4; --muted:#93A4BC;
+  --accent:#7DB0FF; --mark:#F0A06A; --rule:#2A3B55; --tint:#1B2E4A; --marktint:#3A2A1E;
+}}
+:root[data-theme="dark"]{
+  --ground:#0F1B2D; --surface:#16253B; --ink:#E3EAF4; --muted:#93A4BC;
+  --accent:#7DB0FF; --mark:#F0A06A; --rule:#2A3B55; --tint:#1B2E4A; --marktint:#3A2A1E;
+}
+body{background:var(--ground);color:var(--ink);font-family:var(--sans);font-size:16px;line-height:1.75;padding-inline:20px}
+.page{max-width:60rem;margin-inline:auto;padding-block:0 5rem;display:flex;flex-direction:column;gap:3.5rem}
+header.top{padding-block:3.5rem 2.5rem;border-bottom:2px solid var(--ink);
+  background-image:linear-gradient(var(--rule) 1px,transparent 1px),linear-gradient(90deg,var(--rule) 1px,transparent 1px);
+  background-size:28px 28px;background-position:-1px -1px}
+header.top>*{background:var(--ground);display:table;padding-inline:.4rem .8rem}
+.eyebrow{font-family:var(--mono);font-size:.78rem;letter-spacing:.08em;text-transform:uppercase;color:var(--accent);margin:0 0 .6rem}
+h1{font-size:clamp(1.7rem,4.6vw,2.7rem);line-height:1.25;font-weight:700;margin:0;text-wrap:balance;max-width:22em}
+.lede{margin:1rem 0 0;color:var(--muted);max-width:44em}
+nav.toc{display:flex;flex-wrap:wrap;gap:.35rem .5rem;font-size:.85rem}
+nav.toc a{color:var(--ink);text-decoration:none;border:1px solid var(--rule);padding:.15rem .6rem;border-radius:2px;background:var(--surface)}
+nav.toc a:hover,nav.toc a:focus-visible{border-color:var(--accent);color:var(--accent);outline:none}
+section{display:flex;flex-direction:column;gap:1.1rem}
+h2{font-size:1.4rem;line-height:1.35;margin:0;font-weight:700;display:flex;gap:.7rem;align-items:baseline;text-wrap:balance}
+h2 .n{font-family:var(--mono);font-size:.85rem;color:var(--accent);font-weight:500;flex:none}
+h3{font-size:1.02rem;margin:.6rem 0 0;font-weight:600}
+p,ul,ol{margin:0;max-width:46em}
+ul,ol{padding-left:1.2rem;display:flex;flex-direction:column;gap:.35rem}
+code{font-family:var(--mono);font-size:.86em;background:var(--tint);padding:.05em .35em;border-radius:2px}
+.scroll{overflow-x:auto;border:1px solid var(--rule);background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:.9rem;line-height:1.55}
+th,td{text-align:left;vertical-align:top;padding:.55rem .75rem;border-bottom:1px solid var(--rule)}
+th{font-weight:600;font-size:.78rem;letter-spacing:.04em;color:var(--muted);background:var(--tint);white-space:nowrap}
+tr:last-child td{border-bottom:0}
+td.k{font-family:var(--mono);font-size:.82rem;color:var(--accent);white-space:nowrap}
+td.num{font-variant-numeric:tabular-nums}
+.root{border-left:4px solid var(--mark);background:var(--marktint);padding:1rem 1.2rem;font-size:1.08rem;font-weight:500;max-width:46em}
+.root small{display:block;font-weight:400;color:var(--muted);font-size:.85rem;margin-top:.4rem}
+pre{margin:0;font-family:var(--mono);font-size:.78rem;line-height:1.6;padding:1.1rem 1.2rem;color:var(--ink);min-width:46rem}
+.dec{display:grid;grid-template-columns:3.2rem 1fr;gap:.2rem 1rem;padding:1rem 0;border-top:1px solid var(--rule)}
+.dec:first-of-type{border-top:0;padding-top:0}
+.dec .id{font-family:var(--mono);color:var(--accent);font-weight:500;padding-top:.1rem}
+.dec .what{font-weight:600}
+.dec .why,.dec .flip{grid-column:2;font-size:.92rem;color:var(--muted)}
+.dec .flip b{color:var(--mark);font-weight:600}
+.dec .why b{color:var(--ink);font-weight:600}
+.tag{font-family:var(--mono);font-size:.72rem;border:1px solid var(--rule);padding:.05rem .4rem;border-radius:2px;color:var(--muted);white-space:nowrap}
+.tag.new{border-color:var(--mark);color:var(--mark)}
+.tag.keep{border-color:var(--accent);color:var(--accent)}
+.note{font-size:.88rem;color:var(--muted)}
+.ask{border:2px solid var(--ink);background:var(--surface);padding:1.2rem 1.4rem;display:flex;flex-direction:column;gap:.6rem}
+.ask h3{margin:0}
+footer{border-top:1px solid var(--rule);padding-top:1.5rem;font-size:.9rem;color:var(--muted)}
+footer p{max-width:50em}
+@media (max-width:520px){body{font-size:15px}.dec{grid-template-columns:1fr}.dec .why,.dec .flip{grid-column:1}}
+.chg{border:1px solid var(--mark);background:var(--marktint);padding:1rem 1.2rem;display:flex;flex-direction:column;gap:.5rem}
+.chg h3{margin:0;color:var(--mark)}
+</style>
+
+<div class="page">
+<header class="top">
+  <p class="eyebrow">착수 전 합의 · 최종 · 2026-09-22 · 결정 D1–D15 · 착수 승인됨</p>
+  <h1>장부는 하나, 말은 규칙이 거르고, 무거운 일은 뒤에서 돌고, 손이 멈추면 배운다</h1>
+  <p class="lede">PATHFINDER — 비전공자 바이브코더의 컴퓨터에 상주하며 먼저 말을 거는 오픈소스 비서. 이 문서는 구조를 코드보다 먼저 합의하기 위한 것이다. 숫자는 전부 Mark.5 실측과 조사 7건에서 나왔다.</p>
+</header>
+
+<nav class="toc" aria-label="목차">
+  <a href="#s0">v2 · v3 에서 바뀐 것</a><a href="#s1">1 왜 새로 세우나</a><a href="#s2">2 원칙</a><a href="#s3">3 구조 한 장</a><a href="#s4">4 결정</a>
+  <a href="#s5">5 장부와 파일</a><a href="#s6">6 모듈과 예산</a><a href="#s7">7 핵심 루프</a><a href="#s8">8 판정과 말 걸기</a>
+  <a href="#s9">9 기억</a><a href="#s10">10 도구 길</a><a href="#s11">11 불변조건</a><a href="#s12">12 살릴 것·버릴 것</a>
+  <a href="#s13">13 실측</a><a href="#s14">14 구획</a><a href="#s15">15 완성 기준</a><a href="#s16">16 개발팀</a><a href="#s17">17 열린 길</a>
+</nav>
+
+<section id="s0">
+  <div class="chg">
+    <h3>v3 에서 바뀐 것 — "한 단계 멀리"로 v2 의 축소를 다시 걸렀다</h3>
+    <p>대표의 원칙(D8): PATHFINDER 는 문제 해결 도구가 아니라 실질적인 AI 비서다. "아직 쓰임이 없다"만으로 비서다움에 직결되는 능력을 자르지 않는다. v2 가 걷어낸 스물을 이 눈으로 다시 봤다.</p>
+    <p><b>되살린 것</b> — 임베딩과 벡터 색인(D10) · 턴 도중 사용자의 말을 반영하는 steer(D12) · 예약 신호(아침 브리핑 · "내일 9시에 알려줘" — 비서의 기본기) · 새 검증 도구를 하루 한 번 확인하는 catalog 감각(능동 제안의 계기가 없으면 제품의 핵심 문장 "지금 하시는 작업에 이런 도구가 나왔습니다"가 성립하지 않는다).</p>
+    <p><b>그대로 걷어낸 것</b> — 역할 다섯(D9) · 코드 모드 우선(D11) · 말 걸기 분류 · <code>meter</code> 모듈 · 낮/밤 두 통과 · <code>SCHEMA.md</code> · <code>notes/</code> · <code>skills/</code> · 설정 파일 둘 · 참조 서버 · 공유 렌더 층 · 에이전트 여섯. 이것들은 없어도 비서 경험이 줄지 않는다.</p>
+    <p><b>실측으로 확인한 것</b> — 이 계정의 Ollama 무료 플랜에서 네이티브 tool calling 이 실제로 성공한 cloud 모델은 세 계열: <code>gpt-oss</code>(20b · 120b) · <code>gemma4</code>(31b) · <code>nemotron-3</code>(nano 30b · super). <code>glm</code> · <code>deepseek</code> · <code>kimi</code> · <code>qwen3.5</code> · <code>minimax</code> 는 HTTP 402(무료 사용량 미포함). <b>새 위험</b>: 무료 플랜은 스타터 모델 + 월 단위 소량 크레딧(액수 비공개) + 동시 요청 1 이다 — 상주 비서가 크레딧을 태울 수 있어, m6 은 하루 소모량을 재고 구조는 "모델이 막혀도 산다"를 불변조건으로 갖는다.</p>
+  </div>
+  <div class="chg">
+    <h3>v2 에서 바뀐 것 (기록) — 같은 근본원인을 이 문서에 다시 들이댔다</h3>
+    <p>대표의 지적("역할 다섯이 꼭 필요한가, Mark.5 레거시를 너무 많이 받는 것 아닌가")으로 v1 을 다시 봤다. lead 의 자체 검토와 독립 검토(opus)가 구조 요소 37개를 출처로 갈랐다 — 요구 9 · 실측 8 · <b>레거시 8 · 추측 12</b>. 뒤의 스물은 쓰임이 생기기 전에 판 자리였고, 절반 이상은 Mark.5 가 아니라 조사를 읽고 얹은 것이었다.</p>
+    <p><b>걷어낸 것</b> — 모델 역할 다섯 → <code>model</code> 하나(+선택 <code>worker_model</code>) · 임베딩과 벡터 색인 · 코드 모드 우선 → 네이티브 tool calling 우선 · 큐 모드 셋 → 하나 · 판정 3단 → 규칙 하나 · Notify/Question/Review 분류 · <code>meter</code> 모듈 → 조회 하나와 규칙 한 줄 · 낮 통과 · 밤의 절차 · 코드 단계 · 위키 lint · <code>SCHEMA.md</code> · <code>notes/</code> · <code>cron/</code> · <code>skills/</code> · <code>pins.json</code> 과 <code>capabilities.json</code> 파일 → 설정 파일 하나 · 서버가 미는 catalog 감각 · 참조 서버 프로세스 · 결과 전송 · 공유 렌더 층 · 에이전트 여섯 → 셋.</p>
+    <p><b>고친 모순</b> — 구획 0 에서 잴 수 없는 실측을 제 구획의 입구로 옮김 · "하루 8회" 발화 하한 삭제(침묵 우선과 충돌) · 코어 상한에 모듈별 배분 · 새 신호에 라벨이 없는 옛 벤치로 통과선을 재던 것 · 쓰는 이가 둘이던 설정 파일 · 존재를 확인 못 한 "더 작은 cloud 모델" 탈출구.</p>
+    <p class="note">이 중 임베딩 · 벡터 색인, steer, 예약, catalog 감각은 v3 에서 되살렸다(위). 나머지는 §17 에 되살리는 조건과 함께 있다.</p>
+  </div>
+</section>
+
+<section id="s1">
+  <h2><span class="n">§1</span>왜 새로 세우나 — 숫자</h2>
+  <p>Mark.5 를 25일간 실제로 돌린 기록을 읽기 전용으로 쟀다.</p>
+  <div class="scroll"><table>
+    <tr><th>만든 것</th><th>규모</th><th>쓰인 것 (실측)</th></tr>
+    <tr><td>감각 4종 + 판정 2단</td><td class="num">735줄</td><td>판정 2,239건 → 발화 50건(2.2%, 하루 2회). 23건의 근거가 달력·미리알림</td></tr>
+    <tr><td>앱 집중 감각(long_focus)</td><td class="num">~90줄</td><td>1,274건(56.9%) → 발화 0</td></tr>
+    <tr><td>1단 규칙 엔진</td><td class="num">277줄</td><td>74%를 모델 호출 없이 처리. 벤치 precision 1.00 · recall 0.61</td></tr>
+    <tr><td>2단 모델 판정</td><td>—</td><td>115건 중 34건(29.6%) 실패</td></tr>
+    <tr><td>밤 자가학습 5단계</td><td class="num">769줄</td><td>4단계가 24일 연속 산출 0 · 위키 2장 · 스킬 0개</td></tr>
+    <tr><td>장부</td><td class="num">12개</td><td>4개가 같은 사실을 적음. 2개(표 13개)는 8월 말부터 정지 — 아무도 몰랐음</td></tr>
+    <tr><td>턴 중 주입 · 인터럽트 · 스트리밍 · 백그라운드 작업자</td><td>—</td><td>전부 없음. 인터럽트는 화면이 보내는데 서버가 버림</td></tr>
+    <tr><td>도구 제안 · 설치</td><td class="num">0줄</td><td>지금은 설정 파일을 손으로 고친다</td></tr>
+    <tr><td>MCP 클라이언트(설명 해시 고정)</td><td class="num">1,858줄</td><td>작동 — 가장 큰 이식 자산</td></tr>
+  </table></div>
+  <p>자가학습이 멈춘 이유: 세션 파일을 "열린 날" 폴더에 이어 붙이는 코드와 "오늘·어제" 폴더만 읽는 밤 통과가 <em>날짜</em>를 다르게 잡았다. 마지막 폴더는 9월 9일인데 그 안의 파일이 9월 21일까지 218KB로 자랐다. 테스트 566개는 두 모듈의 경계에 있는 이 결함을 못 잡았다.</p>
+  <div class="root">쓰이는지 재는 자리 없이 장부와 단계를 먼저 늘렸다.
+    <small>근본원인 한 문장. 구조의 모든 부품을 두 기준에 걸렀다 — ① 사건 장부는 하나 ② 부품마다 산출을 셀 수 있고 "연속 N일 0"이면 경보. 세 번째 — ③ 요구나 실측이 가리키지 않는 자리는 파지 않는다. 단, 비서다움에 직결되는 능력은 한 단계 멀리 보고 v1 에 넣는다(D8).</small></div>
+</section>
+
+<section id="s2">
+  <h2><span class="n">§2</span>구조를 실제로 떠받치는 원칙</h2>
+  <ol>
+    <li>말하지 않을 조건을 먼저 적는다. 개입 판단은 최신 모델도 40% 안팎이고 Mark.5 의 모델 판정은 30%가 실패했다 — 말할지는 규칙이 정한다. (OpenClaw, PROBE, Mark.5 실측)</li>
+    <li>말은 작업이 끊기는 지점에서 건넨다. (CHI 2008 · 2025, Mark.5 전달 상태기계)</li>
+    <li>대화 모델은 항상 응답 가능하게 두고, 무거운 일은 독립된 맥락의 작업자가 뒤에서 한다. 그래도 사용자가 도중에 덧붙인 말은 곧바로 반영한다(steer). 작업자는 예산을 함께 쓴다. (Anthropic Research, Hermes Agent)</li>
+    <li>기억은 원본 → LLM 이 편집하는 위키. 고칠 때는 전체 재작성이 아니라 작은 추가분만 — 전체 재작성은 18,282토큰이 122토큰으로 붕괴한 실측이 있다. (Karpathy LLM Wiki, ACE)</li>
+    <li>기억에 쓸 때 출처를 붙여, 남의 글이 사용자가 말한 사실과 같은 칸에 못 들어가게 한다. 평가하는 쪽에는 모델이 없다. (memory poisoning 연구, Mark.5 gate)</li>
+    <li>파일이 진실이고 SQLite 는 색인이다. 개인 규모에 그래프 DB · DB 브랜칭 · 전용 벡터 DB 는 과하다 — SQLite 안의 벡터 표 하나면 된다. (DB 조사)</li>
+    <li>도구 검증은 격리 시험 실행과 설명 해시 고정을 함께 써야 한다 — 악성 스킬의 21%가 실행 중 원격 코드를 받아 정적 스캔을 우회했다. (Snyk, Trail of Bits)</li>
+    <li>로컬이라고 믿지 않는다 — 무인증 로컬 소켓, 평문 비밀값, 이름 기반 실행 허용 목록이 실제 사고였다. (OpenClaw CVE)</li>
+  </ol>
+</section>
+
+<section id="s3">
+  <h2><span class="n">§3</span>구조 한 장</h2>
+  <div class="scroll"><pre>
+ 신호원 ─ 화면 붙음 · 메일 · 일정 · 예약 · 작업 개시/완료/실패 · 장부 통계 이상 · 새 검증 도구   · 셸 명령 · Claude Code 훅
+    │       감각 = senses/ 의 파일 하나 + 설정 한 줄
+    ▼
+ ┌─ 사건 장부 (하나) ─────────────────────────────────────────────────────────┐
+ │  events/&lt;날짜&gt;.jsonl  append-only = 진실     state.db = FTS+벡터 색인 + 파생 │
+ │  쓰는 자리 ledger.append() 하나 · 날짜를 정하는 자리 ledger.partition() 하나  │
+ │  빈 DB 에서 승인 대기 · 작업 · 도구 해시 수락까지 복원                        │
+ └────────────────────────────────────────────────────────────────────────────┘
+    ▼
+ 규칙   조용한 시간 · 간격 제한 · 중복 억제 · RULES.md 표   →   speak | silence | defer     (모델 호출 0)
+        speak 의 문구는 코드가 조립한다 — 모델이 막혀도 말은 나간다
+    ▼
+ 전달   손이 멈췄을 때 · 턴 경계에서만 내려놓는다 (소켓 → 없으면 macOS 배너)
+    ▼
+ ┌─ 대화 lane 하나 — model · 스트리밍 · interrupt ────────────────────────────┐
+ │  도는 중에 사용자가 한 말 → 다음 안전한 지점에 끼워 넣는다(steer)           │
+ │  도는 중에 온 신호 → 기다렸다가 턴이 끝나면 묶여서 규칙을 지난다             │
+ │  무거운 일 → 작업 개시 → lane 은 곧바로 다시 응답 가능                       │
+ │  쓰기 · 설치 → 승인 게이트 (장부에 남아 재시작에도 살아남는다)               │
+ └───────────────┬──────────────────────────────────────▲───────────────────┘
+                 ▼                                      │ 개시 · 완료 · 실패 = 신호
+        작업자들 — worker_model(없으면 model) · 독립 맥락 · 공유 예산 ─┘
+    ▼
+ 정리   손이 멈추면 한 번: 장부의 커서 뒤를 읽어 추가분만 제안 → 모델 없는 게이트 → auto | 승인함
+        산출은 장부를 세면 나온다. 읽을 것이 있었는데 3일 연속 0 이면 규칙이 말을 건다
+    ▼
+ 도구 길  하루 한 번 레지스트리의 새 도구를 확인 → 최근 작업 맥락과 맞으면 신호 (연결 규격 v0 모양) → 로컬에서 순위
+          → 제안(검사한 것과 결과를 표시) → 승인 1회 → 설치기 → PATHFINDER 자신 + Claude Code 설정
+  </pre></div>
+</section>
+
+<section id="s4">
+  <h2><span class="n">§4</span>결정 D1–D7</h2>
+  <p class="note">대표가 확정한 것만 올렸다. 뒤집는 조건이 없는 결정은 취향이라 싣지 않는다.</p>
+  <div>
+    <div class="dec"><div class="id">D1</div><div class="what">새 레포에서 구조를 다시 세우고 Mark.5 모듈을 골라 이식한다</div>
+      <div class="why"><b>근거</b> 포크해도 코어 2,426줄은 다시 쓰고, 공개하려면 커밋 182개의 히스토리 재작성이 필수다. v2 의 축소로 옮길 실물은 <code>mcp/</code> · <code>policy</code> · <code>broker</code> · 루프 · 규칙 엔진 · 셸 샌드박스 · gate 패턴 · 하이브리드 색인이다(약 3,300줄).</div>
+      <div class="flip"><b>뒤집는 조건</b> 구획 1에서 이식 모듈의 절반 이상을 다시 써야 하면, 아이디어만 가져오고 새로 쓴다.</div></div>
+    <div class="dec"><div class="id">D2</div><div class="what">자체 하네스 + provider 어댑터. 첫 버전부터 Ollama cloud · OpenAI · Anthropic · Google 등 대부분의 키를 받는다</div>
+      <div class="why"><b>근거</b> 오픈소스이고 다른 비서도 붙는 규격을 낸다. Claude Agent SDK 는 Claude 전용이고 배포 제품에 구독 로그인 제공이 금지된다. 어댑터는 둘 — OpenAI 호환 하나(OpenAI · Ollama · Gemini 호환 · OpenRouter 류) + Anthropic 네이티브 하나.</div>
+      <div class="flip"><b>뒤집는 조건</b> 특정 provider 가 공통 계약의 통과선을 못 넘으면 "1급 / 실험" 등급으로 나눈다.</div></div>
+    <div class="dec"><div class="id">D3</div><div class="what">v1 = macOS 우선 + 도구 제안 → 승인 → 설치 종단. 서버는 비공개 · 팀원 담당</div>
+      <div class="why"><b>근거</b> 지원서 1R 시제품과 1차 지표(주 1건 부착)를 재려면 종단이 필요하다. <span class="tag new">v2 확인 대기</span> 참조 서버 프로세스는 만들지 않고, 연결 규격 문서 + 규격 모양의 시험 자료 + 공식 레지스트리를 직접 읽는 <code>catalog</code> 로 대신한다(§10).</div>
+      <div class="flip"><b>뒤집는 조건</b> 베타 10명 중 비-macOS 가 3명 이상이면 Linux 를 앞당긴다.</div></div>
+    <div class="dec"><div class="id">D4</div><div class="what">설치 대상은 둘 — PATHFINDER 자신의 MCP 클라이언트 + 사용자의 Claude Code 설정</div>
+      <div class="why"><b>근거</b> 타깃이 실제로 일하는 곳이 코딩 에이전트이고 부착 지표가 거기서 잡힌다. Cursor · Claude Desktop 은 v1 밖.</div>
+      <div class="flip"><b>뒤집는 조건</b> 실측 m5 에서 비파괴 병합 · 롤백이 3/3 을 못 넘으면 v1 은 자신에만 설치한다.</div></div>
+    <div class="dec"><div class="id">D5</div><div class="what">GitHub 비공개 레포로 시작, 이 레포만 noreply 신원. 전체가 돌고 스캔을 통과하면 공개</div>
+      <div class="why"><b>근거</b> 미완성 구조가 공개 이력에 남지 않고, 라이선스는 법률 자문 뒤 공개 시점에 정한다. 기관 이메일은 커밋에 넣지 않는다.</div>
+      <div class="flip"><b>뒤집는 조건</b> 베타 모집 · 팀원 검토에 공개 링크가 먼저 필요해지면 앞당긴다(라이선스 먼저).</div></div>
+    <div class="dec"><div class="id">D6</div><div class="what">코드 · 주석 · 커밋 · 문서는 영어, README 와 화면은 한 · 영 병행. ARCHITECTURE 는 한국어본을 따로 둔다</div>
+      <div class="why"><b>근거</b> 공개 오픈소스 + 타 비서 연결 규격. <code>ARCHITECTURE.ko.md</code> 는 대표가 구조를 빠르게 읽기 위한 것.</div>
+      <div class="flip"><b>뒤집는 조건</b> 두 파일이 어긋난 채 2회 이상 커밋되면 한쪽을 정본, 다른 쪽을 생성물로 바꾼다.</div></div>
+    <div class="dec"><div class="id">D7</div><div class="what">유료 API 키 없이 개발 · 검증한다. 도는 모델은 Ollama cloud 모델뿐이다</div>
+      <div class="why"><b>근거</b> 지금은 API 과금을 할 수 없고, 로컬 모델은 파라미터가 작아 뺀다. 대화 모델은 전부 cloud 이고, 로컬에 남는 것은 임베딩 <code>bge-m3</code> 하나다(대화 모델이 아니다). Claude Code 서브에이전트는 시험 운전자 · 채점자로만 쓴다. Anthropic · OpenAI · Google 직결은 규격대로 쓰고 녹화 응답으로 단위 시험만 하며 "실험" 등급으로 표시한다.</div>
+      <div class="flip"><b>뒤집는 조건</b> 키가 생기면 그 provider 로 m1 을 다시 돌려 "1급"으로 올린다.</div></div>
+  </div>
+  <div>
+    <div class="dec"><div class="id">D8</div><div class="what">원칙 — 문제 해결 도구가 아니라 실질적인 AI 비서다. 항상 한 단계 멀리 본다</div>
+      <div class="why"><b>근거</b> 대표의 지시. 자르는 기준은 "쓰임이 아직 없다"가 아니라 "없어도 비서 경험이 줄지 않는다"이다.</div>
+      <div class="flip"><b>뒤집는 조건</b> 그렇게 넣은 능력이 실사용 2주에서 한 번도 쓰이지 않으면 §17 로 보낸다.</div></div>
+    <div class="dec"><div class="id">D9</div><div class="what">모델 설정은 <code>model</code> 하나 + 선택 <code>worker_model</code> (+ <code>embed_model</code>). 역할 다섯은 폐기</div>
+      <div class="why"><b>근거</b> D7 아래 가격 계층이 없어 역할 넷이 같은 모델에 묶인다. 조건 5 의 "다른 LLM 이 맡는다"는 <em>독립된 맥락</em>으로 성립하고, 다른 모델을 배정하고 싶으면 키 하나로 된다. 모델 ID 는 코드에 없다.</div>
+      <div class="flip"><b>뒤집는 조건</b> m6 에서 무료 크레딧이 모자라면 가벼운 모델 키를 더한다 — 존재는 확인했다(<code>gpt-oss:20b-cloud</code> · <code>nemotron-3-nano:30b-cloud</code>).</div></div>
+    <div class="dec"><div class="id">D10</div><div class="what">임베딩 · 벡터 색인을 v1 에 둔다 (FTS5 + <code>sqlite-vec</code>)</div>
+      <div class="why"><b>근거</b> 위키가 자라면 어차피 필요하고, 나중에 넣으면 다시 대처해야 한다. 임베딩은 로컬 <code>bge-m3</code> 또는 provider 의 <code>/v1/embeddings</code> — 같은 호환 어댑터를 지난다. 임베딩이 없거나 죽어도 색인은 FTS 만으로 성공한다(Mark.5 승계).</div>
+      <div class="flip"><b>뒤집는 조건</b> m4 에서 하이브리드의 recall@3 이득이 FTS 단독 대비 5%p 미만이면 기본값을 끈다(코드는 남긴다).</div></div>
+    <div class="dec"><div class="id">D11</div><div class="what">툴 호출은 네이티브 tool calling 우선</div>
+      <div class="why"><b>근거</b> 2026-09-22 실측 — 무료 플랜의 세 계열이 OpenAI 호환 엔드포인트로 툴 호출에 성공했다. Mark.5 실측으로 턴의 60%가 1스텝 · 최대 7이라 스크립트 한 장에 호출을 엮는 이점이 작다. 샌드박스는 셸 툴에 남는다.</div>
+      <div class="flip"><b>뒤집는 조건</b> m1 에서 계열별 85% 미달이면 그 계열은 "실험", 전부 미달이면 코드 모드를 짓는다.</div></div>
+    <div class="dec"><div class="id">D12</div><div class="what">steer 를 v1 에 둔다 — 도는 중에 사용자가 덧붙인 말을 다음 안전한 지점에 반영한다</div>
+      <div class="why"><b>근거</b> 비서라면 "그거 말고 이걸로"를 도중에 받을 수 있어야 한다. 안전한 지점은 둘 — 툴 호출이 끝난 자리, 또는 답을 쓰는 중이면 스트리밍을 끊고 쓴 데까지를 남긴 자리. 신호는 끼어들지 않고 턴이 끝날 때까지 기다린다(대기 큐 하나).</div>
+      <div class="flip"><b>뒤집는 조건</b> m2 미달이면 interrupt 뒤 새 턴으로 대신한다.</div></div>
+  </div>
+  <div>
+    <div class="dec"><div class="id">D13</div><div class="what">규칙이 못 정한 신호는 모델에게 묻되 울타리를 친다 — 그리고 이것은 임시다</div>
+      <div class="why"><b>근거</b> 규칙만으로는 모르는 종류에 영영 말을 걸지 못한다(D8). 울타리: 닫힌 JSON 답 · 하루 20회 · 가벼운 모델 · 매 판단에 👍👎. <b>구조적 해법의 방향(대표의 단서)</b>: 모델 판단은 영구 부품이 아니라 <em>규칙 발견 장치</em>다 — 같은 모양의 판단이 반복되고 👍 를 받으면 정리 통과가 규칙 제안으로 승인함에 올리고, 승인되면 그 종류는 다시 모델에 가지 않는다. 모델 판단 건수가 줄어드는지를 잰다.</div>
+      <div class="flip"><b>뒤집는 조건</b> 2주 뒤 👍 비율이 70% 아래면 끈다. 판단 건수가 4주간 줄지 않으면 규칙 흡수 기제를 다시 설계한다.</div></div>
+    <div class="dec"><div class="id">D14</div><div class="what">참조 서버를 프로세스로 만들지 않는다 (D3 의 문구 수정)</div>
+      <div class="why"><b>근거</b> 팀원의 서버가 아직 없고, 서면 버릴 코드다. 규격 문서 + 규격 모양의 시험 자료 + 공식 레지스트리를 직접 읽는 <code>catalog</code>.</div>
+      <div class="flip"><b>뒤집는 조건</b> 팀원 서버에 받을 주소가 생기면 주소만 바꾸고, HTTP 왕복 시험과 결과 전송을 그때 함께 넣는다.</div></div>
+    <div class="dec"><div class="id">D15</div><div class="what">작업 맥락과 "CLI 실행" 신호의 출처는 전부 — 화면 붙음 · 셸 훅 · Claude Code 훅. 온보딩에서 하나씩 켠다</div>
+      <div class="why"><b>근거</b> 맥락의 출처가 없으면 "지금 하시는 작업에 맞는 도구"를 고를 근거가 대화뿐이다. 설치기가 어차피 Claude Code 설정을 다룬다.</div>
+      <div class="flip"><b>뒤집는 조건</b> 2주 실사용에서 어느 출처의 신호가 발화로 한 번도 이어지지 않으면 그 감각을 끈다(Mark.5 의 앱 집중 감각 — 1,274건에 발화 0 — 의 교훈).</div></div>
+  </div>
+</section>
+
+<section id="s5">
+  <h2><span class="n">§5</span>장부와 파일 규약</h2>
+  <div class="scroll"><table>
+    <tr><th>자리</th><th>무엇</th><th>쓰는 길</th><th>지우면</th></tr>
+    <tr><td class="k">events/&lt;날짜&gt;.jsonl</td><td>사건 전부 — 발화, 툴 호출, 신호, 규칙 결정, 전달, 반응(👍👎), 게이트 개폐, 작업 개시·완료, 정리 산출, 설치 단계, 도구 해시 수락, 설정 변경. 줄마다 <code>ts · session · turn · type · origin · source_trust</code></td><td><code>ledger.append()</code> 하나</td><td>기록을 잃는다 (유일한 진실)</td></tr>
+    <tr><td class="k">vault/</td><td>사람이 보는 것 — <code>SOUL.md</code> · <code>USER.md</code> · <code>RULES.md</code> · <code>wiki/</code> · <code>_inbox/</code></td><td>사람, 정리 통과(게이트 경유)</td><td>지식을 잃는다</td></tr>
+    <tr><td class="k">state.db</td><td>FTS + 벡터 색인, 파생 상태(승인 대기 · 작업 · 중복 억제 · 수락된 해시 · 정리 커서)</td><td>커널</td><td><code>pathfinder reindex</code> 로 전부 복원</td></tr>
+    <tr><td class="k">config.json</td><td>모델(<code>model</code> · <code>worker_model</code> · <code>embed_model</code>) · 감각 · 예약 · 툴 · MCP 서버 · 권한. 모르는 키는 기동을 거부한다</td><td><code>config.set()</code> 하나 — 사람의 명령도 설치기도 이 길로, 바뀔 때마다 장부에 한 줄</td><td>기본값으로</td></tr>
+    <tr><td class="k">Keychain</td><td>비밀값 전부</td><td>온보딩 · 설치기</td><td>다시 입력</td></tr>
+  </table></div>
+  <p>설정 자리는 넷(<code>config.json</code> · <code>RULES.md</code> · <code>USER.md</code> · Keychain) — Mark.5 는 열한 곳이었다. 장부의 <code>type</code> 과 규칙 결정 어휘는 닫힌 목록이고 <code>ledger.append()</code> 가 검사한다. 어휘를 버리면 목록에서 빼고, 빠진 어휘는 그 자리에서 거부된다 — 폐기된 <code>prepare</code> 가 13일간 계속 적힌 일을 구조로 막는다. 규약의 정본은 코드 하나다(<code>SCHEMA.md</code> 를 두지 않는 이유 — 같은 규약을 두 곳에 적는 것이 Mark.5 를 죽인 형태다).</p>
+</section>
+
+<section id="s6">
+  <h2><span class="n">§6</span>모듈과 예산</h2>
+  <div class="scroll"><table>
+    <tr><th>층</th><th>모듈</th><th>출처</th><th>배분(줄)</th></tr>
+    <tr><td rowspan="11">코어<br><span class="note">상한 5,500</span></td><td><code>ledger</code> — 장부, 파티션, 닫힌 어휘</td><td><span class="tag new">새로</span></td><td class="num">400</td></tr>
+    <tr><td><code>state</code> — SQLite, FTS5 + 벡터 하이브리드, 복원</td><td><code>index.py</code> 고쳐서 이식</td><td class="num">600</td></tr>
+    <tr><td><code>daemon</code> + lane — 0600 소켓, 세션, 대기 큐 하나, steer, interrupt</td><td><span class="tag new">새로</span></td><td class="num">600</td></tr>
+    <tr><td><code>loop</code> — 루프, 스트리밍, 출구 셋</td><td><code>react.py</code> 고쳐서</td><td class="num">400</td></tr>
+    <tr><td><code>broker</code> · <code>policy</code> — 호출마다 판정, origin × 툴 표</td><td><span class="tag keep">이식</span></td><td class="num">350</td></tr>
+    <tr><td><code>exec</code> — 셸 툴의 Seatbelt 샌드박스</td><td><span class="tag keep">이식</span> (스크립트 실행기는 빼고)</td><td class="num">300</td></tr>
+    <tr><td><code>tools</code> — 네이티브 툴</td><td>고쳐서 이식</td><td class="num">300</td></tr>
+    <tr><td><code>signals</code> · <code>rules</code> — 감각 적재, 중복 억제, 간격 제한, 규칙 표</td><td><code>rules.py</code> 고쳐서 이식</td><td class="num">450</td></tr>
+    <tr><td><code>deliver</code> — 전달 상태기계</td><td>발상 승계</td><td class="num">250</td></tr>
+    <tr><td><code>jobs</code> — 작업자, 공유 예산, 개시·완료 신호</td><td><span class="tag new">새로</span> (BRAIN-PLAN §7 승계)</td><td class="num">350</td></tr>
+    <tr><td><code>memory</code> — vault, 정리 통과, gate</td><td>gate 패턴 이식, 나머지 새로</td><td class="num">600</td></tr>
+    <tr><td rowspan="4">어댑터<br><span class="note">예산 밖</span></td><td><code>llm/</code> — openai_compat · anthropic</td><td><code>gateway/</code> 계약 재작성</td><td class="num">600</td></tr>
+    <tr><td><code>mcp/</code> — 클라이언트, 해시 고정</td><td><span class="tag keep">그대로 이식</span></td><td class="num">1,858</td></tr>
+    <tr><td><code>senses/</code> — attach · mail · calendar · schedule · catalog · shell · claude_code</td><td>몸통 새로, calendar 다리는 이식</td><td class="num">파일당 150</td></tr>
+    <tr><td><code>catalog</code> · <code>installer</code></td><td><span class="tag new">새로</span></td><td class="num">300 · 700</td></tr>
+    <tr><td>클라이언트</td><td><code>tui</code></td><td><span class="tag new">새로</span></td><td class="num">400</td></tr>
+  </table></div>
+  <p>코어 배분의 합은 4,600이고 상한은 5,500이다. 모듈이 자기 배분의 1.3배를 넘으면 그 구획이 끝날 때 보고한다 — 마지막 날에야 실패할 수 있는 상한은 재는 자리가 아니다. "특이점 발견"과 "산출 0 경보"는 모듈이 아니라 장부 통계 위의 규칙 조건이다(예: 같은 작업이 10분에 3번 실패 · 정리 산출이 3일 연속 0).</p>
+</section>
+
+<section id="s7">
+  <h2><span class="n">§7</span>핵심 루프</h2>
+  <ul>
+    <li><b>트리거는 늘어도 루프는 하나다.</b> 사용자 발화 · 신호 · 게이트 재개 · 작업 완료가 전부 같은 루프를 타고, 다른 것은 봉투와 정책표의 행뿐이다.</li>
+    <li><b>steer.</b> 도는 중에 사용자가 한 말은 다음 안전한 지점에 끼워 넣는다 — 툴 호출이 끝난 자리, 또는 답을 쓰는 중이면 스트리밍을 끊고 쓴 데까지를 남긴 자리. provider 를 가리지 않는다(메시지 목록에 한 줄을 더할 뿐이다).</li>
+    <li><b>대기 큐는 하나.</b> 도는 중에 온 <em>신호</em>는 끼어들지 않고 턴이 끝나면 묶여서 규칙을 지난다. 무거운 일이 작업자로 빠지므로 대화 턴은 설계상 짧다.</li>
+    <li><b>interrupt 는 실제로 선다.</b> 스트리밍을 끊고 실행 중인 툴을 죽이고 장부에 <code>interrupted</code> 한 줄.</li>
+    <li><b>작업자.</b> 대화 모델이 <code>start_job(목표)</code> 을 부르면 독립된 맥락에서 같은 루프가 돈다. 돌아오는 것은 요약 한 덩이와 장부의 작업 구간뿐. 작업자는 작업자를 못 만들고, 하루 예산을 함께 쓴다. 작업자의 정책 행은 <code>signal</code> 과 같다 — 쓰기는 전부 게이트에서 멈춘다.</li>
+    <li><b>툴 호출.</b> 네이티브 tool calling. 브로커가 호출마다 인자를 맞추고 정책표로 판정한다.</li>
+    <li><b>모델이 막혀도 산다.</b> 크레딧 소진(402) · 한도 · 네트워크 단절에도 데몬은 뜨고, 신호는 장부에 쌓이고, 규칙 발화는 코드가 조립한 문구로 나간다. 막힌 사실은 한 번만 알린다.</li>
+  </ul>
+</section>
+
+<section id="s8">
+  <h2><span class="n">§8</span>판정과 말 걸기</h2>
+  <p>말할지는 규칙이 정한다. 규칙은 한 자리(<code>rules.decide</code>)이고 모델 호출이 없다. 알림 문구는 코드가 신호의 칸으로 조립한다(모델이 지어낸 알림은 그대로 사용자에게 간다 — Mark.5 승계). 모델은 그 뒤의 대화를 맡는다.</p>
+  <ul>
+    <li><b>먼저 거르는 것.</b> 조용한 시간 · 하루 예산 · 신호 턴 사이 최소 30초 · 60초에 5회 넘으면 차단 · 같은 열쇠 24시간 1회. (OpenClaw 의 숫자를 첫 값으로)</li>
+    <li><b><code>RULES.md</code> 표.</b> 어휘는 닫혀 있되 감각이 자기 조건어를 등록한다. 감각마다 <em>말하지 않을 조건</em>이 없으면 등록을 거부한다. Mark.5 에서 precision 1.00 이었고 부족한 것은 recall 0.61 — 넓힐 곳이 여기다.</li>
+    <li><b>결정은 넷</b> — <code>speak</code> · <code>silence</code> · <code>defer</code> · <code>ask_model</code>. 규칙이 못 정한 신호는 하루 20회까지 가벼운 모델에게 닫힌 JSON 으로 묻는다(D13). 상한을 넘으면 <code>defer</code>. 매 판단에 👍👎 를 받고, 반복되는 판단은 규칙 제안이 되어 모델을 떠난다.</li>
+    <li><b>사용자가 직접 시작한 일의 결말</b>(작업 완료 · 실패)은 하루 예산을 쓰지 않는다 — "끊임없는 대화"가 예산에 막히지 않게 하는 자리다.</li>
+    <li><b>전달</b>은 Mark.5 의 상태기계를 승계한다 — 손이 멈췄거나 턴이 끝났을 때만 내려놓는다.</li>
+  </ul>
+  <p class="note">Mark.5 의 2단과 다른 점 — 자유 서술이 아니라 닫힌 답, 상한, 그리고 규칙으로 흡수되어 줄어드는 것이 목표라는 것.</p>
+</section>
+
+<section id="s9">
+  <h2><span class="n">§9</span>기억 — 손이 멈추면 한 번</h2>
+  <ul>
+    <li><b>통과는 하나, 커서도 하나.</b> 손이 멈춘 지 N분이면 장부의 커서 뒤를 읽는다. 커서는 날짜가 아니라 장부의 위치다 — 날짜를 두 곳에서 해석하다 24일을 잃은 종류의 결함이 생길 자리가 없다.</li>
+    <li><b>산출은 한 모양.</b> <code>{target, op, old, new, evidence}</code>, 연산은 add · replace · remove 셋. 대상은 <code>wiki/*.md</code> · <code>USER.md</code> · <code>RULES.md</code>. 반복된 절차도 위키의 한 장이다.</li>
+    <li><b>평가에는 모델이 없다.</b> <code>gate</code> 가 형식 · 근거의 실존 · 볼트 안인지를 검사하고, <code>USER.md</code> 로 가는 제안의 근거는 <code>origin=user</code> 인 장부 줄만 받는다. 등급은 코드의 기본값 — <code>wiki/</code> 는 자동 적용(+되돌리기), <code>USER.md</code> · <code>RULES.md</code> · 설정은 승인함.</li>
+    <li><b>산출은 장부를 세면 나온다.</b> "읽은 줄 · 낸 제안 · 통과 · 적용"이 전부 사건이다. 읽을 것이 있었는데 3일 연속 산출 0 이면 규칙이 말을 건다. Mark.5 의 24일이 3일이 된다.</li>
+    <li><b>검색.</b> 위키 지도(제목과 날짜)가 상주하고, 모델이 <code>search</code>(FTS5 + 벡터를 순위로 합침) 와 <code>read</code> 를 부른다. 임베딩이 없거나 죽으면 FTS 만으로 돈다 — 낡은 벡터는 틀린 값이다.</li>
+  </ul>
+</section>
+
+<section id="s10">
+  <h2><span class="n">§10</span>도구 길</h2>
+  <ul>
+    <li><b>연결 규격 v0</b> (<code>docs/spec/</code> 에 문서와 시험 자료). 후보마다 <code>name · version · source_registry</code>, 검증 블록(<code>license</code> · <code>malicious_scan</code> · <code>sandbox_trial</code> · <code>maintenance</code> · <code>description_hash</code> · <code>trust_tier</code>), 설치 레시피(런타임 · 고정 버전과 해시 · 환경변수 · 인자 · 권한 요약), 과금 여부 칸. 서버로 돌아가는 결과 칸(<code>proposed · approved · rejected · installed · install_failed</code>)은 규격에 적어 두되 v1 은 보내지 않는다.</li>
+    <li><b><code>catalog</code>.</b> 지금은 공식 MCP 레지스트리를 직접 읽어 규격 모양의 후보로 바꾼다. 자기가 실제로 확인한 칸만 채우고 나머지는 <code>not_checked</code>. 팀원의 서버가 서면 같은 모양을 서버에서 받는다 — 바뀌는 것은 주소뿐이다. <b>능동 제안의 계기</b>: <code>catalog</code> 감각이 하루 한 번 레지스트리의 새 · 갱신된 도구(<code>updated_since</code>)를 확인하고, 최근 작업 맥락의 거친 태그와 맞으면 신호를 낸다. 사용자가 물을 때는 그 자리에서 당겨 온다.</li>
+    <li><b>제안.</b> 무엇을 검사했고 결과가 어땠는지를 보여 주고, 안전하다고 말하지 않는다. 검사 기록은 장부에 남는다.</li>
+    <li><b>설치기.</b> 런타임 확인(node · uv) → 고정 버전과 해시 대조 → 비밀값은 Keychain → 격리 시험 기동 → 설명 해시 수락(장부에 한 줄) → 설정 비파괴 병합(PATHFINDER · Claude Code) → 실패하면 단계별 롤백. 설치는 승인 게이트 하나를 지난다.</li>
+    <li><b>설치 뒤.</b> 설명이 바뀌면 그 툴을 세우고 다시 수락을 받는다(Mark.5 의 핀 기제 승계 — 수락 기록의 자리만 파일에서 장부로).</li>
+  </ul>
+</section>
+
+<section id="s11">
+  <h2><span class="n">§11</span>불변조건</h2>
+  <div class="scroll"><table>
+    <tr><th>불변조건</th><th>새 구조에서</th><th>확인 방법</th></tr>
+    <tr><td>상주 프롬프트는 세션 중 안 바뀐다</td><td><span class="tag keep">유지</span></td><td><code>test_resident_frozen</code></td></tr>
+    <tr><td>남의 텍스트는 데이터지 지시가 아니다 · 검색 결과는 사용자 글 앞에</td><td><span class="tag keep">유지</span> + 장부의 <code>source_trust</code></td><td><code>bench/injection</code> 0/20</td></tr>
+    <tr><td>말한 것만 기억한다 · 재부착은 봉투를 되살리지 않는다</td><td><span class="tag keep">유지</span></td><td><code>test_restore_said_only</code></td></tr>
+    <tr><td>남의 글에서 USER 사실로 가는 길이 없다</td><td><span class="tag keep">유지</span> — <code>gate</code> 의 origin 필터</td><td><code>test_user_facts_need_user_origin</code></td></tr>
+    <tr><td>셸은 가둘 수 없으면 실행하지 않는다</td><td><span class="tag keep">유지</span></td><td><code>test_shell</code></td></tr>
+    <tr><td>되돌릴 수 있는 것만 자동 실행</td><td><span class="tag keep">유지</span></td><td><code>test_policy</code></td></tr>
+    <tr><td>모호하면 실패 · 정리는 볼트를 못 빠져나간다 · 평가에 모델이 없다</td><td><span class="tag keep">유지</span></td><td><code>test_gate</code></td></tr>
+    <tr><td>원본 불변 · 쓰는 길은 하나(장부도, 설정도)</td><td>구조로 성립 — <code>ledger.append()</code> · <code>config.set()</code></td><td><code>test_single_writer</code></td></tr>
+    <tr><td>날짜를 정하는 자리는 하나, 정리 커서는 날짜가 아니다</td><td><span class="tag new">새로</span></td><td><code>test_partition_roundtrip</code> — 13일 이어진 세션을 정리가 전부 읽는다</td></tr>
+    <tr><td>빈 DB 에서 승인 대기 · 작업 · 해시 수락까지 복원</td><td><span class="tag new">새로</span></td><td><code>test_reindex_restores_pending</code></td></tr>
+    <tr><td>산출은 장부에서 세어지고, 3일 연속 0 이면 말을 건다</td><td><span class="tag new">새로</span></td><td><code>test_zero_output_alarm</code></td></tr>
+    <tr><td>버린 어휘는 장부가 거부한다</td><td><span class="tag new">새로</span></td><td><code>test_ledger_closed_vocab</code></td></tr>
+    <tr><td>승인 대기는 재시작을 넘겨 산다</td><td><span class="tag keep">유지</span> — 자리만 DB 에서 장부로</td><td><code>test_gate_survives_restart</code></td></tr>
+    <tr><td>설치 = 승인 1회 + 해시 일치 + 롤백 가능 · 설명이 바뀌면 세운다</td><td><span class="tag new">새로</span> + 핀 승계</td><td><code>test_install_rollback</code> · <code>test_rug_pull_holds</code></td></tr>
+    <tr><td>모델 ID 와 비밀값은 코드에 없다</td><td><span class="tag new">새로</span></td><td>커밋 전 스캔(저장소 이름 형태 포함)</td></tr>
+    <tr><td>임베딩이 죽어도 색인은 성공한다 (FTS 만)</td><td><span class="tag keep">유지</span></td><td><code>test_index_without_embedder</code></td></tr>
+    <tr><td>모델 호출이 막혀도 데몬 · 장부 · 규칙 발화는 산다</td><td><span class="tag new">새로</span></td><td><code>test_survives_model_402</code></td></tr>
+    <tr><td>TCP 를 열지 않는다 · 소켓은 0600</td><td><span class="tag keep">유지</span></td><td><code>test_socket_perms</code></td></tr>
+  </table></div>
+</section>
+
+<section id="s12">
+  <h2><span class="n">§12</span>살릴 것 · 버릴 것</h2>
+  <div class="scroll"><table>
+    <tr><th>살린다 — 실측이나 요구가 가리키는 것</th><th>버린다</th></tr>
+    <tr><td><code>brain/mcp/</code> 1,858줄과 해시 고정 · <code>policy.py</code> · <code>broker.py</code> · 루프 · 셸 샌드박스 · gate 패턴</td><td>스크립트 실행기(코드 모드) · 역할 표 · <code>gateway/store</code> 의 bind 경로 · 접두사 없는 모델명을 Ollama 로 읽는 규칙</td></tr>
+    <tr><td><code>rules.py</code>(precision 1.00) · <code>index.py</code> 의 FTS + 벡터 하이브리드 · calendar 다리(발화 50건 중 23건)</td><td>2단 모델 판정(실패 29.6%) · 앱 집중 감각(발화 0) · telegram 표면</td></tr>
+    <tr><td>신호 봉투와 검색 블록 위치 실측 · <code>bench/injection</code></td><td>낮/밤 두 통과와 밤 5단계 · <code>SCHEMA.md</code> · <code>cron/</code> 폴더(예약은 감각 하나로) · <code>notes/</code> · <code>skills/</code></td></tr>
+    <tr><td>파일이 진실 · 생성/평가 분리 · 전달 상태기계 · "세는 법" 문서 규율</td><td>죽은 표 13개 · 장부 넷이 같은 사실을 적는 구조 · 시계 넷 · 설정 자리 열한 곳 · <code>.env</code> 의 평문 비밀값</td></tr>
+  </table></div>
+  <p class="note"><code>bench/proactive</code> 의 말뭉치는 Mark.5 의 감각 넷으로 만든 것이라 새 신호에는 라벨이 없다. 틀만 가져오고 말뭉치는 구획 3 에서 새로 만든다.</p>
+</section>
+
+<section id="s13">
+  <h2><span class="n">§13</span>실측</h2>
+  <p>유료 키 없이 잰다(D7). 도는 모델은 Ollama cloud 이고, Claude Code 서브에이전트는 과제를 만들고 신호를 넣고 기록을 채점하는 <em>운전자</em>다. 채점은 가능한 한 코드로 한다. 구획 0 에서 잴 수 있는 것은 둘뿐이고, 나머지는 자기 구획의 입구에서 잰다 — 잴 대상이 그때 생긴다.</p>
+  <div class="scroll"><table>
+    <tr><th>m</th><th>언제</th><th>가정</th><th>어떻게 재나</th><th>통과선 <span class="note">첫 값</span></th><th>실패하면</th></tr>
+    <tr><td class="k">m6</td><td>구획 0 · 먼저</td><td>무료 플랜의 크레딧으로 상주 비서의 하루가 돈다 — D7 이 걸린 존재 조건</td><td>합성 하루(사용자 턴 30 · 신호가 연 턴 20 · 작업 5 · 정리 2)를 <code>gpt-oss:120b-cloud</code> 와 <code>gpt-oss:20b-cloud</code> 로 각각 흘려 토큰 수를 세고, 공개 단가로 하루 비용을 낸다. 대표가 사용량 화면에서 전후를 확인한다</td><td>402 · 거부 0건 · 첫 토큰 중앙값 ≤ 3초 · 하루 소모가 월 무료 사용량의 1/30 이하</td><td>기본 모델을 가벼운 쪽으로, 신호가 연 턴을 묶고 정리 간격을 늘린다. 그래도 넘치면 D7 을 대표와 다시 본다</td></tr>
+    <tr><td class="k">m1</td><td>구획 0</td><td>네이티브 tool calling 이 모델 계열을 가리지 않고 통한다</td><td>같은 20과제 × 확인된 무료 세 계열(<code>gpt-oss</code> · <code>gemma4</code> · <code>nemotron-3</code>). 한 번의 호출 성공은 이미 확인했다 — 재는 것은 여러 단계 · 인자 정확도 · 한국어 지시</td><td>계열마다 ≥ 85%</td><td>미달 계열은 "실험" 등급. 전부 미달이면 코드 모드를 짓는다</td></tr>
+    <tr><td class="k">m2</td><td>구획 2 입구</td><td>steer 에 대화가 안 깨진다</td><td>툴 경계 10회 · 스트리밍 도중 10회, 사용자 덧말을 끼워 넣는다</td><td>덧말 반영 ≥ 90% · 앞서 하던 일을 잊지 않음 ≥ 90%</td><td>interrupt 뒤 새 턴으로 대신한다(D12)</td></tr>
+    <tr><td class="k">m3</td><td>구획 3 입구</td><td>주입 방어가 새 봉투에서도 선다</td><td><code>bench/injection</code> 이식</td><td>남의 지시를 따른 계획 0/20</td><td>신호 본문을 대화 모델에 안 주고 요약 작업자를 거친다</td></tr>
+    <tr><td class="k">m4</td><td>구획 5 입구</td><td>하이브리드 검색이 값을 한다</td><td>Mark.5 합성 말뭉치의 질의로 FTS 단독 · 하이브리드를 나란히. 임베딩은 <code>/v1/embeddings</code> + <code>bge-m3</code></td><td>하이브리드 recall@3 ≥ 0.80 이고 FTS 단독보다 ≥ 5%p 높다</td><td>기본값을 FTS 로 두고 벡터는 끈 채 남긴다(D10)</td></tr>
+    <tr><td class="k">m5</td><td>구획 6 입구</td><td>승인 1회 설치가 5분 안에 끝난다</td><td>새 macOS 계정에서 공식 레지스트리의 npm 서버 3종 → PATHFINDER + Claude Code</td><td>3/3 성공 · 각 ≤ 5분 · 롤백 3/3 · 기존 설정 바이트 단위 보존</td><td>D4 의 뒤집는 조건 — 자신에만 설치</td></tr>
+  </table></div>
+</section>
+
+<section id="s14">
+  <h2><span class="n">§14</span>구획</h2>
+  <p class="note">구획은 검증 단위지 배포 단위가 아니다. 전체가 한 브랜치에서 돌 때까지 main 에 안 올린다. 구획마다 계획 → 대표 승인 → 구현 → "돈다" 확인 → 개인정보 스캔 → 커밋.</p>
+  <div class="scroll"><table>
+    <tr><th>구획</th><th>만드는 것</th><th>돈다 =</th></tr>
+    <tr><td class="k">0</td><td>레포 세우기(비공개 · noreply · 커밋 전 스캔 · <code>.claude/agents</code>) + m6 · m1</td><td>두 통과선 판정, 결과가 <code>HISTORY.md</code> 에</td></tr>
+    <tr><td class="k">1</td><td><code>ledger</code> · <code>state</code> · <code>llm/openai_compat</code>(스트리밍) · <code>loop</code> · <code>daemon</code> · 원시 클라이언트</td><td><code>nc -U</code> 로 한 턴이 스트리밍으로 돌고, DB 를 지워도 복원된다</td></tr>
+    <tr><td class="k">2</td><td>m2 → <code>broker</code> · <code>policy</code> · <code>exec</code> · <code>tools</code> · 승인 게이트 · steer · interrupt</td><td>승인 대기가 재시작 뒤에도 뜨고, 도중에 한 말이 반영되고, interrupt 가 도는 툴을 죽인다</td></tr>
+    <tr><td class="k">3</td><td>m3 → <code>signals</code> · <code>rules</code> · <code>deliver</code> · 감각(attach · mail · calendar · schedule · shell · claude_code) · 울타리 친 모델 판단 · 새 신호 라벨 셋(≥ 40건)</td><td>라벨 셋에서 규칙대로 말하거나 침묵하고, 주입 0/20</td></tr>
+    <tr><td class="k">4</td><td><code>jobs</code> — 작업자, 개시 · 완료 · 실패 신호, 공유 예산</td><td>조사를 맡긴 직후 다른 질문에 답하고, 완료되면 요약이 말을 건다</td></tr>
+    <tr><td class="k">5</td><td>m4 → <code>memory</code> — vault · 하이브리드 색인 · 정리 통과 · gate · 산출 0 규칙</td><td>합성 3일치에서 위키 ≥ 1장 승격, 산출 0 이 3일이면 말을 건다</td></tr>
+    <tr><td class="k">6</td><td>m5 → 규격 v0 · <code>catalog</code>(감각 포함) · 제안 · <code>installer</code> · 해시 수락</td><td>새 도구 확인 → 작업 맥락과 맞음 → 먼저 제안 → 승인 1회 → 두 곳에 설치 → 롤백까지</td></tr>
+    <tr><td class="k">7</td><td>설치 가능한 형태 — <code>pathfinder init</code> 온보딩 · launchd · <code>tui</code> · <code>llm/anthropic</code>(실험) · README 한·영 · ARCHITECTURE(.ko)</td><td>팀원이 깨끗한 맥에서 10분 안에 첫 대화</td></tr>
+    <tr><td class="k">8</td><td>실사용 2주</td><td>§15 를 채우고 공개 전환을 판단</td></tr>
+  </table></div>
+</section>
+
+<section id="s15">
+  <h2><span class="n">§15</span>완성 기준</h2>
+  <p class="note">전부 통과해야 main. 숫자는 제가 정한 첫 값입니다 — 대표의 감각과 다르면 고칩니다.</p>
+  <h3>코드가 재는 것</h3>
+  <ol>
+    <li>코어 ≤ 5,500줄 · 모듈은 §6 배분의 1.3배 이내 · 감각 파일당 ≤ 150 · <code>tui</code> ≤ 400 (<code>ARCHITECTURE</code> 의 "세는 법" 명령)</li>
+    <li>첫 토큰 중앙값 ≤ 3초 (Ollama cloud 모델 기준)</li>
+    <li><code>bench/injection</code> 0/20 · 새 신호 라벨 셋에서 규칙 precision ≥ 0.95 (recall 은 기록하고, 통과선은 실사용 첫 주 뒤에 정한다)</li>
+    <li>§11 의 테스트 전부 통과</li>
+    <li>DB 를 지우고 <code>reindex</code> 하면 승인 대기 · 해시 수락까지 돌아온다 · 모델을 402 로 막아도 데몬이 산다</li>
+    <li>장부에 쓰는 길도 설정에 쓰는 길도 하나 (<code>grep</code> 으로 센다)</li>
+    <li>새 감각 하나 = 파일 하나 + 설정 한 줄, 코어 변경 0</li>
+  </ol>
+  <h3>사람이 재는 것 (실사용 2주 뒤 대표가 채운다)</h3>
+  <ol start="8">
+    <li>먼저 건 말 중 받아들인 것(👍 이거나 그 말대로 움직인 것)이 하루 3건 이상, 👎 비율 ≤ 20%. 발화 수에는 하한을 두지 않는다 — 말이 많은 것이 목표가 아니다</li>
+    <li>정리 통과가 14일 중 7일 이상 위키에 1건 이상 적용했다 (장수가 아니라 "멈추지 않았다"를 잰다)</li>
+    <li>도구 제안 → 설치가 실제로 2회 이상 (지원서 지표: 주 1건)</li>
+    <li>작업 위임이 실제로 5회 이상이고 완료 알림을 받았다</li>
+    <li>승인함을 열어 1건 이상 승인한 날이 7일 이상</li>
+    <li>팀원이 도움 요청 없이 설치했다</li>
+  </ol>
+</section>
+
+<section id="s16">
+  <h2><span class="n">§16</span>Claude Code 안의 개발팀</h2>
+  <p>대표 = 개발 총괄. 메인 세션이 lead 로 설계안과 계획을 내고 팀에 나눈다. 승인은 대표가 한다. 세 모델을 전부 high 로 쓴다는 조건은 lead 와 에이전트 셋으로 채운다.</p>
+  <div class="scroll"><table>
+    <tr><th>역할</th><th>모델 · 사고</th><th>하는 일</th><th>격리</th></tr>
+    <tr><td class="k">lead</td><td>fable · high (메인 세션)</td><td>설계 선택지와 되돌리는 비용, 구획 계획, 결과 취합, 대표 보고. 구조를 바꿀 일이 생기면 코드 전에 대표에게 묻는다</td><td>—</td></tr>
+    <tr><td class="k">implementer</td><td>sonnet · high</td><td>승인된 계획의 구현, 부품 테스트, "돈다" 확인. 같은 부품에서 두 번 실패하면 opus 로 다시 부른다</td><td>worktree</td></tr>
+    <tr><td class="k">researcher</td><td>sonnet · high</td><td>문서 · 규격 · 라이브러리 조사, 실측 운전</td><td>읽기 + 웹</td></tr>
+    <tr><td class="k">reviewer</td><td>opus · high</td><td>정확성 · 보안 · 과설계 · 개인정보 스캔. 고치지 않고 짚는다</td><td>읽기 전용</td></tr>
+  </table></div>
+  <p><code>.claude/agents/*.md</code> 에 모델과 <code>effort: high</code> 를 적어 고정한다. Claude Code 의 실험 기능 "agent teams"는 lead 가 계획을 자동 승인해 대표의 승인 자리가 없으므로 쓰지 않는다. 비밀값 스캔은 git <code>pre-commit</code> 에 건다 — 누가 커밋하든 걸린다. <code>.claude/settings.json</code> 의 권한 허용 목록은 구획 0 에서 안을 올리고 승인받은 뒤에 넣는다.</p>
+</section>
+
+<section id="s17">
+  <h2><span class="n">§17</span>열린 길 — 걷어낸 것과 되살리는 조건</h2>
+  <div class="scroll"><table>
+    <tr><th>지금은 없는 것</th><th>되살리는 조건</th></tr>
+    <tr><td>신호의 끼어들기(급한 신호가 도는 턴을 끊는 것)</td><td>대화 턴의 중앙값이 30초를 넘어, 급한 일정 알림이 실제로 늦은 적이 있을 때</td></tr>
+    <tr><td>판정 · 정리 전용 모델 키</td><td>m6 에서 크레딧이 모자랄 때 — 가벼운 무료 모델의 존재는 확인했다</td></tr>
+    <tr><td>코드 모드와 스크립트 실행기</td><td>m1 전 계열 미달</td></tr>
+    <tr><td>위키 lint · 절차 전용 폴더</td><td>위키 100장 초과 · 정리 통과가 7일 연속 1건 이상 낼 때</td></tr>
+    <tr><td>참조 서버 프로세스 · 결과 전송</td><td>팀원의 서버에 받을 주소가 생길 때 — 허용 목록 투영 함수와 그 테스트를 함께</td></tr>
+    <tr><td>서버가 미는 새 도구 신호</td><td>위와 같음</td></tr>
+    <tr><td>공유 렌더 층 · 두 번째 화면</td><td>두 번째 화면을 실제로 만들 때</td></tr>
+    <tr><td>Linux · Windows</td><td>D3 의 뒤집는 조건</td></tr>
+    <tr><td>Cursor · Claude Desktop 설치 대상, 스킬 · 플러그인 도구 종류</td><td>지원서 2R</td></tr>
+    <tr><td>vault 의 git 버전 관리 · 위키링크 그래프</td><td>되돌리기 저널로 부족해질 때 · 여러 단계를 건너는 질문이 실제로 나올 때</td></tr>
+    <tr><td>라이선스</td><td>공개 전환 시점, 법률 자문 뒤</td></tr>
+  </table></div>
+</section>
+
+<section>
+  <div class="ask">
+    <h3>착수 — 2026-09-22</h3>
+    <p>열린 결정은 없다. 대표가 "착수하자"고 했고 구획 0 이 시작됐다. 이 문서는 여기서 닫는다 — 이후 실증에서 바뀌는 것은 레포의 <code>HISTORY.md</code> 에 적는다.</p>
+  </div>
+</section>
+
+<footer>
+  <p>착수 전 합의다. 구현이 시작되면 코드가 하는 일의 정본은 레포의 <code>ARCHITECTURE.md</code>(≤ 500줄, 한국어본 <code>ARCHITECTURE.ko.md</code>)이고, 이 문서는 "왜 이렇게 정했나"로 남는다. 실증에서 바뀐 것은 여기 고치지 않고 <code>HISTORY.md</code> 에 적는다 — 기획이 실증을 모른 채 낡는 일을 되풀이하지 않기 위해서다. 조사 요지는 <code>docs/research/RESEARCH-DIGEST.md</code>, 결정 로그는 <code>docs/decisions/</code> 에 둔다.</p>
+</footer>
+</div>

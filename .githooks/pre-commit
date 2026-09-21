@@ -1,0 +1,3 @@
+#!/bin/sh
+# Runs for every committer (human or agent). See scripts/scan_personal.py.
+exec python3 scripts/scan_personal.py

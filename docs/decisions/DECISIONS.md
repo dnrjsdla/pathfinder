@@ -1,0 +1,80 @@
+# Decisions
+
+Format: **Dn. decision** — why — *reversed if*. A decision without a reversal condition is a
+preference and does not belong here. All were confirmed by the owner (2026-09-21/22).
+
+**D1. New repository; transplant selected Mark.5 modules** (MCP client with description-hash
+pinning, policy table, broker, agent loop, rules engine, shell sandbox, gate pattern, hybrid index;
+about 3,300 lines). — A fork would still rewrite the 2,426-line core and would need a full history
+rewrite before going public. — *Reversed if* partition 1 shows that more than half of the
+transplanted modules must be rewritten for the new lane structure: then carry the ideas only.
+
+**D2. Own harness with provider adapters; most LLM API keys supported from the first version**
+(Ollama cloud, OpenAI, Anthropic, Google, ...). Two adapters: OpenAI-compatible and Anthropic
+native. — Open source, and a connection spec other assistants can use; the Claude Agent SDK is
+Claude-only and forbids offering subscription login in distributed products. — *Reversed if* a
+provider cannot pass the common contract: split support into "first-class" and "experimental".
+
+**D3. v1 = macOS first, including the full path: tool proposal -> one approval -> install.**
+The verification server is closed and built by a teammate. — The application's first prototype and
+its primary metric (one tool attached per user per week) need the end-to-end path. — *Reversed if*
+3 or more of 10 beta users are not on macOS: bring Linux forward.
+
+**D4. Install targets are two: PATHFINDER's own MCP client and the user's Claude Code config.**
+— That is where the target user actually works. — *Reversed if* m5 cannot merge and roll back a
+foreign config file 3/3: v1 installs into PATHFINDER only.
+
+**D5. Start as a private GitHub repository with a noreply commit identity; go public when the
+whole structure runs and passes the personal-data scan.** License is chosen at that point, after
+legal advice. — *Reversed if* beta recruiting or teammate review needs a public link earlier
+(license first).
+
+**D6. Code, comments, commits, docs in English; README and UI bilingual; ARCHITECTURE also kept in
+Korean (`ARCHITECTURE.ko.md`).** — *Reversed if* the two files drift apart in two or more commits:
+make one canonical and generate the other.
+
+**D7. Build and verify without paid API keys.** Live chat models are Ollama cloud models only
+(local chat models are too small); the only local model is the `bge-m3` embedder. Claude Code
+subagents act as test drivers and graders, never as the product's runtime. Direct Anthropic /
+OpenAI / Google adapters are written to spec, unit-tested against recorded responses, and labelled
+"experimental". — *Reversed if* a key becomes available: rerun m1 on that provider and promote it.
+
+**D8. Principle: a real assistant, not a problem-solving tool — look one step ahead.** Do not cut
+a capability assistant-ness depends on merely because it is unused today; cut what can be absent
+without reducing the assistant experience. — *Reversed if* a capability kept under this rule is
+never used in two weeks of real use: move it to the open list.
+
+**D9. Model configuration is `model`, optional `worker_model`, and `embed_model`.** Five roles
+were dropped. — Under D7 there are no price tiers, so the roles collapse onto one model; "another
+LLM does the subtask" is satisfied by an independent context. — *Reversed if* m6 shows the free
+credit is insufficient: add a light-model key (light free models exist).
+
+**D10. Embeddings and a vector index are in v1 (FTS5 + sqlite-vec hybrid).** — The wiki will grow;
+adding it later means handling it twice. Indexing must succeed with FTS alone when no embedder is
+available. — *Reversed if* m4 shows hybrid recall@3 gains under 5 points over FTS alone: default
+off, code stays.
+
+**D11. Native tool calling first.** — Verified live on three free-plan families (see HISTORY).
+Mark.5 telemetry: 60% of turns took one step, maximum seven, so scripted multi-call turns buy
+little. The sandbox stays for the shell tool. — *Reversed if* a family scores under 85% in m1
+(that family becomes experimental); if all do, build code mode.
+
+**D12. Steer is in v1:** what the user says mid-turn is inserted at the next safe point (after a
+tool result, or by cutting the stream and keeping what was said). Signals never cut in; they wait
+for the turn boundary in one queue. — *Reversed if* m2 fails: interrupt and start a new turn.
+
+**D13. Signals the rules cannot decide go to a fenced model judgment** (closed JSON answer, 20 per
+day, light model, thumbs on every judgment). **This is temporary; the structural direction:** the
+model judgment is a *rule-discovery device* — judgments that repeat and earn thumbs-up become rule
+proposals in the inbox, and once approved that kind never reaches the model again. Track that the
+count falls over time. — *Reversed if* thumbs-up rate is under 70% after two weeks (switch off);
+if the count does not fall in four weeks, redesign the absorption mechanism.
+
+**D14. No reference-server process** (amends D3): a spec document, spec-shaped fixtures, and a
+`catalog` that reads the official MCP registry directly. — *Reversed if* the teammate's server
+gets an address: point at it, and add the HTTP round-trip test and the allowlisted outcome
+projection then.
+
+**D15. Work-context and "CLI" signals come from all three: attaching a PATHFINDER screen, a shell
+hook, and Claude Code hooks; each is switched on during onboarding.** — *Reversed if* a source
+never leads to an utterance in two weeks of real use: switch that sense off.

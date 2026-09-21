@@ -1,0 +1,1619 @@
+{
+  "base_url": "http://localhost:11434/v1",
+  "max_steps": 6,
+  "n_tasks": 20,
+  "models": {
+    "gpt-oss:120b-cloud": {
+      "results": [
+        {
+          "id": "A1",
+          "category": "A",
+          "lang": "ko",
+          "title": "weather Busan",
+          "passed": true,
+          "steps": 2,
+          "reason": null,
+          "calls": [
+            {
+              "name": "get_weather",
+              "args": {
+                "city": "Busan"
+              }
+            }
+          ],
+          "final_text": "현재 부산은 **맑음**이며, 기온은 **24°C** 정도입니다. 즐거운 하루 보내세요!",
+          "prompt_tokens": 818,
+          "completion_tokens": 135,
+          "latencies": [
+            0.7581968307495117,
+            1.566964864730835
+          ],
+          "http_error": null
+        },
+        {
+          "id": "A2",
+          "category": "A",
+          "lang": "en",
+          "title": "weather Tokyo",
+          "passed": true,
+          "steps": 2,
+          "reason": null,
+          "calls": [
+            {
+              "name": "get_weather",
+              "args": {
+                "city": "Tokyo"
+              }
+            }
+          ],
+          "final_text": "The current weather in Tokyo is **sunny** with a temperature of **24 °C**.",
+          "prompt_tokens": 814,
+          "completion_tokens": 65,
+          "latencies": [
+            0.7533969879150391,
+            0.6572790145874023
+          ],
+          "http_error": null
+        },
+        {
+          "id": "A3",
+          "category": "A",
+          "lang": "ko",
+          "title": "start job AI trend research",
+          "passed": true,
+          "steps": 2,
+          "reason": null,
+          "calls": [
+            {
+              "name": "start_job",
+              "args": {
+                "goal": "Research AI trends"
+              }
+            }
+          ],
+          "final_text": "AI 트렌드 조사를 위한 백그라운드 작업을 시작했습니다. 작업 ID는 **job-001**이며, 진행 상황이 업데이트되는 대로 알려드리겠습니다. 추가로 궁금한 점이나 구체적인 조사 범위(예: 특정 산업, 기술, 연도 등)가 있으면 알려 주세요!",
+          "prompt_tokens": 842,
+          "completion_tokens": 179,
+          "latencies": [
+            0.9710869789123535,
+            0.8864078521728516
+          ],
+          "http_error": null
+        },
+        {
+          "id": "A4",
+          "category": "A",
+          "lang": "en",
+          "title": "start job quantum computing research",
+          "passed": true,
+          "steps": 2,
+          "reason": null,
+          "calls": [
+            {
+              "name": "start_job",
+              "args": {
+                "goal": "research quantum computing"
+              }
+            }
+          ],
+          "final_text": "The background job to research quantum computing has been started (job‑001). I’ll let you know when it’s completed or if any findings become available. Let me know if there’s anything else you’d like me to do in the meantime!",
+          "prompt_tokens": 826,
+          "completion_tokens": 118,
+          "latencies": [
+            0.7040178775787354,
+            0.6796400547027588
+          ],
+          "http_error": null
+        },
+        {
+          "id": "A5",
+          "category": "A",
+          "lang": "ko",
+          "title": "run shell ls -la",
+          "passed": true,
+          "steps": 2,
+          "reason": null,
+          "calls": [
+            {
+              "name": "run_shell",
+              "args": {
+                "command": "ls -la"
+              }
+            }
+          ],
+          "final_text": "쉘 명령어 `ls -la`를 실행했습니다.  \n\n**출력:**  \n```\n(mock) ran: ls -la\n```",
+          "prompt_tokens": 836,
+          "completion_tokens": 97,
+          "latencies": [
+            0.7525439262390137,
+            0.5726897716522217
+          ],
+          "http_error": null
+        },
+        {
+          "id": "A6",
+          "category": "A",
+          "lang": "en",
+          "title": "run shell ls -la",
+          "passed": true,
+          "steps": 2,
+          "reason": null,
+          "calls": [
+            {
+              "name": "run_shell",
+              "args": {
+                "command": "ls -la"
+              }
+            }
+          ],
+          "final_text": "Here’s the result of the `ls -la` command:\n\n```\n(mock) ran: ls -la\n```",
+          "prompt_tokens": 824,
+          "completion_tokens": 75,
+          "latencies": [
+            0.5875668525695801,
+            1.1060359477996826
+          ],
+          "http_error": null
+        },
+        {
+          "id": "B1",
+          "category": "B",
+          "lang": "ko",
+          "title": "schedule mentor meeting tomorrow 3pm/30min",
+          "passed": true,
+          "steps": 2,
+          "reason": null,
+          "calls": [
+            {
+              "name": "add_event",
+              "args": {
+                "duration_min": 30,
+                "start_iso": "2026-09-23T15:00:00+09:00",
+                "title": "멘토 미팅"
+              }
+            }
+          ],
+          "final_text": "내일(2026‑09‑23) 오후 3시부터 30분 동안 “멘토 미팅” 일정이 추가되었습니다. 필요하신 다른 일정이나 도움이 있으면 알려 주세요!",
+          "prompt_tokens": 897,
+          "completion_tokens": 243,
+          "latencies": [
+            1.1175172328948975,
+            0.6274802684783936
+          ],
+          "http_error": null
+        },
+        {
+          "id": "B2",
+          "category": "B",
+          "lang": "en",
+          "title": "schedule code review tomorrow 9am/45min",
+          "passed": true,
+          "steps": 2,
+          "reason": null,
+          "calls": [
+            {
+              "name": "add_event",
+              "args": {
+                "duration_min": 45,
+                "start_iso": "2026-09-23T09:00:00+09:00",
+                "title": "Code Review"
+              }
+            }
+          ],
+          "final_text": "Your 45‑minute “Code Review” has been scheduled for tomorrow, September 23, 2026, starting at 9:00 AM (Asia/Seoul time). Let me know if you need anything else!",
+          "prompt_tokens": 881,
+          "completion_tokens": 234,
+          "latencies": [
+            0.922170877456665,
+            0.6262450218200684
+          ],
+          "http_error": null
+        },
+        {
+          "id": "B3",
+          "category": "B",
+          "lang": "ko",
+          "title": "add dinner today 7pm/1hr",
+          "passed": true,
+          "steps": 2,
+          "reason": null,
+          "calls": [
+            {
+              "name": "add_event",
+              "args": {
+                "duration_min": 60,
+                "start_iso": "2026-09-22T19:00:00+09:00",
+                "title": "저녁 약속"
+              }
+            }
+          ],
+          "final_text": "✅ 오늘 저녁 7시(2026‑09‑22)부터 1시간 동안 “저녁 약속” 일정을 성공적으로 추가했습니다. 필요하신 다른 일정이나 도움이 있으면 알려 주세요!",
+          "prompt_tokens": 899,
+          "completion_tokens": 233,
+          "latencies": [
+            1.0375869274139404,
+            0.7124500274658203
+          ],
+          "http_error": null
+        },
+        {
+          "id": "C1",
+          "category": "C",
+          "lang": "ko",
+          "title": "playwright note config path chain",
+          "passed": true,
+          "steps": 3,
+          "reason": null,
+          "calls": [
+            {
+              "name": "search_notes",
+              "args": {
+                "query": "플레이라이트 MCP 설정"
+              }
+            },
+            {
+              "name": "read_note",
+              "args": {
+                "path": "notes/playwright-mcp-setup.md"
+              }
+            }
+          ],
+          "final_text": "플레이라이트 MCP 설정 노트에 따르면 설정 파일 경로는 다음과 같습니다:\n\n**`~/.config/mcp/playwright.json`**  \n\n이 파일을 편집한 뒤에는 MCP 호스트를 재시작해 주세요.",
+          "prompt_tokens": 1389,
+          "completion_tokens": 213,
+          "latencies": [
+            1.0404841899871826,
+            0.6058638095855713,
+            0.6634652614593506
+          ],
+          "http_error": null
+        },
+        {
+          "id": "C2",
+          "category": "C",
+          "lang": "en",
+          "title": "playwright note config path chain",
+          "passed": true,
+          "steps": 3,
+          "reason": null,
+          "calls": [
+            {
+              "name": "search_notes",
+              "args": {
+                "query": "Playwright MCP setup"
+              }
+            },
+            {
+              "name": "read_note",
+              "args": {
+                "path": "notes/playwright-mcp-setup.md"
+              }
+            }
+          ],
+          "final_text": "Your note titled **“Playwright MCP Setup”** contains the configuration path:\n\n**`~/.config/mcp/playwright.json`**",
+          "prompt_tokens": 1367,
+          "completion_tokens": 191,
+          "latencies": [
+            0.8273911476135254,
+            0.6333940029144287,
+            1.125330924987793
+          ],
+          "http_error": null
+        },
+        {
+          "id": "C3",
+          "category": "C",
+          "lang": "ko",
+          "title": "deep work block no overlap",
+          "passed": true,
+          "steps": 3,
+          "reason": null,
+          "calls": [
+            {
+              "name": "list_events",
+              "args": {
+                "date": "2026-09-23"
+              }
+            },
+            {
+              "name": "add_event",
+              "args": {
+                "duration_min": 60,
+                "start_iso": "2026-09-23T11:00:00+09:00",
+                "title": "딥워크"
+              }
+            }
+          ],
+          "final_text": "내일(2026‑09‑23) 11:00 ~ 12:00에 **‘딥워크’** 1시간 블록을 추가했습니다. 일정이 겹치지 않도록 선택했으며, 캘린더에 반영되었습니다. 필요하신 다른 도움이 있으면 알려 주세요!",
+          "prompt_tokens": 1523,
+          "completion_tokens": 523,
+          "latencies": [
+            1.6408898830413818,
+            1.672250747680664,
+            0.9186949729919434
+          ],
+          "http_error": null
+        },
+        {
+          "id": "C4",
+          "category": "C",
+          "lang": "en",
+          "title": "deep work block no overlap",
+          "passed": true,
+          "steps": 3,
+          "reason": null,
+          "calls": [
+            {
+              "name": "list_events",
+              "args": {
+                "date": "2026-09-23"
+              }
+            },
+            {
+              "name": "add_event",
+              "args": {
+                "duration_min": 60,
+                "start_iso": "2026-09-23T11:00:00+09:00",
+                "title": "Deep work"
+              }
+            }
+          ],
+          "final_text": "The 1‑hour “Deep work” block has been added for tomorrow (2026‑09‑23) from **11:00 – 12:00** KST, which does not overlap any of your existing events.",
+          "prompt_tokens": 1491,
+          "completion_tokens": 467,
+          "latencies": [
+            1.3487951755523682,
+            2.2750980854034424,
+            0.5936591625213623
+          ],
+          "http_error": null
+        },
+        {
+          "id": "C5",
+          "category": "C",
+          "lang": "ko",
+          "title": "focus time block no overlap",
+          "passed": true,
+          "steps": 3,
+          "reason": null,
+          "calls": [
+            {
+              "name": "list_events",
+              "args": {
+                "date": "2026-09-23"
+              }
+            },
+            {
+              "name": "add_event",
+              "args": {
+                "duration_min": 60,
+                "start_iso": "2026-09-23T11:00:00+09:00",
+                "title": "집중 시간"
+              }
+            }
+          ],
+          "final_text": "내일(2026‑09‑23) 일정은 다음과 같습니다:\n\n- **10:00 ~ 11:00** – Team sync  \n- **11:00 ~ 12:00** – **집중 시간** (추가됨)  \n- **14:00 ~ 15:00** – Dentist  \n\n‘집중 시간’ 블록을 11시부터 12시까지 1시간으로 추가했습니다. 필요하신 다른 일정 관리가 있으면 알려 주세요!",
+          "prompt_tokens": 1523,
+          "completion_tokens": 610,
+          "latencies": [
+            1.4958090782165527,
+            1.2825870513916016,
+            0.8438961505889893
+          ],
+          "http_error": null
+        },
+        {
+          "id": "D1",
+          "category": "D",
+          "lang": "ko",
+          "title": "calendar read-only distractor",
+          "passed": true,
+          "steps": 2,
+          "reason": null,
+          "calls": [
+            {
+              "name": "list_events",
+              "args": {
+                "date": "2026-09-23"
+              }
+            }
+          ],
+          "final_text": "내일(2026‑09‑23) 일정은 다음과 같습니다:\n\n- **10:00 ~ 11:00** – Team sync  \n- **14:00 ~ 15:00** – Dentist  \n\n추가로 궁금한 점이 있으면 알려 주세요!",
+          "prompt_tokens": 872,
+          "completion_tokens": 154,
+          "latencies": [
+            0.7445597648620605,
+            0.6283981800079346
+          ],
+          "http_error": null
+        },
+        {
+          "id": "D2",
+          "category": "D",
+          "lang": "en",
+          "title": "calendar read-only distractor",
+          "passed": true,
+          "steps": 2,
+          "reason": null,
+          "calls": [
+            {
+              "name": "list_events",
+              "args": {
+                "date": "2026-09-23"
+              }
+            }
+          ],
+          "final_text": "Tomorrow’s calendar (2024‑09‑23) includes:\n\n- 10:00 – 11:00 : Team sync  \n- 14:00 – 15:00 : Dentist",
+          "prompt_tokens": 862,
+          "completion_tokens": 129,
+          "latencies": [
+            0.7766869068145752,
+            0.6013309955596924
+          ],
+          "http_error": null
+        },
+        {
+          "id": "D3",
+          "category": "D",
+          "lang": "en",
+          "title": "search notes not email distractor",
+          "passed": true,
+          "steps": 3,
+          "reason": null,
+          "calls": [
+            {
+              "name": "search_notes",
+              "args": {
+                "query": "Playwright"
+              }
+            },
+            {
+              "name": "read_note",
+              "args": {
+                "path": "notes/playwright-mcp-setup.md"
+              }
+            }
+          ],
+          "final_text": "Here’s the note you have about Playwright:\n\n**Title:** Playwright MCP Setup  \n**Content:**  \n```\nPlaywright MCP setup notes.\nconfig path: ~/.config/mcp/playwright.json\nRestart the MCP host after editing.\n```",
+          "prompt_tokens": 1363,
+          "completion_tokens": 157,
+          "latencies": [
+            0.6260411739349365,
+            0.6167809963226318,
+            0.6186151504516602
+          ],
+          "http_error": null
+        },
+        {
+          "id": "E1",
+          "category": "E",
+          "lang": "ko",
+          "title": "no tool needed: multiplication",
+          "passed": true,
+          "steps": 1,
+          "reason": null,
+          "calls": [],
+          "final_text": "17 × 23 = 391.",
+          "prompt_tokens": 387,
+          "completion_tokens": 59,
+          "latencies": [
+            0.6339080333709717
+          ],
+          "http_error": null
+        },
+        {
+          "id": "E2",
+          "category": "E",
+          "lang": "en",
+          "title": "no tool needed: multiplication",
+          "passed": true,
+          "steps": 1,
+          "reason": null,
+          "calls": [],
+          "final_text": "17 × 23 = 391.",
+          "prompt_tokens": 385,
+          "completion_tokens": 40,
+          "latencies": [
+            0.5506598949432373
+          ],
+          "http_error": null
+        },
+        {
+          "id": "F1",
+          "category": "F",
+          "lang": "en",
+          "title": "missing info: send the email",
+          "passed": true,
+          "steps": 1,
+          "reason": null,
+          "calls": [],
+          "final_text": "Sure! Could you please provide the following details for the email?\n\n1. **Recipient’s email address**  \n2. **Subject line**  \n3. **Body content** (the full message you’d like to send)\n\nOnce I have that information, I’ll send the email for you.",
+          "prompt_tokens": 381,
+          "completion_tokens": 101,
+          "latencies": [
+            0.7123920917510986
+          ],
+          "http_error": null
+        }
+      ],
+      "blocked": null
+    },
+    "gemma4:31b-cloud": {
+      "results": [
+        {
+          "id": "A1",
+          "category": "A",
+          "lang": "ko",
+          "title": "weather Busan",
+          "passed": true,
+          "steps": 2,
+          "reason": null,
+          "calls": [
+            {
+              "name": "get_weather",
+              "args": {
+                "city": "Busan"
+              }
+            }
+          ],
+          "final_text": "현재 부산의 날씨는 맑으며, 기온은 24도입니다.",
+          "prompt_tokens": 1076,
+          "completion_tokens": 40,
+          "latencies": [
+            0.543377161026001,
+            0.7007911205291748
+          ],
+          "http_error": null
+        },
+        {
+          "id": "A2",
+          "category": "A",
+          "lang": "en",
+          "title": "weather Tokyo",
+          "passed": true,
+          "steps": 2,
+          "reason": null,
+          "calls": [
+            {
+              "name": "get_weather",
+              "args": {
+                "city": "Tokyo"
+              }
+            }
+          ],
+          "final_text": "The weather in Tokyo is currently sunny with a temperature of 24°C.",
+          "prompt_tokens": 1078,
+          "completion_tokens": 37,
+          "latencies": [
+            0.5446951389312744,
+            0.595041036605835
+          ],
+          "http_error": null
+        },
+        {
+          "id": "A3",
+          "category": "A",
+          "lang": "ko",
+          "title": "start job AI trend research",
+          "passed": true,
+          "steps": 2,
+          "reason": null,
+          "calls": [
+            {
+              "name": "start_job",
+              "args": {
+                "goal": "AI 트렌드 조사"
+              }
+            }
+          ],
+          "final_text": "AI 트렌드를 조사하는 백그라운드 작업을 시작했습니다. (작업 ID: job-001) 조사가 완료되면 알려드리겠습니다.",
+          "prompt_tokens": 1103,
+          "completion_tokens": 57,
+          "latencies": [
+            0.5415120124816895,
+            0.688629150390625
+          ],
+          "http_error": null
+        },
+        {
+          "id": "A4",
+          "category": "A",
+          "lang": "en",
+          "title": "start job quantum computing research",
+          "passed": true,
+          "steps": 2,
+          "reason": null,
+          "calls": [
+            {
+              "name": "start_job",
+              "args": {
+                "goal": "research quantum computing"
+              }
+            }
+          ],
+          "final_text": "I've started a background job to research quantum computing (Job ID: job-001).",
+          "prompt_tokens": 1087,
+          "completion_tokens": 43,
+          "latencies": [
+            0.5440561771392822,
+            0.5773670673370361
+          ],
+          "http_error": null
+        },
+        {
+          "id": "A5",
+          "category": "A",
+          "lang": "ko",
+          "title": "run shell ls -la",
+          "passed": true,
+          "steps": 2,
+          "reason": null,
+          "calls": [
+            {
+              "name": "run_shell",
+              "args": {
+                "command": "ls -la"
+              }
+            }
+          ],
+          "final_text": "명령어 `ls -la`를 실행한 결과입니다:\n\n`(mock) ran: ls -la`",
+          "prompt_tokens": 1089,
+          "completion_tokens": 46,
+          "latencies": [
+            0.5334887504577637,
+            0.6893060207366943
+          ],
+          "http_error": null
+        },
+        {
+          "id": "A6",
+          "category": "A",
+          "lang": "en",
+          "title": "run shell ls -la",
+          "passed": true,
+          "steps": 2,
+          "reason": null,
+          "calls": [
+            {
+              "name": "run_shell",
+              "args": {
+                "command": "ls -la"
+              }
+            }
+          ],
+          "final_text": "The command `ls -la` was executed successfully.",
+          "prompt_tokens": 1083,
+          "completion_tokens": 33,
+          "latencies": [
+            0.5682551860809326,
+            0.57069993019104
+          ],
+          "http_error": null
+        },
+        {
+          "id": "B1",
+          "category": "B",
+          "lang": "ko",
+          "title": "schedule mentor meeting tomorrow 3pm/30min",
+          "passed": true,
+          "steps": 2,
+          "reason": null,
+          "calls": [
+            {
+              "name": "add_event",
+              "args": {
+                "duration_min": 30,
+                "start_iso": "2026-09-23T15:00:00",
+                "title": "멘토 미팅"
+              }
+            }
+          ],
+          "final_text": "내일(9월 23일) 오후 3시에 '멘토 미팅' 일정을 30분 동안으로 예약했습니다.",
+          "prompt_tokens": 1169,
+          "completion_tokens": 87,
+          "latencies": [
+            0.6941580772399902,
+            1.1047461032867432
+          ],
+          "http_error": null
+        },
+        {
+          "id": "B2",
+          "category": "B",
+          "lang": "en",
+          "title": "schedule code review tomorrow 9am/45min",
+          "passed": true,
+          "steps": 2,
+          "reason": null,
+          "calls": [
+            {
+              "name": "add_event",
+              "args": {
+                "duration_min": 45,
+                "start_iso": "2026-09-23T09:00:00",
+                "title": "Code Review"
+              }
+            }
+          ],
+          "final_text": "OK. I've scheduled your 'Code Review' for tomorrow, September 23rd, at 9:00 AM for 45 minutes.",
+          "prompt_tokens": 1157,
+          "completion_tokens": 87,
+          "latencies": [
+            0.7551238536834717,
+            0.6959130764007568
+          ],
+          "http_error": null
+        },
+        {
+          "id": "B3",
+          "category": "B",
+          "lang": "ko",
+          "title": "add dinner today 7pm/1hr",
+          "passed": true,
+          "steps": 2,
+          "reason": null,
+          "calls": [
+            {
+              "name": "add_event",
+              "args": {
+                "duration_min": 60,
+                "start_iso": "2026-09-22T19:00:00",
+                "title": "저녁 약속"
+              }
+            }
+          ],
+          "final_text": "오늘 저녁 7시에 '저녁 약속' 일정을 1시간 동안 추가했습니다.",
+          "prompt_tokens": 1171,
+          "completion_tokens": 77,
+          "latencies": [
+            0.658393144607544,
+            0.6892518997192383
+          ],
+          "http_error": null
+        },
+        {
+          "id": "C1",
+          "category": "C",
+          "lang": "ko",
+          "title": "playwright note config path chain",
+          "passed": true,
+          "steps": 3,
+          "reason": null,
+          "calls": [
+            {
+              "name": "search_notes",
+              "args": {
+                "query": "플레이라이트 MCP 설정"
+              }
+            },
+            {
+              "name": "read_note",
+              "args": {
+                "path": "notes/playwright-mcp-setup.md"
+              }
+            }
+          ],
+          "final_text": "플레이라이트 MCP 설정 관련 노트에 기재된 설정 파일 경로는 `~/.config/mcp/playwright.json`입니다.",
+          "prompt_tokens": 1785,
+          "completion_tokens": 83,
+          "latencies": [
+            0.5539870262145996,
+            0.6032769680023193,
+            0.6558411121368408
+          ],
+          "http_error": null
+        },
+        {
+          "id": "C2",
+          "category": "C",
+          "lang": "en",
+          "title": "playwright note config path chain",
+          "passed": true,
+          "steps": 3,
+          "reason": null,
+          "calls": [
+            {
+              "name": "search_notes",
+              "args": {
+                "query": "Playwright MCP setup"
+              }
+            },
+            {
+              "name": "read_note",
+              "args": {
+                "path": "notes/playwright-mcp-setup.md"
+              }
+            }
+          ],
+          "final_text": "The config path for your Playwright MCP setup is `~/.config/mcp/playwright.json`.",
+          "prompt_tokens": 1765,
+          "completion_tokens": 75,
+          "latencies": [
+            1.0437140464782715,
+            0.6694731712341309,
+            0.6393799781799316
+          ],
+          "http_error": null
+        },
+        {
+          "id": "C3",
+          "category": "C",
+          "lang": "ko",
+          "title": "deep work block no overlap",
+          "passed": true,
+          "steps": 3,
+          "reason": null,
+          "calls": [
+            {
+              "name": "list_events",
+              "args": {
+                "date": "2026-09-23"
+              }
+            },
+            {
+              "name": "add_event",
+              "args": {
+                "duration_min": 60,
+                "start_iso": "2026-09-23T09:00:00",
+                "title": "딥워크"
+              }
+            }
+          ],
+          "final_text": "내일(9월 23일) 일정 중 비어 있는 오전 9시부터 10시까지 1시간 동안 '딥워크' 블록을 추가했습니다.",
+          "prompt_tokens": 1929,
+          "completion_tokens": 121,
+          "latencies": [
+            0.5654120445251465,
+            0.7093379497528076,
+            0.8008081912994385
+          ],
+          "http_error": null
+        },
+        {
+          "id": "C4",
+          "category": "C",
+          "lang": "en",
+          "title": "deep work block no overlap",
+          "passed": true,
+          "steps": 3,
+          "reason": null,
+          "calls": [
+            {
+              "name": "list_events",
+              "args": {
+                "date": "2026-09-23"
+              }
+            },
+            {
+              "name": "add_event",
+              "args": {
+                "duration_min": 60,
+                "start_iso": "2026-09-23T09:00:00Z",
+                "title": "Deep work"
+              }
+            }
+          ],
+          "final_text": "I've checked your schedule for tomorrow, September 23rd. You have a \"Team sync\" from 10:00 to 11:00 and a \"Dentist\" appointment from 14:00 to 15:00.\n\nI have added a 1-hour 'Deep work' block from **09:00 to 10:00**.",
+          "prompt_tokens": 1919,
+          "completion_tokens": 170,
+          "latencies": [
+            0.6464359760284424,
+            0.7573659420013428,
+            0.9858548641204834
+          ],
+          "http_error": null
+        },
+        {
+          "id": "C5",
+          "category": "C",
+          "lang": "ko",
+          "title": "focus time block no overlap",
+          "passed": true,
+          "steps": 3,
+          "reason": null,
+          "calls": [
+            {
+              "name": "list_events",
+              "args": {
+                "date": "2026-09-23"
+              }
+            },
+            {
+              "name": "add_event",
+              "args": {
+                "duration_min": 60,
+                "start_iso": "2026-09-23T11:00:00Z",
+                "title": "집중 시간"
+              }
+            }
+          ],
+          "final_text": "내일(9월 23일) 일정을 확인한 결과, 오전 10시 팀 싱크와 오후 2시 치과 예약이 있었습니다.\n\n비어 있는 시간 중 **오전 11시부터 12시까지** 1시간 동안 '집중 시간' 블록을 추가했습니다.",
+          "prompt_tokens": 1939,
+          "completion_tokens": 154,
+          "latencies": [
+            0.5610361099243164,
+            0.7496650218963623,
+            0.9011039733886719
+          ],
+          "http_error": null
+        },
+        {
+          "id": "D1",
+          "category": "D",
+          "lang": "ko",
+          "title": "calendar read-only distractor",
+          "passed": true,
+          "steps": 2,
+          "reason": null,
+          "calls": [
+            {
+              "name": "list_events",
+              "args": {
+                "date": "2026-09-23"
+              }
+            }
+          ],
+          "final_text": "내일(2026-09-23) 일정은 다음과 같습니다.\n\n* **10:00 ~ 11:00**: Team sync\n* **14:00 ~ 15:00**: Dentist",
+          "prompt_tokens": 1138,
+          "completion_tokens": 83,
+          "latencies": [
+            0.7209577560424805,
+            0.8628170490264893
+          ],
+          "http_error": null
+        },
+        {
+          "id": "D2",
+          "category": "D",
+          "lang": "en",
+          "title": "calendar read-only distractor",
+          "passed": true,
+          "steps": 2,
+          "reason": null,
+          "calls": [
+            {
+              "name": "list_events",
+              "args": {
+                "date": "2026-09-23"
+              }
+            }
+          ],
+          "final_text": "You have two events tomorrow:\n- 10:00 - 11:00: Team sync\n- 14:00 - 15:00: Dentist",
+          "prompt_tokens": 1140,
+          "completion_tokens": 70,
+          "latencies": [
+            0.6143548488616943,
+            0.7358829975128174
+          ],
+          "http_error": null
+        },
+        {
+          "id": "D3",
+          "category": "D",
+          "lang": "en",
+          "title": "search notes not email distractor",
+          "passed": true,
+          "steps": 3,
+          "reason": null,
+          "calls": [
+            {
+              "name": "search_notes",
+              "args": {
+                "query": "Playwright"
+              }
+            },
+            {
+              "name": "read_note",
+              "args": {
+                "path": "notes/playwright-mcp-setup.md"
+              }
+            }
+          ],
+          "final_text": "I found one note about Playwright:\n\n**Playwright MCP Setup** (`notes/playwright-mcp-setup.md`)\n- Config path: `~/.config/mcp/playwright.json`\n- Note: Restart the MCP host after editing.",
+          "prompt_tokens": 1767,
+          "completion_tokens": 107,
+          "latencies": [
+            0.5484869480133057,
+            0.6102709770202637,
+            0.9190640449523926
+          ],
+          "http_error": null
+        },
+        {
+          "id": "E1",
+          "category": "E",
+          "lang": "ko",
+          "title": "no tool needed: multiplication",
+          "passed": true,
+          "steps": 1,
+          "reason": null,
+          "calls": [],
+          "final_text": "17 곱하기 23은 391입니다.",
+          "prompt_tokens": 519,
+          "completion_tokens": 15,
+          "latencies": [
+            0.5401279926300049
+          ],
+          "http_error": null
+        },
+        {
+          "id": "E2",
+          "category": "E",
+          "lang": "en",
+          "title": "no tool needed: multiplication",
+          "passed": true,
+          "steps": 1,
+          "reason": null,
+          "calls": [],
+          "final_text": "17 * 23 = 391",
+          "prompt_tokens": 519,
+          "completion_tokens": 12,
+          "latencies": [
+            0.5006158351898193
+          ],
+          "http_error": null
+        },
+        {
+          "id": "F1",
+          "category": "F",
+          "lang": "en",
+          "title": "missing info: send the email",
+          "passed": true,
+          "steps": 1,
+          "reason": null,
+          "calls": [],
+          "final_text": "I'm sorry, but I don't have the details for the email you want to send. Could you please provide the recipient's email address, the subject, and the body of the message?",
+          "prompt_tokens": 513,
+          "completion_tokens": 43,
+          "latencies": [
+            0.7419769763946533
+          ],
+          "http_error": null
+        }
+      ],
+      "blocked": null
+    },
+    "nemotron-3-super:cloud": {
+      "results": [
+        {
+          "id": "A1",
+          "category": "A",
+          "lang": "ko",
+          "title": "weather Busan",
+          "passed": true,
+          "steps": 2,
+          "reason": null,
+          "calls": [
+            {
+              "name": "get_weather",
+              "args": {
+                "city": "Busan"
+              }
+            }
+          ],
+          "final_text": "부산 날씨는 맑고 기온은 24도예요.",
+          "prompt_tokens": 1830,
+          "completion_tokens": 216,
+          "latencies": [
+            4.012108087539673,
+            1.605545997619629
+          ],
+          "http_error": null
+        },
+        {
+          "id": "A2",
+          "category": "A",
+          "lang": "en",
+          "title": "weather Tokyo",
+          "passed": true,
+          "steps": 2,
+          "reason": null,
+          "calls": [
+            {
+              "name": "get_weather",
+              "args": {
+                "city": "Tokyo"
+              }
+            }
+          ],
+          "final_text": "The weather in Tokyo is currently sunny with a temperature of 24°C.",
+          "prompt_tokens": 1828,
+          "completion_tokens": 114,
+          "latencies": [
+            1.4666979312896729,
+            5.2964091300964355
+          ],
+          "http_error": null
+        },
+        {
+          "id": "A3",
+          "category": "A",
+          "lang": "ko",
+          "title": "start job AI trend research",
+          "passed": true,
+          "steps": 2,
+          "reason": null,
+          "calls": [
+            {
+              "name": "start_job",
+              "args": {
+                "goal": "Investigate AI trends"
+              }
+            }
+          ],
+          "final_text": "백그라운드 작업이 시작되었습니다. 작업 ID: **job-001**, 목표: \"AI 트렌드 조사\", 상태: **started**.\n\n작업이 백그라운드에서 진행되고 있으며, 완료되면 결과를 확인할 수 있습니다. 추가로 필요한 것이 있으면 알려주세요.",
+          "prompt_tokens": 1853,
+          "completion_tokens": 254,
+          "latencies": [
+            19.586053133010864,
+            6.072649002075195
+          ],
+          "http_error": null
+        },
+        {
+          "id": "A4",
+          "category": "A",
+          "lang": "en",
+          "title": "start job quantum computing research",
+          "passed": true,
+          "steps": 2,
+          "reason": null,
+          "calls": [
+            {
+              "name": "start_job",
+              "args": {
+                "goal": "research quantum computing"
+              }
+            }
+          ],
+          "final_text": "I've started a background job to research quantum computing. The job has been created with ID **job-001** and is now running in the background. You can check on its progress later if needed.",
+          "prompt_tokens": 1841,
+          "completion_tokens": 141,
+          "latencies": [
+            5.227869987487793,
+            3.5933988094329834
+          ],
+          "http_error": null
+        },
+        {
+          "id": "A5",
+          "category": "A",
+          "lang": "ko",
+          "title": "run shell ls -la",
+          "passed": true,
+          "steps": 2,
+          "reason": null,
+          "calls": [
+            {
+              "name": "run_shell",
+              "args": {
+                "command": "ls -la"
+              }
+            }
+          ],
+          "final_text": "�쉘에서 `ls -la` 명령어를 실행한 결과입니다:\n\n```\n(mock) ran: ls -la\n```\n\n명령어는 정상적으로 실행되었습니다 (exit code: 0). 실제 파일 목록은 모의 환경에서는 표시되지 않습니다. 실제 시스템에서 실행하면 현재 디렉터리의 모든 파일과 디렉터리(숨김 파일 포함)의 상세 목록이 보일 것입니다.",
+          "prompt_tokens": 1846,
+          "completion_tokens": 232,
+          "latencies": [
+            3.3514018058776855,
+            9.31735897064209
+          ],
+          "http_error": null
+        },
+        {
+          "id": "A6",
+          "category": "A",
+          "lang": "en",
+          "title": "run shell ls -la",
+          "passed": true,
+          "steps": 2,
+          "reason": null,
+          "calls": [
+            {
+              "name": "run_shell",
+              "args": {
+                "command": "ls -la"
+              }
+            }
+          ],
+          "final_text": "I've executed the command `ls -la` in the shell. The output shows:\n\n```\n(mock) ran: ls -la\n```\n\nThis indicates the command was processed successfully in the mock environment. The actual file listing would depend on the current directory in the real system, but in this simulated environment, we receive this confirmation message.",
+          "prompt_tokens": 1836,
+          "completion_tokens": 186,
+          "latencies": [
+            1.1646628379821777,
+            2.6581571102142334
+          ],
+          "http_error": null
+        },
+        {
+          "id": "B1",
+          "category": "B",
+          "lang": "ko",
+          "title": "schedule mentor meeting tomorrow 3pm/30min",
+          "passed": true,
+          "steps": 2,
+          "reason": null,
+          "calls": [
+            {
+              "name": "add_event",
+              "args": {
+                "title": "멘토 미팅",
+                "start_iso": "2026-09-23T15:00:00",
+                "duration_min": 30
+              }
+            }
+          ],
+          "final_text": "내일(2026년 9월 23일) 오후 3시부터 30분 동안 '멘토 미팅'이 캘린더에 추가되었습니다.",
+          "prompt_tokens": 1935,
+          "completion_tokens": 426,
+          "latencies": [
+            4.305791854858398,
+            3.628129005432129
+          ],
+          "http_error": null
+        },
+        {
+          "id": "B2",
+          "category": "B",
+          "lang": "en",
+          "title": "schedule code review tomorrow 9am/45min",
+          "passed": true,
+          "steps": 2,
+          "reason": null,
+          "calls": [
+            {
+              "name": "add_event",
+              "args": {
+                "title": "Code Review",
+                "start_iso": "2026-09-23T09:00:00+09:00",
+                "duration_min": 45
+              }
+            }
+          ],
+          "final_text": "I've scheduled a 45-minute 'Code Review' event for you tomorrow (2026-09-23) at 9:00 AM in your calendar. The event has been successfully added.",
+          "prompt_tokens": 1927,
+          "completion_tokens": 530,
+          "latencies": [
+            6.348995208740234,
+            3.215388774871826
+          ],
+          "http_error": null
+        },
+        {
+          "id": "B3",
+          "category": "B",
+          "lang": "ko",
+          "title": "add dinner today 7pm/1hr",
+          "passed": true,
+          "steps": 2,
+          "reason": null,
+          "calls": [
+            {
+              "name": "add_event",
+              "args": {
+                "title": "저녁 약속",
+                "start_iso": "2026-09-22T19:00:00+09:00",
+                "duration_min": 60
+              }
+            }
+          ],
+          "final_text": "오늘 저녁 7시부터 1시간 동안의 '저녁 약속' 일정이 성공적으로 추가되었습니다.",
+          "prompt_tokens": 1943,
+          "completion_tokens": 476,
+          "latencies": [
+            4.195604085922241,
+            3.6680819988250732
+          ],
+          "http_error": null
+        },
+        {
+          "id": "C1",
+          "category": "C",
+          "lang": "ko",
+          "title": "playwright note config path chain",
+          "passed": true,
+          "steps": 3,
+          "reason": null,
+          "calls": [
+            {
+              "name": "search_notes",
+              "args": {
+                "query": "플레이라이트 MCP 설정"
+              }
+            },
+            {
+              "name": "read_note",
+              "args": {
+                "path": "notes/playwright-mcp-setup.md"
+              }
+            }
+          ],
+          "final_text": "플레이라이트 MCP 설정 노트에 따르면, 설정 파일 경로는 다음과 같습니다:\n\n**`~/.config/mcp/playwright.json`**\n\n이 파일을 수정한 후에는 MCP 호스트를 재시작해야 변경 사항이 적용됩니다.",
+          "prompt_tokens": 2933,
+          "completion_tokens": 393,
+          "latencies": [
+            4.193542957305908,
+            3.3818283081054688,
+            3.5143721103668213
+          ],
+          "http_error": null
+        },
+        {
+          "id": "C2",
+          "category": "C",
+          "lang": "en",
+          "title": "playwright note config path chain",
+          "passed": true,
+          "steps": 3,
+          "reason": null,
+          "calls": [
+            {
+              "name": "search_notes",
+              "args": {
+                "query": "Playwright MCP setup"
+              }
+            },
+            {
+              "name": "read_note",
+              "args": {
+                "path": "notes/playwright-mcp-setup.md"
+              }
+            }
+          ],
+          "final_text": "The config path for your Playwright MCP setup is: `~/.config/mcp/playwright.json`",
+          "prompt_tokens": 2908,
+          "completion_tokens": 186,
+          "latencies": [
+            1.4921197891235352,
+            1.1712021827697754,
+            3.461750030517578
+          ],
+          "http_error": null
+        },
+        {
+          "id": "C3",
+          "category": "C",
+          "lang": "ko",
+          "title": "deep work block no overlap",
+          "passed": true,
+          "steps": 3,
+          "reason": null,
+          "calls": [
+            {
+              "name": "list_events",
+              "args": {
+                "date": "2026-09-23"
+              }
+            },
+            {
+              "name": "add_event",
+              "args": {
+                "title": "딥워크",
+                "start_iso": "2026-09-23T11:00:00+09:00",
+                "duration_min": 60
+              }
+            }
+          ],
+          "final_text": "내일(2026-09-23) 일정을 확인한 결과, 다음과 같이 예정된 일정이 있습니다:\n- 팀 sync: 10:00 ~ 11:00\n- dentist: 14:00 ~ 15:00\n\n겹치지 않는 시간을 골라 **11:00 ~ 12:00**에 1시간짜리 '딥워크' 블록을 추가했습니다. \n\n추가된 일정:\n- 딥워크: 2026-09-23T11:00:00+09:00 (60분)",
+          "prompt_tokens": 3116,
+          "completion_tokens": 1036,
+          "latencies": [
+            7.531944990158081,
+            6.004536867141724,
+            9.12006402015686
+          ],
+          "http_error": null
+        },
+        {
+          "id": "C4",
+          "category": "C",
+          "lang": "en",
+          "title": "deep work block no overlap",
+          "passed": true,
+          "steps": 4,
+          "reason": null,
+          "calls": [
+            {
+              "name": "list_events",
+              "args": {
+                "date": "2026-09-23"
+              }
+            },
+            {
+              "name": "add_event",
+              "args": {
+                "title": "Deep work",
+                "start_iso": "2026-09-23T11:00:00+09:00",
+                "duration_min": 60
+              }
+            },
+            {
+              "name": "list_events",
+              "args": {
+                "date": "2026-09-23"
+              }
+            }
+          ],
+          "final_text": "I've checked tomorrow's events (September 23, 2026) and found:\n- Team sync: 10:00–11:00\n- Dentist: 14:00–15:00\n\nI selected a free slot from **11:00–12:00** and added a 1‑hour \"Deep work\" block for that time. The event has been successfully created.",
+          "prompt_tokens": 4346,
+          "completion_tokens": 1931,
+          "latencies": [
+            5.343387842178345,
+            8.518770933151245,
+            5.586468935012817,
+            8.310313940048218
+          ],
+          "http_error": null
+        },
+        {
+          "id": "C5",
+          "category": "C",
+          "lang": "ko",
+          "title": "focus time block no overlap",
+          "passed": true,
+          "steps": 3,
+          "reason": null,
+          "calls": [
+            {
+              "name": "list_events",
+              "args": {
+                "date": "2026-09-23"
+              }
+            },
+            {
+              "name": "add_event",
+              "args": {
+                "title": "집중 시간",
+                "start_iso": "2026-09-23T13:00:00+09:00",
+                "duration_min": 60
+              }
+            }
+          ],
+          "final_text": "내일(2026‑09‑23) 일정에서 비어 있는 시간을 확인한 결과, **13:00 ~ 14:00**에 1시간짜리 “집중 시간” 블록을 추가했습니다.  \n\n- 제목: 집중 시간  \n- 시작: 2026‑09‑23T13:00:00+09:00  \n- 기간: 60분  \n\n다른 일정이 겹치지 않도록 선택했으며, 필요 시 언제든 조정해 드릴 수 있습니다.",
+          "prompt_tokens": 3108,
+          "completion_tokens": 697,
+          "latencies": [
+            4.42303991317749,
+            7.20811915397644,
+            5.042023181915283
+          ],
+          "http_error": null
+        },
+        {
+          "id": "D1",
+          "category": "D",
+          "lang": "ko",
+          "title": "calendar read-only distractor",
+          "passed": true,
+          "steps": 2,
+          "reason": null,
+          "calls": [
+            {
+              "name": "list_events",
+              "args": {
+                "date": "2026-09-23"
+              }
+            }
+          ],
+          "final_text": "내일(2026-09-23) 일정은 다음과 같습니다:\n\n- 10:00 ~ 11:00: Team sync  \n- 14:00 ~ 15:00: Dentist",
+          "prompt_tokens": 1892,
+          "completion_tokens": 308,
+          "latencies": [
+            1.9113259315490723,
+            6.3441832065582275
+          ],
+          "http_error": null
+        },
+        {
+          "id": "D2",
+          "category": "D",
+          "lang": "en",
+          "title": "calendar read-only distractor",
+          "passed": true,
+          "steps": 2,
+          "reason": null,
+          "calls": [
+            {
+              "name": "list_events",
+              "args": {
+                "date": "2026-09-23"
+              }
+            }
+          ],
+          "final_text": "Tomorrow's calendar:\n- 10:00 – 11:00: Team sync\n- 14:00 – 15:00: Dentist",
+          "prompt_tokens": 1888,
+          "completion_tokens": 293,
+          "latencies": [
+            4.777408599853516,
+            2.5748560428619385
+          ],
+          "http_error": null
+        },
+        {
+          "id": "D3",
+          "category": "D",
+          "lang": "en",
+          "title": "search notes not email distractor",
+          "passed": true,
+          "steps": 3,
+          "reason": null,
+          "calls": [
+            {
+              "name": "search_notes",
+              "args": {
+                "query": "Playwright"
+              }
+            },
+            {
+              "name": "read_note",
+              "args": {
+                "path": "notes/playwright-mcp-setup.md"
+              }
+            }
+          ],
+          "final_text": "Here are your notes about Playwright:\n\n**File:** `notes/playwright-mcp-setup.md`  \n**Title:** Playwright MCP Setup  \n**Content:**\n```\nPlaywright MCP setup notes.\nconfig path: ~/.config/mcp/playwright.json\nRestart the MCP host after editing.\n```",
+          "prompt_tokens": 2907,
+          "completion_tokens": 333,
+          "latencies": [
+            3.1765387058258057,
+            1.9603290557861328,
+            3.5491867065429688
+          ],
+          "http_error": null
+        },
+        {
+          "id": "E1",
+          "category": "E",
+          "lang": "ko",
+          "title": "no tool needed: multiplication",
+          "passed": true,
+          "steps": 1,
+          "reason": null,
+          "calls": [],
+          "final_text": "17 곱하기 23은 391입니다.",
+          "prompt_tokens": 888,
+          "completion_tokens": 134,
+          "latencies": [
+            3.164777994155884
+          ],
+          "http_error": null
+        },
+        {
+          "id": "E2",
+          "category": "E",
+          "lang": "en",
+          "title": "no tool needed: multiplication",
+          "passed": true,
+          "steps": 1,
+          "reason": null,
+          "calls": [],
+          "final_text": "17 × 23 = 391.",
+          "prompt_tokens": 886,
+          "completion_tokens": 137,
+          "latencies": [
+            4.988476037979126
+          ],
+          "http_error": null
+        },
+        {
+          "id": "F1",
+          "category": "F",
+          "lang": "en",
+          "title": "missing info: send the email",
+          "passed": true,
+          "steps": 1,
+          "reason": null,
+          "calls": [],
+          "final_text": "I'd be happy to help you send an email! However, I need a few more details:\n\n1. **To**: Who should receive the email? (email address)\n2. **Subject**: What should the subject line be?\n3. **Body**: What message would you like to include in the email?\n\nCould you please provide these details so I can send the email for you?",
+          "prompt_tokens": 880,
+          "completion_tokens": 121,
+          "latencies": [
+            3.473273754119873
+          ],
+          "http_error": null
+        }
+      ],
+      "blocked": null
+    }
+  }
+}

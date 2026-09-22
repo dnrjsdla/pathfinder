@@ -121,3 +121,73 @@ ledger alone. 47 offline tests. Core so far about 800 lines against a 5,500 budg
 
 `flush()` without `fsync`; `_write` without `drain()` (a slow client grows memory); an unbounded
 session queue; sessions are never evicted. None loses data; each is a note for partition 7.
+
+## 2026-09-22 — Before partition 2: the harness-engineering review
+
+The owner asked whether a multi-agent harness (Anthropic, "Harness design for long-running
+application development": planner / generator / evaluator, context resets, "every component encodes
+an assumption about what the model cannot do alone") makes steer unnecessary. Reviewed against the
+blueprint: the structure is already there (§2 principle 3, §7 workers with independent context, a
+code-only evaluating side, the reviewer/implementer split in §16), and it makes steer *rarer*
+(short front-lane turns; a job is cheaper to restart than to steer) but not absent - the place
+steer is worth anything is the answer the user is watching stream, which is one model writing
+right now. Partition 2 therefore builds steer as a primitive of `loop.run` (inject one user
+message at the next safe point), which is exactly what steers a worker in partition 4, because
+every trigger runs the same loop. m2 stays: whether a model keeps its thread after an injected line
+is model behaviour, not harness structure. Decisions D16-D18 record the partition's three choices.
+
+### Open paths added
+
+- **A model evaluator for job results (partition 4 entrance).** The article's evaluator earns its
+  cost on long, subjective, autonomous outputs - here, jobs. Chat turns are watched by the user,
+  who is the evaluator. The free-plan models are weaker than the ones the article *removed* the
+  evaluator for, so the need is more likely, not less. Measure at the entrance of partition 4: N job
+  outputs with and without an evaluator pass; add the row only if the thumbs-up rate differs by a
+  margin the owner sets.
+- **In-session compaction (partition 5).** Every turn resends `state.history()` in full; m6 already
+  showed user turns dominate the day because history grows. The two-hour session reset is the only
+  clean slate today. Natural place: after the consolidation pass has written the wiki, fold the
+  older part of the session into a summary. Not built until the memory partition owns it.
+
+### m2 — does a mid-turn steer break the conversation? (`bench/m2_steer.py`, 20 tasks, scored by code)
+
+Ten tool-boundary tasks (A: the steer arrives after the first tool result) and ten mid-stream
+tasks (B: the stream is cut by the adapter's `cancel` after three lines, then partial + steer).
+Traces in `docs/measurements/m2-run*.json`; `--rescore` re-runs the scorers on them without
+requests. Pass line (owner): reflected >= 18/20 and kept >= 18/20 per family.
+
+| run | mid-stream envelope | gpt-oss:120b refl / kept | gemma4:31b refl / kept |
+|---|---|---|---|
+| 1 | none (bare user text after the partial) | A 10/10 · 9/10, B 8/10 · **3/10** | A 8/8 · 7/8, B 10/10 · **6/10** |
+| 2 | "interrupted mid-answer; continue from where it stopped, do not repeat" | B 7/10 · 8/10 | B 10/10 · 9/10 |
+| 3 | run 2 + "apply the instruction below" | B 7/10 · 7/10 | B 10/10 · 8/10 |
+
+(A was run once; the envelope only touches B. gemma4 ran two A tasks with the read and the
+write in parallel before the steer could be sent - excluded as `too_late`, not scored.)
+
+- **Tool-boundary steer works**: reflected 10/10 and 8/8, kept 9/10 and 7/8. The one miss is
+  the same on both families (A6): a steer that replaced the first half of the request made the
+  model drop the second half ("...and then the weather in Seoul").
+- **Mid-stream steer fails the line in every configuration, and the bare form is the worst.**
+  Without an envelope both families rewrote the list from 1 when told "stop at 20" - the model
+  cannot know its answer was cut unless the harness says so. The envelope fixed that (B2/B6
+  pass everywhere after run 1) and asked-back answers ("backwards from where?") disappeared.
+  What remains: "from here, backwards" read as "count to the end, then backwards" or "from 40"
+  (B3/B9, one steer type, so the two failures are correlated); gpt-oss ignoring "continue in
+  English" once the envelope says "continue" (B4 in runs 2 and 3, B7 in run 2); one restart
+  despite the envelope (gpt-oss B10 run 3); and lists that overshoot the requested count by
+  three because the model forgot how many items were already written (gemma4 B4, gpt-oss B5).
+- **D12's fallback is not an escape.** "Interrupt, then a new turn" puts the same partial and
+  the same user text in front of the model - it is run 1, the bare form, kept 3/10 and 6/10.
+  The choice is between the enveloped cut (70-100% reflected, 70-90% kept) and not accepting a
+  mid-stream interjection at all.
+- Review before the run (reviewer, opus, against a fake SSE server) found seven blockers: every
+  B task crashed on a missing key; the pre/post-steer split assumed one tool call per step, so
+  a parallel call scored a perfect steer as a miss; HTTP errors and untooled answers were billed
+  to the model; the B scorers failed correct answers on a preamble, a markdown number or a flag
+  emoji (regional indicators sit below the emoji range); the "continue in English" scorer could
+  not see a translated restart; a buffered whole answer plus the usage chunk read as a genuine
+  cut. All fixed before any credit was spent; self-check went from 80 to 93 assertions. One more
+  scorer defect surfaced in run 2 and was fixed by rescoring the saved traces: a cut mid-word
+  leaves a fragment ("미" of "미국") that is not an item, and re-typing it is correct.
+- Cost: about 60k tokens over the three runs, one to two seconds per request.

@@ -78,3 +78,28 @@ projection then.
 **D15. Work-context and "CLI" signals come from all three: attaching a PATHFINDER screen, a shell
 hook, and Claude Code hooks; each is switched on during onboarding.** — *Reversed if* a source
 never leads to an utterance in two weeks of real use: switch that sense off.
+
+## Partition 2 (decided 2026-09-22)
+
+**D16. An approval gate ends the turn** (`turn_end {kind: "gated"}`); the in-flight messages are
+written into the `approval_pending` event, and an `approve` starts a new turn from that point. —
+The wait lives in the ledger, so it survives a restart and a deleted `state.db` for free, and the
+lane stays free. A blocking worker thread would die with the daemon; Mark.5's "collect writes,
+approve after the answer" only made sense in code mode (it breaks write-then-verify chains under
+native tool calling). — *Reversed if* real use shows the "continue" context is lost because another
+turn ran in between more than once a week: pin the gated turn's context to the front of the next
+turn.
+
+**D17. A `say` that arrives while a turn is running is a steer**, not a queued turn. — D12's own
+sentence: when the user speaks, the assistant hears it. A separate `steer` message would push the
+"is this a steer or a new turn" judgment into the screen, which would rebuild this rule there. —
+*Reversed if* m2 fails (then D12's fallback: interrupt, new turn) or users demonstrably queue
+follow-up questions while an answer streams.
+
+**D18. m2 runs on the default model and one second family (gemma4).** — Mechanism test, but m1
+showed families differ in how they treat arguments; two families cost about 0.24M tokens. —
+*Reversed if* the two disagree by more than 10 points: run the third.
+
+**Approval is explicit** (`approve`/`deny` messages, a `y` key in the screen later). A "yes" in
+conversation is never read as approval by the model: the evaluating side has no model (blueprint
+§2). Not a decision with a reversal condition — a principle already agreed.

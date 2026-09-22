@@ -45,8 +45,10 @@ class SourceInvariants(unittest.TestCase):
             self.assertNotRegex(text, r"start_server\(|AF_INET", f"{name} opens TCP; the daemon is unix-socket only")
 
     def test_sense_files_under_150_lines(self):
+        """A leading underscore (`_eventkit.py`) marks an adapter shared by senses, not a sense
+        itself - outside the budget, same as `__init__.py`."""
         for p in (SRC / "senses").glob("*.py"):
-            if p.name == "__init__.py":
+            if p.name.startswith("_"):
                 continue
             n = len(p.read_text(encoding="utf-8").splitlines())
             self.assertLessEqual(n, 150, f"{p.name} is {n} lines, over the sense budget of 150")

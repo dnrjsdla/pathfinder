@@ -1,8 +1,9 @@
+import os
 import tempfile
 import unittest
 from pathlib import Path
 
-from pathfinder import clock, config, rules
+from pathfinder import clock, config, rules, signals
 from pathfinder.senses import schedule, shell
 from pathfinder.state import Today
 
@@ -41,6 +42,41 @@ class ScheduleFiresTest(unittest.TestCase):
         self.assertEqual(schedule.poll({"_home": self.home}, due_ts - 60), [])
         self.assertEqual(len(config.load(self.home)["schedules"]), 1)
 
+    def test_schedule_repeat_only_fires_once_after_being_down(self):
+        """Blocker 3: a daily schedule missed for a week must fire ONE signal, not one per
+        missed day, and `at` must land in the future in a single poll."""
+        config.set(self.home, "schedules", [
+            {"id": "b", "at": "2026-09-15 09:00", "repeat": "daily", "text": "stand-up"},
+        ])
+        now, _ = clock.parse_local("2026-09-22 09:30")  # 7 days and 30 minutes later
+        fired = schedule.poll({"_home": self.home}, now)
+        self.assertEqual(len(fired), 1)
+        row = config.load(self.home)["schedules"][0]
+        next_ts, _ = clock.parse_local(row["at"])
+        self.assertGreater(next_ts, now)
+        # polling again right away must not fire again
+        self.assertEqual(schedule.poll({"_home": self.home}, now), [])
+
+    def test_schedule_tools_use_the_bound_home_not_config_home(self):
+        """Should-fix 8: the sense's tools must use the ONE home `signals.load` bound, never a
+        second answer from `config.home()` (which reads PATHFINDER_HOME) - they can legitimately
+        differ, as in this test and in the review's own repro."""
+        old = os.environ.get("PATHFINDER_HOME")
+        other_home = Path(tempfile.mkdtemp())
+        os.environ["PATHFINDER_HOME"] = str(other_home)
+        try:
+            signals.load({"senses": {"schedule": {}}}, self.home)  # binds schedule.HOME = self.home
+            self.assertEqual(schedule.HOME, self.home)
+            schedule._add_schedule("2026-09-30 09:00", "planted", "none")
+            self.assertEqual(len(config.load(self.home).get("schedules", [])), 1)
+            self.assertEqual(config.load(other_home).get("schedules", []), [])
+        finally:
+            if old is None:
+                os.environ.pop("PATHFINDER_HOME", None)
+            else:
+                os.environ["PATHFINDER_HOME"] = old
+            schedule.HOME = None
+
 
 class ShellBuildTest(unittest.TestCase):
     def test_build_kind_and_summary(self):
@@ -58,8 +94,8 @@ class ShellBuildTest(unittest.TestCase):
 
 class ShellThreeFailuresTest(unittest.TestCase):
     def test_shell_three_failures_speak_one_silent(self):
-        """The shipped RULES.md: fewer than 3 failures recorded today stays silent; the 3rd
-        (state.today's count_over reaching 3) speaks."""
+        """The shipped RULES.md: fewer than 3 failures in the last 10 minutes stays silent; the
+        3rd occurrence itself (count_over's window includes the current signal) speaks."""
         parsed = rules.parse(
             rules.DEFAULT_RULES_PATH.read_text(encoding="utf-8"),
             conditions={**rules.CORE_CONDITIONS, **shell.CONDITIONS},
@@ -67,12 +103,12 @@ class ShellThreeFailuresTest(unittest.TestCase):
         )
         sig = shell.build({"cmd": "flaky", "exit": 1, "seconds": 1, "cwd": "/x"}, now=1000.0)
         actions = []
-        for count in (0, 1, 2, 3):
+        for count in (1, 2, 3):  # this failure IS the Nth occurrence, not one before it
             today = Today(spoken=0, judgments=0, last_signal_ts=None, burst=0,
-                         kind_counts={"command_failed": count})
+                         recent_counts={"command_failed": count})
             action, _why = rules.decide(sig, parsed, {}, today, 1000.0)
             actions.append(action)
-        self.assertEqual(actions, ["silence", "silence", "silence", "speak"])
+        self.assertEqual(actions, ["silence", "silence", "speak"])
 
     def test_command_finished_speaks_only_past_five_minutes(self):
         parsed = rules.parse(

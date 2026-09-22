@@ -36,9 +36,61 @@ precmd() {
 swallows anything the CLI might print. Neither the command's exit code nor its timing is
 affected - `precmd` already ran after the command finished either way.
 
-## Claude Code hooks (later - the senses do not exist yet)
+## Claude Code hooks
 
-Partition 3's next step adds a `claude_code` sense reading `Stop` and `Notification` hook
-payloads from Claude Code's `settings.json` (`pathfinder signal claude_code '{"event": ...,
-"cwd": ..., "message": ...}'`), the same fire-and-forget shape as above. Left here as a
-placeholder heading so this file does not need restructuring when it lands.
+Turn the sense on with `pathfinder config set senses '{"claude_code": {}}'` (merge it into
+whatever `senses` already holds), then add this block to Claude Code's `settings.json`. Each
+hook gets the event's JSON on stdin; the one-liner below reads `cwd`/`message` out of it and
+backgrounds the CLI call the same way the shell hook does, so a slow or stopped daemon never
+holds the hook up:
+
+```json
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -c \"import json,sys,subprocess; d=json.load(sys.stdin); subprocess.Popen(['pathfinder','signal','claude_code',json.dumps({'event':'Stop','cwd':d.get('cwd',''),'message':d.get('message','')})])\""
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -c \"import json,sys,subprocess; d=json.load(sys.stdin); subprocess.Popen(['pathfinder','signal','claude_code',json.dumps({'event':'Notification','cwd':d.get('cwd',''),'message':d.get('message','')})])\""
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+`Stop` becomes `task_done`, `Notification` becomes `needs_input`; both speak only when
+`presence` says the user is away from PATHFINDER itself (RULES.md's `away` condition) - otherwise
+they are silent, since the user is presumably already looking at Claude Code's own output.
+
+## calendar, reminders, mail
+
+Poll senses, no hook needed - just turn them on:
+
+```bash
+pathfinder config set senses '{"calendar": {}, "reminders": {}}'   # needs pyobjc-framework-EventKit
+pathfinder config set senses '{"mail": {"host": "imap.example.com", "user": "you@example.com"}}'
+```
+
+`calendar`/`reminders` need `pyobjc-framework-EventKit` installed and Calendar/Reminders access
+granted to the terminal running the daemon (System Settings > Privacy & Security); without it
+they log one `error` event and stay quiet from then on (`pathfinder/senses/_eventkit.py`).
+`mail`'s password is never in config - store it once with:
+
+```bash
+security add-generic-password -s pathfinder-mail -a you@example.com -w
+```
+
+(`-s` must match `keychain_service`, default `pathfinder-mail`; `-a` must match `user`.)

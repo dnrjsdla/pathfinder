@@ -40,7 +40,8 @@ class Today:
     judgments: int            # judgment events today - the judgment_cap
     last_signal_ts: float | None  # ts of the last signal turn opened (rate limit)
     burst: int                # signal turns opened in the last 60 s
-    kind_counts: dict         # kind -> decisions today of that kind (count_over)
+    recent_counts: dict       # kind -> signals of that kind in the last 600 s, incl. this one (count_over)
+    away: bool = True         # target session's presence is stale/idle (claude_code's "away")
 
 
 class State:
@@ -200,13 +201,20 @@ class State:
         row = self.db.execute("SELECT id FROM deliveries ORDER BY ts DESC LIMIT 1").fetchone()
         return row[0] if row else None
 
+    def has_delivery(self, id: str) -> bool:
+        return self.db.execute("SELECT 1 FROM deliveries WHERE id = ?", (id,)).fetchone() is not None
+
     def seen(self, key: str, since: float) -> bool:
         """True when `key` was recorded (any sense, any kind) at or after `since` - the 24 h
         dedupe window is the caller's `since = now - 86400`."""
         row = self.db.execute("SELECT 1 FROM signals WHERE key = ? AND ts >= ?", (key, since)).fetchone()
         return row is not None
 
-    def today(self, now: float | None = None) -> Today:
+    def today(self, now: float | None = None, session: str | None = None,
+             idle_threshold_s: float | None = None) -> Today:
+        """`session`/`idle_threshold_s` (only the daemon's signal-turn triage passes them) fill
+        in `away` - a predicate (claude_code's) only ever sees `(signal, value, today, now)`,
+        never `rules` or `state` itself, so the threshold has to be applied here, not there."""
         now = now if now is not None else time.time()
         start = clock.day_start(now)
         spoken = self.db.execute(
@@ -215,10 +223,17 @@ class State:
         last_signal_ts = self.db.execute("SELECT MAX(ts) FROM signal_turns").fetchone()[0]
         burst = self.db.execute(
             "SELECT COUNT(*) FROM signal_turns WHERE ts >= ?", (now - 60,)).fetchone()[0]
-        kind_counts = dict(self.db.execute(
-            "SELECT s.kind, COUNT(*) FROM decisions d JOIN signals s ON d.signal_key = s.key "
-            "WHERE d.ts >= ? GROUP BY s.kind", (start,)).fetchall())
-        return Today(spoken, judgments, last_signal_ts, burst, kind_counts)
+        # count_over's window (should-fix 5): signals of a kind in the last 10 minutes, not a
+        # whole-day count - read from `signals`, not `decisions`, because a signal is recorded
+        # before its own decision is, so "including this one" falls out for free.
+        recent_counts = dict(self.db.execute(
+            "SELECT kind, COUNT(*) FROM signals WHERE ts >= ? GROUP BY kind", (now - 600,)).fetchall())
+        away = True
+        if session is not None and idle_threshold_s is not None:
+            row = self.presence(session)
+            fresh = row is not None and now - row["ts"] < 60
+            away = not fresh or row["idle_s"] >= idle_threshold_s
+        return Today(spoken, judgments, last_signal_ts, burst, recent_counts, away)
 
     def undelivered(self) -> list:
         """Notices from a `decision speak` never confirmed by a `delivery` - what a daemon

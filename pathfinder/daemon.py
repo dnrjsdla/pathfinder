@@ -14,7 +14,7 @@ import time
 import uuid
 from pathlib import Path
 
-from . import clock, config, deliver, loop, rules as rules_mod, signals, tools
+from . import clock, config, loop, rules as rules_mod, signals, tools
 from .broker import Broker, Gate
 from .deliver import Notice, Outbox
 from .ledger import Ledger
@@ -27,6 +27,7 @@ PROMPT = Path(__file__).parent / "prompts" / "system.txt"
 LINE_LIMIT = 1 << 20  # one NDJSON line; asyncio's 64 KiB default is too small for a pasted file
 LEDGER_CLIP = 2000  # a tool result recorded in the ledger is clipped shorter than the 8000-char read clip
 SIGNAL_TURN_BUDGET = 4  # D20: a signal turn is a few tool calls plus a sentence, not a conversation
+PUSH_FIELDS_LIMIT = 4096  # a pushed signal's `fields` text goes verbatim into the envelope
 
 
 def default_step_factory(cfg, control):
@@ -138,7 +139,7 @@ class Daemon:
             await self.server.serve_forever()
 
     async def close(self):
-        self.sense_loop.stop()
+        await self.sense_loop.stop()
         for s in self.sessions.values():
             if s.worker:
                 s.worker.cancel()
@@ -189,7 +190,7 @@ class Daemon:
                     _write(writer, {"type": "error", "message": "expected one JSON object per line with a \"type\""})
                     continue  # a bad line never costs the connection
                 if kind == "attach":
-                    session = self.attach(writer, msg.get("session"), session)
+                    session = self.attach(writer, msg.get("session"), session, msg.get("cwd"))
                 elif kind == "say":
                     text = msg.get("text")
                     if not isinstance(text, str) or not text.strip():
@@ -229,11 +230,20 @@ class Daemon:
                     if sense is None or not sense.push_capable or not isinstance(fields, dict):
                         _write(writer, {"type": "error", "message": f"unknown or non-push sense: {sense_name!r}"})
                         continue
-                    self.push_signal(sense.module.build(fields))
+                    if len(json.dumps(fields, ensure_ascii=False)) > PUSH_FIELDS_LIMIT:
+                        _write(writer, {"type": "error", "message": "fields too large (4 KB limit)"})
+                        continue
+                    try:
+                        signal = sense.module.build(fields)
+                    except Exception as e:  # the only untrusted local input - never take the daemon down
+                        _write(writer, {"type": "error", "message": f"bad fields for {sense_name}: {e}"})
+                        continue
+                    self.push_signal(signal)
                 elif kind == "presence":
                     idle_s = msg.get("idle_s")
-                    if not isinstance(idle_s, (int, float)) or isinstance(idle_s, bool):
-                        _write(writer, {"type": "error", "message": "presence needs a numeric idle_s"})
+                    if (not isinstance(idle_s, (int, float)) or isinstance(idle_s, bool)
+                            or not (0 <= idle_s <= 86400)):
+                        _write(writer, {"type": "error", "message": "presence needs a numeric idle_s in [0, 86400]"})
                         continue
                     session = session or self.attach(writer, None, None)
                     self.record("presence", session=session.id, origin="user", idle_s=idle_s)
@@ -244,8 +254,8 @@ class Daemon:
                         _write(writer, {"type": "error", "message": "react needs \"vote\": \"up\"|\"down\""})
                         continue
                     delivery_id = msg.get("id") or self.state.latest_delivery()
-                    if delivery_id is None:
-                        _write(writer, {"type": "error", "message": "no delivery to react to"})
+                    if delivery_id is None or not self.state.has_delivery(delivery_id):
+                        _write(writer, {"type": "error", "message": "no such delivery to react to"})
                         continue
                     self.record("reaction", origin="user", delivery_id=delivery_id, vote=vote)
                 else:
@@ -262,7 +272,7 @@ class Daemon:
             s.worker = asyncio.create_task(self.lane(s))
         return s
 
-    def attach(self, writer, sid, current):
+    def attach(self, writer, sid, current, cwd=None):
         if current:
             current.conns.discard(writer)
         if not isinstance(sid, str):
@@ -277,6 +287,10 @@ class Daemon:
             self.record("session_start", session=sid)
         s = self._session(sid)
         s.conns.add(writer)
+        if isinstance(cwd, str):
+            sense = self.senses.get("attach")
+            if sense is not None and sense.push_capable:
+                self.push_signal(sense.module.build({"cwd": cwd}))
         _write(writer, {"type": "attached", "session": sid, "resumed": bool(known),
                         "turns": known["turns"] if known else 0})
         return s
@@ -300,6 +314,15 @@ class Daemon:
             item_kind, payload = await s.queue.get()
             if item_kind == "signal":
                 await self.run_signal_turn(s, [payload] + s.queue.drain_signals())
+                continue
+            if item_kind == "signal_ready":
+                # a `speak` set whose rate-limit hold has (or may have) elapsed - re-check
+                # rather than re-triage: the decision was already made and recorded as such.
+                wait = signals.hold_for(self.state, self.rules)
+                if wait > 0:
+                    asyncio.get_running_loop().call_later(wait, s.queue.put_nowait, ("signal_ready", payload))
+                else:
+                    await self._signal_model_turn(s, payload)
                 continue
             turn = uuid.uuid4().hex[:12]
             leftover = []
@@ -346,7 +369,7 @@ class Daemon:
         against what was on disk *before* this call, so the first occurrence of a key always
         goes through and only a later repeat of the same key within 24 h is silenced."""
         now = time.time()
-        dup = self.state.seen(signal.key, since=now - 86400)
+        dup = signals.seen_recently(self.state, signal.key, now)
         self.record("signal", origin="signal", trust=signal.trust, sense=signal.sense,
                     kind=signal.kind, key=signal.key, summary=signal.summary, fields=signal.fields)
         if dup:
@@ -364,18 +387,15 @@ class Daemon:
         return self._session(sid)
 
     async def run_signal_turn(self, s, bundle) -> None:
-        """Triage a bundle through rules.decide (D8): a defer/silence/ask_model result is
-        recorded and done for free; only the `speak` set opens the one model turn (D20)."""
-        wait = signals.hold_for(self.state, self.rules)
-        if wait > 0:
-            await asyncio.sleep(wait)
-            for sig in bundle:
-                s.queue.put_nowait(("signal", sig))  # re-queued whole, not discarded
-            return
+        """Triage the whole bundle through rules.decide (D8) FIRST, unconditionally: a
+        defer/silence/ask_model result is recorded and done for free. Only the resulting
+        `speak` set is subject to the rate-limit hold, and that hold never blocks the lane
+        (`signal_ready` + `call_later`, not a sleep here) - the reviewer's blocker was a
+        silenced signal freezing the next `say` for up to min_interval_s."""
         lists = rules_mod.user_lists(self.home)
         to_speak = []
         for sig in bundle:
-            today = self.state.today()
+            today = self.state.today(session=s.id, idle_threshold_s=self.rules.idle_threshold_s)
             action, why = rules_mod.decide(sig, self.rules, lists, today, time.time())
             if action == "ask_model":
                 if today.judgments >= self.rules.judgment_cap:
@@ -385,11 +405,21 @@ class Daemon:
                     self.record("judgment", session=s.id, origin="signal", signal_key=sig.key,
                                 speak=speak, reason=reason)
                     action, why = ("speak" if speak else "silence"), "judged"
+            # should-fix 4: the budget is spent per bundle as it is built, not only once the
+            # turn ends - a bundle of 5 with daily_budget=1 must not speak all 5.
+            if (action == "speak" and sig.trust != "user" and self.rules.daily_budget
+                    and today.spoken + len(to_speak) >= self.rules.daily_budget):
+                action, why = "defer", "daily budget spent"
             if action == "speak":
                 to_speak.append((sig, why))  # recorded once, with the notice, once it exists
             else:
                 self.record("decision", session=s.id, origin="signal", signal_key=sig.key, action=action, why=why)
-        if to_speak:
+        if not to_speak:
+            return
+        wait = signals.hold_for(self.state, self.rules)
+        if wait > 0:
+            asyncio.get_running_loop().call_later(wait, s.queue.put_nowait, ("signal_ready", to_speak))
+        else:
             await self._signal_model_turn(s, to_speak)
 
     async def _signal_model_turn(self, s, to_speak) -> None:
@@ -399,54 +429,58 @@ class Daemon:
         turn = uuid.uuid4().hex[:12]
         sigs = [sig for sig, _why in to_speak]
         self.record("turn_start", session=s.id, turn=turn, origin="signal")
-        messages = [
-            {"role": "system", "content": self.system_prompt},
-            {"role": "system", "content": clock.now_line()},
-            {"role": "user", "content": signals.render_envelope(sigs)},  # never recorded as `user`
-        ]
-        cfg = config.load(self.home)
         control = TurnControl()
-        aio = asyncio.get_running_loop()
-        out_q = asyncio.Queue()
-
-        def emit(kind, payload):
-            aio.call_soon_threadsafe(out_q.put_nowait, (kind, payload))
-
-        broker = Broker(tools.TOOLS, "signal", cfg["grants"], control=control, emit=emit)
-        step = self.step_factory(cfg, control)
-
-        def work():
-            try:
-                return loop.run(step, messages, call_tool=broker.call, emit=emit,
-                                budget=SIGNAL_TURN_BUDGET, control=control)
-            finally:
-                aio.call_soon_threadsafe(out_q.put_nowait, (None, None))
-
+        s.control, s.turn = control, turn  # note 13: without this, is_running(s) is False mid-turn
         answer, gated, ending = "", False, {"kind": "answer"}
         try:
-            running = asyncio.create_task(asyncio.to_thread(work))
-            while True:
-                kind, payload = await out_q.get()
-                if kind is None:
-                    break
-                if kind == "tool_call":
-                    recorded = {**payload, "args": _clip_for_ledger(payload["args"])}
-                    self.record("tool_call", session=s.id, turn=turn, origin="signal", **recorded)
-                elif kind == "tool_result":
-                    recorded = {**payload, "result": _clip_for_ledger(payload["result"])}
-                    self.record("tool_result", session=s.id, turn=turn, origin="signal", **recorded)
-            out = await running
-            answer = out.text
-            ending = {"kind": out.kind, "steps": out.steps, "usage": out.usage}
-        except Gate:
-            # A signal turn has no history to resume into and policy already asks for every
-            # write/network call from origin "signal" - the attempt is dropped, not approved
-            # later; the notice still goes out with the sense's own summary.
-            gated, ending = True, {"kind": "gated"}
-        except LLMError as e:
-            # summaries alone (D20's own fallback); the blocked call is a fact worth one line
-            self.record("error", session=s.id, turn=turn, origin="signal", status=e.status, message=str(e)[:300])
-            ending = {"kind": "error"}
+            messages = [
+                {"role": "system", "content": self.system_prompt},
+                {"role": "system", "content": clock.now_line()},
+                {"role": "user", "content": signals.render_envelope(sigs)},  # never recorded as `user`
+            ]
+            cfg = config.load(self.home)
+            aio = asyncio.get_running_loop()
+            out_q = asyncio.Queue()
+
+            def emit(kind, payload):
+                aio.call_soon_threadsafe(out_q.put_nowait, (kind, payload))
+
+            broker = Broker(tools.TOOLS, "signal", cfg["grants"], control=control, emit=emit)
+            step = self.step_factory(cfg, control)
+
+            def work():
+                try:
+                    return loop.run(step, messages, call_tool=broker.call, emit=emit,
+                                    budget=SIGNAL_TURN_BUDGET, control=control)
+                finally:
+                    aio.call_soon_threadsafe(out_q.put_nowait, (None, None))
+
+            try:
+                running = asyncio.create_task(asyncio.to_thread(work))
+                while True:
+                    kind, payload = await out_q.get()
+                    if kind is None:
+                        break
+                    if kind == "tool_call":
+                        recorded = {**payload, "args": _clip_for_ledger(payload["args"])}
+                        self.record("tool_call", session=s.id, turn=turn, origin="signal", **recorded)
+                    elif kind == "tool_result":
+                        recorded = {**payload, "result": _clip_for_ledger(payload["result"])}
+                        self.record("tool_result", session=s.id, turn=turn, origin="signal", **recorded)
+                out = await running
+                answer = out.text
+                ending = {"kind": out.kind, "steps": out.steps, "usage": out.usage}
+            except Gate:
+                # A signal turn has no history to resume into and policy already asks for every
+                # write/network call from origin "signal" - the attempt is dropped, not approved
+                # later; the notice still goes out with the sense's own summary.
+                gated, ending = True, {"kind": "gated"}
+            except LLMError as e:
+                # summaries alone (D20's own fallback); the blocked call is a fact worth one line
+                self.record("error", session=s.id, turn=turn, origin="signal", status=e.status, message=str(e)[:300])
+                ending = {"kind": "error"}
+        finally:
+            s.control, s.turn = None, ""
 
         summaries = "\n".join(sig.summary for sig in sigs)
         text = f"{summaries}\n{answer}".strip() if answer and not gated else summaries

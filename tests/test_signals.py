@@ -1,9 +1,11 @@
+import asyncio
 import sys
+import time
 import types
 import unittest
 
 from pathfinder import signals
-from pathfinder.signals import Signal
+from pathfinder.signals import Sense, Signal
 
 
 class FakeState:
@@ -93,6 +95,41 @@ class SenseValidationTest(unittest.TestCase):
         self._register("_fake_bad_trust", TRUST="nope", KINDS={"foo": ("always", "-", "silence", "")})
         with self.assertRaises(ValueError):
             signals.load({"senses": {"_fake_bad_trust": {}}})
+
+    def test_load_binds_home_onto_the_module(self):
+        """Should-fix 8: a sense's tool handlers get no `options` argument, so `load` binds the
+        same home it injects as `_home` onto the module itself as `HOME` - one source, not two."""
+        mod = self._register("_fake_home", KINDS={"foo": ("always", "-", "silence", "")})
+        loaded = signals.load({"senses": {"_fake_home": {}}}, home="/tmp/some-home")
+        self.assertEqual(mod.HOME, "/tmp/some-home")
+        self.assertEqual(loaded[0].options["_home"], "/tmp/some-home")
+
+
+class SenseLoopStopTest(unittest.TestCase):
+    def test_stop_awaits_an_inflight_poll(self):
+        """Note 9: stop() must not return while a poll is still running in its own thread - a
+        late arrival could touch `state` after the daemon has closed it."""
+        finished = []
+
+        def slow_poll(options, now):
+            time.sleep(0.25)
+            finished.append(True)
+            return []
+
+        sense = Sense(name="slow", trust="self", kinds={}, conditions={}, options={},
+                      module=None, poll=slow_poll, cadence_s=0.01)
+
+        async def scenario():
+            loop = signals.SenseLoop([sense], push=lambda sig: None)
+            loop.start()
+            await asyncio.sleep(0.05)  # let _run schedule the poll
+            t0 = time.time()
+            await loop.stop()
+            return time.time() - t0, list(finished)
+
+        elapsed, done = asyncio.run(scenario())
+        self.assertGreater(elapsed, 0.15)  # stop() actually waited for the slow poll
+        self.assertEqual(done, [True])
 
 
 if __name__ == "__main__":

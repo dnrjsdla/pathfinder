@@ -4,11 +4,12 @@
 `docs/decisions/DECISIONS.md`, 실측이 바꾼 것은 `HISTORY.md`. 여기 적힌 이름은 전부 트리에
 실존한다. 정본은 영어 `ARCHITECTURE.md` 이고 이 파일은 같은 커밋에서 함께 고친다.
 
-지금까지 지은 것: **구획 3(그 착수 순서의 2단계) — 세상이 말한다.** 비서가 말하고(1) 툴을
-부르고(2); 이제 사용자가 정한 일정, 실패하거나 끝난 셸 명령이 `Signal` 이 된다. 값싼 규칙
-(`RULES.md`) 이 speak · silence · defer · ask_model 을 공짜로 정하고, `speak` 만 짧은 모델 턴을
-열며, 그 알림은 세션이 비기를 기다렸다가 나간다. 캘린더 · 메일 · `attach`/`claude_code` 감각과
-울타리 친 판정의 모델 호출은 다음 단계이고, 작업자 · 기억 볼트 · TUI 는 그 뒤 구획들이다.
+지금까지 지은 것: **구획 3 — 세상이 말한다.** 비서가 말하고(1) 툴을 부르고(2); 이제 일정,
+셸 명령, 캘린더 일정과 미리 알림, 새 메일, 클라이언트가 붙을 때의 작업 디렉터리, Claude Code
+자신의 훅까지 모두 `Signal` 이 된다. 값싼 규칙(`RULES.md`) 이 speak · silence · defer ·
+ask_model 을 공짜로 정하고, `ask_model` 은 울타리 친 판정 호출 하나를 받으며(D13), `speak` 만
+짧은 모델 턴을 열어 그 알림이 세션이 비기를 기다렸다가 나간다. 작업자 · 기억 볼트 · 규칙
+제안 · TUI 는 그 뒤 구획들이다.
 
 ## 0. 한 문장
 
@@ -85,10 +86,13 @@ decision)`: `approval_pending` 이 넣고 `approval` 이 결정을 적는다. `p
 구획 3 이 더한 것: `signals(key, ts, sense, kind)`(24시간 중복 제거: `seen(key, since)`),
 `decisions(signal_key, ts, action, why, notice_id, session, text, signal_keys)`, `judgments(ts)`,
 `deliveries(id, ts, session, via)`, `reactions(ts, delivery_id, vote)`, `presence(session, ts,
-idle_s)`, `signal_turns(ts)`(신호 기원 `turn_start` 한 번마다 한 줄 — 속도 제한용). `today(now)`
-(`clock.day_start` 기준)는 `rules.decide` 가 필요로 하는 계수들을 준다: `spoken`, `judgments`,
-`last_signal_ts`, `burst`(최근 60초 안의 신호 턴 수), `kind_counts`(오늘 종류별 판정 수,
-`count_over` 용). `undelivered()` 는 `delivery` 가 아직 없는 `decision speak` 를 찾는다 —
+idle_s)`, `signal_turns(ts)`(신호 기원 `turn_start` 한 번마다 한 줄 — 속도 제한용).
+`today(now, session=, idle_threshold_s=)` 는 `rules.decide` 가 필요로 하는 것들을 준다: `spoken`
+과 `judgments`(`clock.day_start` 기준), `last_signal_ts`, `burst`(최근 60초 안의 신호 턴 수),
+`recent_counts`(최근 600초 안의 그 종류 신호 수 — `decisions` 가 아니라 `signals` 에서 재는데,
+신호는 자기 판정보다 먼저 적히므로 "이번 것 포함"이 저절로 나온다; `>= N` 은 N번째 자신이
+말한다는 뜻), `away`(`presence` 에서 — 데몬의 신호 턴 심사가 `session`/`idle_threshold_s` 를
+건넬 때만; 조건 술어는 `rules` 나 `state` 자체를 못 본다). `undelivered()` 는 `delivery` 가 아직 없는 `decision speak` 를 찾는다 —
 `deliver.Outbox.rebuild()` 가 죽었다 살아날 때 복구하는 것. `rebuild(ledger)` 는 이 표들도
 같이 버리고 다시 흘린다.
 
@@ -173,7 +177,8 @@ dict 를 키 튜플로 바꿔 버린다.
 
 ## 7. 데몬 (`pathfinder/daemon.py`)
 
-- 규약, 한 줄에 JSON 하나. 들어오는 것 `attach {session?}` · `say {text}` · `interrupt` ·
+- 규약, 한 줄에 JSON 하나. 들어오는 것 `attach {session?, cwd?}`(문자열 `cwd` 는 - 그 감각이
+  켜져 있으면 - `attach` 감각의 `context` 신호를 push 한다) · `say {text}` · `interrupt` ·
   `approve {id}` · `deny {id}` · `signal {sense, fields}`(push 문 — 감각이 로드되어 있고
   push 가능해야 한다, 즉 `build(fields)` 를 내보내야 한다) · `presence {idle_s}` ·
   `react {vote, id?}`. 나가는 것 `attached` · `turn.start` · `delta` · `tool {name, ok}` ·
@@ -221,10 +226,14 @@ Daemon.push_signal ── "signal" 기록 ── state.seen(key, 24h)? ── �
 세션 lane: ("signal", Signal) — 바로 뒤에 연달아 있는 것들이 한 다발로 모인다
         │
         ▼
-Daemon.run_signal_turn ── signals.hold_for (속도 제한) ── 신호마다 rules.decide:
+Daemon.run_signal_turn ── 신호마다 rules.decide 를 먼저(절대 안 들려 있고 안 잠든다):
         defer / silence ──▶ 적히고 끝, 공짜
-        ask_model ──▶ judgment_cap? defer : rules.judge (스텁) ──▶ "judgment" 적고 다시 결정
-        speak (전부) ──▶ Daemon._signal_model_turn
+        ask_model ──▶ judgment_cap? defer : rules.judge (모델 호출 하나) ──▶ "judgment" 적고 다시 결정
+        speak 인데 today.spoken + 이 다발에서 지금까지 >= daily_budget ──▶ 대신 defer(trust "user" 는 예외)
+        speak(남은 것) ──▶ signals.hold_for: 0 ──▶ Daemon._signal_model_turn
+                                          >0 ──▶ loop.call_later(wait, "signal_ready" 로 다시 큐에)
+                                                  (이게 돌아오는 순간 lane 은 자유다 — 들린 신호 바로
+                                                  뒤의 `say` 는 절대 안 기다린다)
                 │
                 ▼
         모델 턴 하나: origin "signal", Broker(origin="signal"), 이력 없음, budget 4,
@@ -241,7 +250,7 @@ Daemon.run_signal_turn ── signals.hold_for (속도 제한) ── 신호마�
 ```
 
 - **`clock.py`** — `ledger.py` 말고 날짜를 계산해도 되는 유일한 모듈(`test_invariants` 는 여기에
-  천장을 안 두고, 다른 곳은 전부 0). `now_line()`, `local_day(ts)`, `day_start(ts)`, `hour(ts)`,
+  천장을 안 두고, 다른 곳은 전부 0). `now_line()`, `day_start(ts)`, `hour(ts)`,
   `parse_local(text) -> (ts, canonical)`(`Z` 나 오프셋을 거부), `format_local(ts)`,
   `minutes_until`, `next_repeat`. 로컬 시각은 항상 오프셋 없는 벽시계 문자열이고, `time.mktime`
   이 다른 모든 타임스탬프와 같은 epoch 로 바꾼다.
@@ -260,11 +269,16 @@ Daemon.run_signal_turn ── signals.hold_for (속도 제한) ── 신호마�
   로 이름을 바꿨다). `RULES.md`: 앞머리(`quiet_hours, daily_budget, min_interval_s, burst_limit,
   judgment_cap, idle_threshold_s`)에 종류마다 `## <kind>` 표 하나, 첫 매치가 이긴다. 조건 어휘는
   닫혀 있다: 핵심 `always, count_over, minutes_until_under, minutes_over` 에 로드된 감각들이
-  등록한 것을 더한 것; 로드된 감각이 없는 종류의 절은 파싱은 되지만 검사는 안 한다.
-  `decide(signal, rules, user_lists, today, now)`: 조용한 시간 -> defer; 하루 예산 소진 ->
-  defer(`trust: user` 신호, 예를 들어 일정은 예외); 그다음 표; 매치 없음 -> `ask_model`.
-  `judge(signal, cfg, today)` 는 스텁이고(D13 의 모델 호출은 구획 3의 다음 단계에 온다)
-  `(False, "not implemented")` 를 돌려준다 — 데몬이 이미 그 자리를 부르고 있는 이음매다.
+  등록한 것을 더한 것(`all_day`, `sender_in`/`sender_domain_in`/`subject_has`, `away`); 로드된
+  감각이 없는 종류의 절은 파싱은 되지만 검사는 안 한다. `decide(signal, rules, user_lists,
+  today, now)`: 조용한 시간 -> defer, 하루 예산 소진 -> defer(`trust: user` 신호 - 일정이나
+  claude_code 종류 자신의 인스턴스 - 는 **둘 다** 예외다: 사용자가 새벽 3시로 정한 알람은
+  새벽 3시에도 사용자의 것이다); 그다음 표; 매치 없음 -> `ask_model`. `judge(signal, cfg,
+  today)`(D13)는 `worker_model`(있으면) 아니면 `model` 로 요청 하나, 툴 없음, 이력 없음,
+  messages = 짧은 고정 시스템 문구("JSON 으로만 답하라: `{\"speak\": ..., \"reason\": ...}`")
+  + 그 신호 하나의 봉투; 엄격한 `json.loads`, 그 밖의 무엇이든(막혔거나 미설정인 모델 포함)
+  `(False, why)` — 이 모듈이 llm 모듈에 손대는 유일한 자리이고, 이 함수 안에서만이다
+  (`test_rules_imports_no_llm_at_top_level`).
 - **`deliver.py`** — `Notice(id, session, text, why, signal_keys)`; `Outbox.hold(session)` 은
   `is_running(session)` 이거나, 신선한(60초 이내) `presence` 줄이 `idle_s < idle_threshold_s`
   라고 말하는 동안 참이다. `release()` 는 풀 수 있는 알림을 FIFO 순서로 다 보내고, 아직 걸린
@@ -273,17 +287,39 @@ Daemon.run_signal_turn ── signals.hold_for (속도 제한) ── 신호마�
   macOS `osascript` 알림 — 테스트를 위해 갈아 끼울 수 있다). `rebuild()` 는 `state.undelivered()`
   에서 큐를 복구한다; 여기서 곧바로 흘려보내지는 않고 다음 자연스러운 `release()` 계기를
   기다린다 — 재시작이 아무 일도 일어나기 전에 느닷없이 배너를 띄우는 일이 없도록.
-- **`senses/`** — 파일마다 150줄 천장. `schedule.py`: `cfg["schedules"]` 를 읽고(폴링, 30초),
-  때가 된 줄을 한 번만 울리고, 반복이면 `config.set` 으로 `at` 을 미루고, 1회성이면 줄을 지운다;
+- **`senses/`** — 파일마다 150줄 천장(밑줄로 시작하는 파일은 여럿이 나눠 쓰는 어댑터라 이
+  배분 밖이다). `schedule.py`: `cfg["schedules"]` 를 읽고(폴링, 30초), 때가 된 줄을 한 번만
+  울리고, 반복이면 `config.set` 으로 `at` 을 미루고, 1회성이면 줄을 지운다;
   `add_schedule`/`list_schedules`/`remove_schedule` 을 내놓는다(첫째와 셋째는 `write=True,
   reversible=True`). `shell.py`: push 전용(`build(fields, now)`), `command_failed`(exit != 0) /
   `command_finished`(exit == 0), `exit_nonzero` 와 `duration_over` 를 등록한다; 중복 제거 열쇠에
-  도착 시각이 들어가는데, 반복 자체가 `count_over` 가 보려는 것이기 때문이다. `docs/senses.md`
-  에 zsh 훅(백그라운드로 돌리고 오류를 삼킴 — 훅이 셸을 막으면 안 된다)과 다음 단계가 더할
-  Claude Code 훅의 자리표시가 있다.
+  도착 시각이 들어가는데, 반복 자체가 `count_over` 가 보려는 것이기 때문이다.
+  `calendar.py`/`reminders.py`: 어댑터 하나(`_eventkit.py`, 158줄, PyObjC 의
+  `EventKit`/`Foundation` 을 함수 안에서 그때그때 임포트 - Mark.5 의 `eventkit_bridge.py` 를
+  목록/추가만 남기고 잘랐고, 시각은 평범한 epoch 부동소수라 `clock.py` 와 맞출 두 번째 날짜
+  형식이 없다)를 감각 둘이 나눠 쓴다; 나눈 이유는 `TRUST` 가 다르기 때문이다(일정은 남의
+  초대일 수 있어 `third_party`, 미리 알림은 사용자 자신의 메모라 `user`) - 감각 모듈 하나에
+  `TRUST` 문자열 하나뿐이라 한 파일에 같이 못 둔다. PyObjC 없이는 꺼짐: `poll` 이 한 번
+  예외를 내면(`SenseLoop.on_error` 가 `error` 사건으로 적는다) 그다음부터는 조용히 `[]` 를
+  돌려주고, 툴들도 같은 문구를 내는데 브로커가 다른 핸들러 예외와 똑같이 받는다. `mail.py`:
+  IMAP 헤더만(`imaplib`, `BODY.PEEK[HEADER...]`, 읽기 전용 `SELECT` - `poll` 은 본문을 절대
+  안 가져온다), 계정 비밀번호는 macOS 키체인에서(`security find-generic-password`) - config
+  나 환경변수가 아니다; 메모리 안의 UID 워터마크가 이번 프로세스에서 이미 신호로 만든 메일의
+  재조회를 막고, 진짜 24시간 중복 제거는 `state.seen` 이 한다. `attach.py`: 데몬 자신의
+  `attach {cwd}` 메시지가 먹이고, 훅이 아니다 - 항상 침묵, rules 와 훗날의 카탈로그가 사용자가
+  뭘 하고 있는지 알기 위해서만 존재한다. `claude_code.py`: Claude Code 의 `Stop`/`Notification`
+  훅이 push 하고, `away` 를 등록한다(`state.Today.away` 를 읽는데, 데몬이 `decide` 를 돌리기
+  전에 `presence` 로부터 계산해 둔 것이다 - 조건 술어는 `(signal, value, today, now)` 만 보지
+  `rules` 나 `state` 자체는 못 보므로, `idle_threshold_s` 비교는 술어가 아니라 `state.today()`
+  안에서 해야 한다). `docs/senses.md` 에 zsh 훅(백그라운드로 돌리고 오류를 삼킴 — 훅이 셸을
+  막으면 안 된다)과 Claude Code `settings.json` 훅 블록이 있다.
 - **`config.py`** 이 더한 것: `senses`(`{name: options}` — 키가 있으면 켜짐; `_check` 가 그
   감각 모듈을 임포트해 옵션을 `OPTIONS` 로 검사)와 `schedules`(`{id, at, repeat, text}` 목록;
   `at` 은 이미 `clock.parse_local` 의 표준 문자열이어야 한다).
+- **두 번째·세 번째 외부 의존.** `calendar`/`reminders` 는 `pyobjc-framework-EventKit` 이
+  필요하다; `mail` 은 추가 패키지는 없지만(`imaplib` 은 표준 라이브러리) 키체인 항목
+  (`docs/senses.md`)과 IMAP 서버로의 네트워크 접근이 필요하다. 둘 다 선택 사항 - 나머지는
+  이것들 없이도 돈다.
 
 ## 9. 불변조건과 그것을 붙드는 테스트
 
@@ -312,11 +348,17 @@ Daemon.run_signal_turn ── signals.hold_for (속도 제한) ── 신호마�
 | D22: reversible write 는 사용자에게 그 자체로 돌고, signal/job 에는 여전히 묻고, system 에는 여전히 거부됨; 되돌릴 수 없는 write 는 그대로임 | `test_policy.test_policy_reversible` |
 | `local_datetime` 은 `Z`/오프셋을 거부하고 표준화함; 일정은 한 번만 울리고 반복은 미뤄짐; 같은 종류의 실패 세 번은 말하고 그보다 적으면 침묵함 | `test_tools.test_local_datetime_normalize`, `test_senses.*` |
 | `state.db` 삭제: `seen()` 과 `undelivered()` 가 장부만으로 돌아옴 | `test_daemon.ReindexRestoresSignalsTest.test_reindex_restores_seen_and_undelivered` |
+| `judge` 는 엄격한 JSON 만 받고, 쓰레기/필드 누락/막히거나 미설정인 모델에는 `(False, ...)`; `worker_model` 을 `model` 보다 먼저 읽음 | `test_rules.JudgeTest.*`, `test_daemon.JudgmentCapTest.test_judge_never_runs_over_cap` |
+| calendar/reminders 는 PyObjC 없이 죽지 않고 꺼지고, 실패를 한 번만 적고, 그다음은 조용함; 툴도 같은 문구를 돌려줌 | `test_calendar.CalendarOffTest.*` |
+| mail 의 `poll` 은 본문 fetch 를 절대 안 함(`PEEK[HEADER` 뿐); 비밀번호는 키체인에서만 오지 config 키가 아님 | `test_mail.MailHeadersOnlyTest.*` |
+| `attach {cwd}` 는 감각이 켜져 있을 때만 `context` 신호를 정확히 하나 push 함 | `test_daemon.AttachSenseTest.*` |
+| `claude_code` 의 `task_done`/`needs_input` 은 `today.away` 가 참일 때만 말함 | `test_claude_code.ClaudeCodeAwayTest.test_claude_code_speaks_only_when_away` |
+| `local_datetime` 게이트는 모델이 쓴 것이 아니라 표준 문자열을 보여줌 | `test_calendar.AddEventGateTest.test_add_event_gate_shows_canonical_datetime` |
 
 ## 10. 세는 법
 
 ```bash
-python3 -m unittest discover -s tests            # 전체 테스트, 네트워크 없음 (123)
+python3 -m unittest discover -s tests            # 전체 테스트, 네트워크 없음 (142)
 wc -l pathfinder/*.py pathfinder/senses/*.py     # 코어; 배분: ledger 400 · state 600 · daemon 600 ·
                                                   # loop 400 · broker+policy 350 · exec 300 · tools 300 ·
                                                   # clock+signals+rules 450 · deliver 250 · 감각 파일 150
@@ -334,8 +376,10 @@ python3 -m pathfinder approvals                   # 승인 대기 목록, state.
 python3 -m pathfinder approve ID | deny ID        # 게이트에 걸린 턴을 재개하고 답을 출력
 python3 -m pathfinder interrupt                   # 최근 세션의 도는 턴을 멈춤
 python3 -m pathfinder config set grants '{"write_file": "allow"}'
-python3 -m pathfinder config set senses '{"schedule": {}, "shell": {}}'
+python3 -m pathfinder config set senses '{"schedule": {}, "shell": {}, "calendar": {}, "reminders": {}}'
 python3 -m pathfinder signal shell '{"cmd": "make test", "exit": 1, "seconds": 3, "cwd": "/tmp"}'
+python3 -m pathfinder config set senses '{"mail": {"host": "imap.example.com", "user": "you@example.com"}}'
+security add-generic-password -s pathfinder-mail -a you@example.com -w   # mail 켜기 전에 한 번
 python3 -m pathfinder react up                    # 최근 전달에 엄지척
 python3 -m pathfinder rules                       # RULES.md 의 경로를 출력
 python3 -m pathfinder reindex                     # 데몬이 도는 중에는 거부

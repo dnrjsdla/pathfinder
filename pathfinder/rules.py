@@ -30,7 +30,8 @@ def _minutes(fields: dict) -> float:
 
 CORE_CONDITIONS = {
     "always": lambda signal, value, today, now: True,
-    "count_over": lambda signal, value, today, now: today.kind_counts.get(signal.kind, 0) >= value,
+    # occurrences of this kind in the last 10 min, including this one - N means the Nth speaks
+    "count_over": lambda signal, value, today, now: today.recent_counts.get(signal.kind, 0) >= value,
     "minutes_until_under": lambda signal, value, today, now: (
         signal.fields.get("minutes_until") is not None and 0 <= signal.fields["minutes_until"] < value),
     "minutes_over": lambda signal, value, today, now: _minutes(signal.fields) > value,
@@ -57,8 +58,7 @@ def _int(value, fallback: int) -> int:
 
 
 def _parse_frontmatter(text: str) -> tuple:
-    """Flat `key: value` frontmatter, `[...]`/`{...}` values as JSON. Copied in shape from
-    Mark.5's userland parser - no dependency, minimal syntax."""
+    """Flat `key: value` frontmatter, `[...]`/`{...}` values as JSON - no dependency."""
     if not text.startswith("---"):
         return {}, text
     parts = text.split("\n", 1)
@@ -85,9 +85,8 @@ def _parse_frontmatter(text: str) -> tuple:
 
 
 def parse(text: str, conditions: dict | None = None, validated_kinds: set | None = None) -> Rules:
-    """Parse one RULES.md. `validated_kinds` (None = every kind found) names the kinds whose
-    section is checked against the closed vocabulary - a section for a kind with no loaded
-    sense is kept, its words unchecked (its sense may simply be off)."""
+    """Parse one RULES.md. `validated_kinds` (None = every kind found) names the kinds checked
+    against the closed vocabulary - a section for a kind with no loaded sense is kept, unchecked."""
     conditions = conditions if conditions is not None else CORE_CONDITIONS
     meta, body = _parse_frontmatter(text)
     by_kind: dict = {}
@@ -125,8 +124,8 @@ def load(home, senses) -> Rules:
     if not rules_path.exists():
         rules_path.write_text(DEFAULT_RULES_PATH.read_text(encoding="utf-8"), encoding="utf-8")
     user_path = home / "USER.md"
-    if not user_path.exists():
-        user_path.write_text("---\n---\n", encoding="utf-8")  # partition 5 fills this in
+    if not user_path.exists():  # the empty lists new_mail's rules read; partition 5 fills them in
+        user_path.write_text("---\nwaiting_for: []\nsubject_alerts: []\nnoise_domains: []\n---\n", encoding="utf-8")
     conditions = dict(CORE_CONDITIONS)
     validated_kinds = set()
     for s in senses:
@@ -141,8 +140,7 @@ def user_lists(home) -> dict:
 
 
 def resolve(value, lists: dict):
-    """`USER.xxx` -> the same-named list in USER.md's frontmatter. Anything else is the
-    literal value: `-`/empty is None, `true`/`false` a bool, a bare integer an int."""
+    """`USER.xxx` -> that list in USER.md; else `-`/empty -> None, `true`/`false` -> bool, digits -> int."""
     if value.startswith("USER."):
         return lists.get(value[len("USER."):], [])
     if value in ("-", ""):
@@ -153,8 +151,7 @@ def resolve(value, lists: dict):
 
 
 def _quiet(spec: str, hour: int) -> bool:
-    """`23-8` wraps past midnight. A broken spec never blocks speaking - a typo here must not
-    silence the assistant with no clue why."""
+    """`23-8` wraps past midnight. A broken spec never blocks speaking (fail open, not silent)."""
     try:
         start, end = (int(p) for p in str(spec).split("-", 1))
     except ValueError:
@@ -178,9 +175,25 @@ def decide(signal, rules: Rules, user_lists: dict, today, now: float) -> tuple:
     return "ask_model", "no rule matched"
 
 
+_JUDGE_SYSTEM = ('You decide whether a resident assistant should interrupt its user now. Answer only '
+                'JSON: {"speak": true|false, "reason": "..."}')
+
 def judge(signal, cfg: dict, today) -> tuple:
-    """D13, fenced judgment - stub. The model call (worker_model if set else model, one
-    request, no tools, no history) lands in step 3. The seam: the daemon already checks
-    `today.judgments < rules.judgment_cap` before calling this and records a `judgment` event
-    with whatever it returns."""
-    return False, "not implemented"
+    """D13: one request, no tools, no history. Strict JSON only - the only place this module
+    reaches for an llm module (test_invariants checks it stays that way)."""
+    from . import signals as _signals
+    from .llm import LLMError, openai_compat, resolve
+    try:
+        endpoint = resolve(cfg, cfg.get("worker_model") or cfg.get("model") or "")
+        messages = [{"role": "system", "content": _JUDGE_SYSTEM},
+                    {"role": "user", "content": _signals.render_envelope([signal])}]
+        text = "".join(p for k, p in openai_compat.stream(endpoint, messages, tools=None) if k == "text")
+    except LLMError:
+        return False, "model unavailable"
+    try:
+        data = json.loads(text)
+    except (TypeError, ValueError):
+        return False, "unparseable"
+    if not (isinstance(data, dict) and isinstance(data.get("speak"), bool) and isinstance(data.get("reason"), str)):
+        return False, "unparseable"
+    return data["speak"], data["reason"]

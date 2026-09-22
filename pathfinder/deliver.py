@@ -20,10 +20,13 @@ class Notice:
     signal_keys: list
 
 
-def banner(text: str) -> None:
-    """The default `banner`: a macOS notification. Injectable - tests pass their own."""
-    script = f'display notification {json.dumps(text)} with title "PATHFINDER"'
-    subprocess.run(["osascript", "-e", script], check=False, capture_output=True)
+def banner(text: str) -> bool:
+    """The default `banner`: a macOS notification. Injectable - tests pass their own. Returns
+    whether it succeeded; `ensure_ascii=False`, or a non-ASCII (e.g. Korean) notice becomes a
+    literal `\\uXXXX` escape sequence that osascript cannot display."""
+    script = f'display notification {json.dumps(text, ensure_ascii=False)} with title "PATHFINDER"'
+    result = subprocess.run(["osascript", "-e", script], check=False, capture_output=True)
+    return result.returncode == 0
 
 
 class Outbox:
@@ -63,17 +66,21 @@ class Outbox:
         return fresh and presence["idle_s"] < self.rules.idle_threshold_s
 
     def release(self, session: str | None = None) -> None:
-        """Send every releasable notice in FIFO order, stopping at the first one still held -
-        a later notice never jumps a held earlier one."""
-        while self.queue and not self.hold(self.queue[0].session):
-            self._deliver(self.queue.pop(0))
+        """Deliver every releasable notice, in order; one still held for its own session (or
+        whose banner just failed) stays queued in place - it does not block another session's
+        notice behind it, and it is retried on the next release()."""
+        self.queue = [n for n in self.queue if self.hold(n.session) or not self._deliver(n)]
 
-    def _deliver(self, notice: Notice) -> None:
+    def _deliver(self, notice: Notice) -> bool:
+        """True on success. A failed banner is not recorded as a delivery - the notice stays in
+        the outbox, to go out for real on the next release()."""
         if self.attached(notice.session):
             self.send(notice.session, {"type": "notice", "id": notice.id, "text": notice.text, "why": notice.why})
             via = "socket"
         else:
-            self.banner(notice.text)
+            if not self.banner(notice.text):
+                return False
             via = "banner"
         self.record("delivery", session=notice.session, origin="signal", id=notice.id, via=via)
         self.record("assistant", session=notice.session, origin="signal", text=notice.text, final=True)
+        return True

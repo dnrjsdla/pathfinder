@@ -9,7 +9,9 @@ import threading
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
+from pathfinder import config
 from pathfinder import tools as tools_mod
 from pathfinder.daemon import SOCKET, Daemon
 from pathfinder.deliver import Notice
@@ -735,7 +737,12 @@ class DeliverTest(DaemonHarness):
     def test_deliver_banner_when_no_client(self):
         async def scenario(daemon):
             calls = []
-            daemon.outbox.banner = calls.append
+
+            def fake_banner(text):
+                calls.append(text)
+                return True
+
+            daemon.outbox.banner = fake_banner
             daemon.record("session_start", session="no-client")
             daemon.outbox.enqueue(Notice("n3", "no-client", "banner text", "w", []))
             return calls
@@ -744,6 +751,44 @@ class DeliverTest(DaemonHarness):
         self.assertEqual(calls, ["banner text"])
         deliveries = [e for e in self.events() if e["type"] == "delivery"]
         self.assertEqual(deliveries[-1]["via"], "banner")
+
+    def test_deliver_failed_banner_is_not_recorded_and_stays_queued(self):
+        """Blocker 2: a failed banner must not be recorded as a delivery - the notice stays in
+        the outbox and is retried on the next release()."""
+        async def scenario(daemon):
+            attempts = []
+
+            def flaky_banner(text):
+                attempts.append(text)
+                return len(attempts) > 1  # fails once, then succeeds
+
+            daemon.outbox.banner = flaky_banner
+            daemon.record("session_start", session="no-client")
+            daemon.outbox.enqueue(Notice("n4", "no-client", "안녕 (Korean)", "w", []))
+            first_queue_len = len(daemon.outbox.queue)
+            daemon.outbox.release()
+            return attempts, first_queue_len, len(daemon.outbox.queue)
+
+        attempts, first_queue_len, second_queue_len = self.run_with(fake_model(), scenario)
+        self.assertEqual(len(attempts), 2)
+        self.assertEqual((first_queue_len, second_queue_len), (1, 0))
+        events = self.events()
+        self.assertEqual(len([e for e in events if e["type"] == "delivery"]), 1)  # only the success
+
+    def test_deliver_banner_korean_text_not_ascii_escaped(self):
+        """Blocker 2: ensure_ascii=False, or osascript gets a literal \\uXXXX it cannot show."""
+        from pathfinder import deliver as deliver_mod
+        seen = {}
+
+        def fake_run(argv, **kw):
+            seen["script"] = argv[2]
+            return type("R", (), {"returncode": 0})()
+
+        with mock.patch("pathfinder.deliver.subprocess.run", side_effect=fake_run):
+            ok = deliver_mod.banner("안녕")
+        self.assertTrue(ok)
+        self.assertIn("안녕", seen["script"])
+        self.assertNotIn("\\u", seen["script"])
 
     def test_deliver_outbox_rebuilt_from_ledger(self):
         """A `decision speak` with no matching `delivery` is restored into a fresh daemon's
@@ -786,6 +831,207 @@ class ReindexRestoresSignalsTest(DaemonHarness):
         self.assertTrue(state.seen("k-seen", since=0))
         self.assertTrue(any(u["id"] == "notice-x" for u in state.undelivered()))
         state.close()
+
+
+class AttachSenseTest(DaemonHarness):
+    def test_attach_cwd_pushes_context_signal(self):
+        config.set(self.home, "senses", {"attach": {}})
+
+        async def scenario(daemon):
+            c = await Client.open(self.home)
+            c.send({"type": "attach", "cwd": "/Users/you/project-name"})
+            await c.recv()  # "attached"
+            c.close()
+
+        self.run_with(fake_model(), scenario)
+        signals = [e for e in self.events() if e["type"] == "signal"]
+        self.assertEqual(len(signals), 1)
+        self.assertEqual((signals[0]["sense"], signals[0]["kind"]), ("attach", "context"))
+        self.assertEqual(signals[0]["fields"]["project"], "project-name")
+
+    def test_attach_without_cwd_pushes_nothing(self):
+        config.set(self.home, "senses", {"attach": {}})
+
+        async def scenario(daemon):
+            c = await Client.open(self.home)
+            c.send({"type": "attach"})
+            await c.recv()
+            c.close()
+
+        self.run_with(fake_model(), scenario)
+        self.assertEqual([e for e in self.events() if e["type"] == "signal"], [])
+
+
+class JudgmentCapTest(DaemonHarness):
+    def test_judge_never_runs_over_cap(self):
+        """`judgment_cap` is checked before `rules.judge` is ever called - a signal whose kind
+        has no RULES.md section (ask_model) defers instead, and judge sees nothing."""
+        async def scenario(daemon):
+            _never_quiet(daemon)
+            daemon.rules = dataclasses.replace(daemon.rules, judgment_cap=0)
+            with mock.patch("pathfinder.daemon.rules_mod.judge") as judge_mock:
+                daemon.push_signal(Signal(sense="mail", kind="kind_with_no_rules_section",
+                                          key="cap-test", summary="s", fields={}, trust="third_party"))
+                for _ in range(200):
+                    if any(e["type"] == "decision" for e in Ledger(self.home).read()):
+                        break
+                    await asyncio.sleep(0.01)
+                self.assertFalse(judge_mock.called)
+            return list(Ledger(self.home).read())
+
+        events = self.run_with(fake_model(), scenario)
+        decisions = [e for e in events if e["type"] == "decision"]
+        self.assertTrue(any(d["action"] == "defer" and d["why"] == "judgment cap" for d in decisions))
+
+
+class RateLimitDoesNotBlockLaneTest(DaemonHarness):
+    def test_held_signal_does_not_delay_a_say(self):
+        """Blocker 1: the rate-limit hold used to `await asyncio.sleep(wait)` inside the lane
+        itself, so a `say` queued right behind a held signal waited out the whole hold. The
+        fix re-queues the speak set with `call_later` and returns immediately."""
+        async def scenario(daemon):
+            _never_quiet(daemon)
+            daemon.rules = dataclasses.replace(daemon.rules, min_interval_s=3, burst_limit=999)
+            c = await Client.open(self.home)
+            c.send({"type": "attach"})
+            attached = await c.recv()
+            sid = attached["session"]
+            daemon.record("turn_start", session=sid, turn="t0", origin="signal")  # "just spoke"
+            daemon.push_signal(Signal(sense="schedule", kind="schedule_due", key="k-hold",
+                                      summary="A", fields={}, trust="user"))
+            await asyncio.sleep(0.1)
+            t0 = time.time()
+            c.send({"type": "say", "text": "hi"})
+            await c.until("turn.start")
+            elapsed = time.time() - t0
+            c.close()
+            return elapsed
+
+        elapsed = self.run_with(fake_model("ok"), scenario)
+        self.assertLess(elapsed, 1.0)  # nowhere near min_interval_s=3
+
+
+class DailyBudgetBundleTest(DaemonHarness):
+    def test_daily_budget_split_within_one_bundle(self):
+        """Should-fix 4: the budget is spent as the bundle is triaged, not only once the model
+        turn ends and records its `decision speak` rows - one bundle of 5 with daily_budget=1
+        must not speak all 5."""
+        async def scenario(daemon):
+            _never_quiet(daemon)
+            daemon.rules = dataclasses.replace(daemon.rules, daily_budget=1, min_interval_s=0, burst_limit=999)
+            s = daemon._target_session()
+            bundle = [Signal("schedule", "schedule_due", f"k{i}", f"summary {i}", {}, "third_party")
+                     for i in range(5)]
+            await daemon.run_signal_turn(s, bundle)
+            await asyncio.sleep(0.2)
+            return list(Ledger(self.home).read())
+
+        events = self.run_with(fake_model("ok"), scenario)
+        decisions = [e for e in events if e["type"] == "decision"]
+        speaks = [d for d in decisions if d["action"] == "speak"]
+        defers = [d for d in decisions if d["action"] == "defer" and d["why"] == "daily budget spent"]
+        self.assertEqual(len(speaks), 1)
+        self.assertEqual(len(defers), 4)
+
+
+class PushDoorValidationTest(DaemonHarness):
+    def test_signal_build_exception_is_an_error_line_not_a_crash(self):
+        """Should-fix 6: `sense.module.build(fields)` is the only untrusted local input: a bad
+        field must produce an `error` line, not kill the connection."""
+        config.set(self.home, "senses", {"shell": {}})
+
+        async def scenario(daemon):
+            c = await Client.open(self.home)
+            c.send({"type": "signal", "sense": "shell", "fields": {"cmd": 123, "exit": 1}})  # cmd not a string
+            reply = await c.recv()
+            c.send({"type": "say", "text": "still alive?"})
+            seen = await c.until("turn.end")
+            c.close()
+            return reply, seen
+
+        reply, seen = self.run_with(fake_model("ok"), scenario)
+        self.assertEqual(reply["type"], "error")
+        self.assertEqual(seen[-1]["kind"], "answer")
+
+    def test_signal_fields_over_4kb_refused(self):
+        config.set(self.home, "senses", {"shell": {}})
+
+        async def scenario(daemon):
+            c = await Client.open(self.home)
+            big = "A" * 5000
+            c.send({"type": "signal", "sense": "shell",
+                    "fields": {"cmd": big, "exit": 1, "seconds": 1, "cwd": "/x"}})
+            reply = await c.recv()
+            c.close()
+            return reply
+
+        reply = self.run_with(fake_model(), scenario)
+        self.assertEqual(reply["type"], "error")
+        self.assertEqual([e for e in self.events() if e["type"] == "signal"], [])
+
+
+class ProtocolValidationTest(DaemonHarness):
+    def test_presence_rejects_out_of_range_idle_s(self):
+        async def scenario(daemon):
+            c = await Client.open(self.home)
+            c.send({"type": "attach"})
+            await c.recv()
+            replies = []
+            for bad in (-1, 86401, "5", True):
+                c.send({"type": "presence", "idle_s": bad})
+                replies.append(await c.recv())
+            c.close()
+            return replies
+
+        replies = self.run_with(fake_model(), scenario)
+        self.assertTrue(all(r["type"] == "error" for r in replies))
+
+    def test_react_unknown_delivery_id_is_an_error(self):
+        async def scenario(daemon):
+            c = await Client.open(self.home)
+            c.send({"type": "react", "vote": "up", "id": "no-such-id"})
+            reply = await c.recv()
+            c.close()
+            return reply
+
+        reply = self.run_with(fake_model(), scenario)
+        self.assertEqual(reply["type"], "error")
+        self.assertEqual([e for e in self.events() if e["type"] == "reaction"], [])
+
+
+class SignalTurnControlTest(DaemonHarness):
+    def test_signal_turn_sets_is_running(self):
+        """Note 13: without s.control set, is_running(s) is False during a signal turn, so
+        interrupt wrongly says "no turn is running" and a presence line can release a notice
+        mid-turn."""
+        proceed = threading.Event()
+
+        def slow_model(cfg, control=None):
+            def step(messages):
+                proceed.wait(2)
+                yield ("text", "ok")
+            return step
+
+        async def scenario(daemon):
+            _never_quiet(daemon)
+            daemon.push_signal(Signal(sense="schedule", kind="schedule_due", key="k-run",
+                                      summary="A", fields={}, trust="user"))
+            s = None
+            for _ in range(200):
+                s = next(iter(daemon.sessions.values()), None)
+                if s is not None and s.control is not None:
+                    break
+                await asyncio.sleep(0.01)
+            is_running = s is not None and s.control is not None
+            proceed.set()
+            for _ in range(200):
+                if any(e["type"] == "delivery" for e in Ledger(self.home).read()):
+                    break
+                await asyncio.sleep(0.01)
+            return is_running
+
+        is_running = self.run_with(slow_model, scenario)
+        self.assertTrue(is_running)
 
 
 if __name__ == "__main__":

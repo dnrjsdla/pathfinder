@@ -39,12 +39,6 @@ def format_local(ts: float) -> str:
     return datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M")
 
 
-def local_day(ts: float | None = None) -> str:
-    """The local calendar date of `ts` - the budget's and the dedupe's day. A rate limit, so
-    losing it at a day boundary (a restart, a DST jump) costs nothing, unlike a cursor."""
-    return datetime.fromtimestamp(ts if ts is not None else time.time()).strftime("%Y-%m-%d")
-
-
 def day_start(ts: float | None = None) -> float:
     """Timestamp of local midnight on `ts`'s calendar day - the boundary `state.today()` counts
     from."""

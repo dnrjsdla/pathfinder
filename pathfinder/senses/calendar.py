@@ -1,0 +1,89 @@
+"""calendar sense - events via EventKit (see `_eventkit.py`). Off without PyObjC: `poll` logs
+one `error` event through the daemon's normal sense-failure path (SenseLoop.on_error) the first
+time, then quietly returns [] on every later poll - the calendar simply never speaks again,
+rather than filling the ledger with the same "not installed" error every 5 minutes."""
+from __future__ import annotations
+
+from .. import clock
+from ..signals import Signal
+from ..tools import ToolSpec, normalize_local_datetime
+from . import _eventkit as ek
+
+OPTIONS: dict = {}
+TRUST = "third_party"  # an invitation is someone else's words, even though it lands on the user's calendar
+KINDS = {"upcoming_event": ("always", "-", "silence", "no rule configured for this kind")}
+CADENCE_S = 300
+_WINDOW_S = 3600  # look one hour ahead; RULES.md's minutes_until_under does the real filtering
+_OFF = "calendar sense is off: install pyobjc-framework-EventKit"
+_off_logged = False
+
+
+def _all_day(signal, value, today, now):
+    return signal.fields.get("all_day") is value
+
+
+CONDITIONS = {"all_day": _all_day}
+
+
+def poll(options, now):
+    global _off_logged
+    try:
+        events = ek.list_events(now, now + _WINDOW_S)
+    except ImportError:
+        if _off_logged:
+            return []
+        _off_logged = True
+        raise RuntimeError(_OFF) from None
+    out = []
+    for ev in events:
+        if ev["start"] is None:
+            continue
+        out.append(Signal(
+            sense="calendar", kind="upcoming_event", key=f"event:{ev['id']}:{ev['start']}",
+            summary=f"Upcoming: {clock.format_local(ev['start'])} {ev['title']}",
+            fields={"title": ev["title"], "start": clock.format_local(ev["start"]),
+                    "end": clock.format_local(ev["end"]) if ev["end"] else None,
+                    "all_day": ev["all_day"], "notes": ev.get("notes"),
+                    "minutes_until": clock.minutes_until(ev["start"], now)},
+            trust=TRUST))
+    return out
+
+
+def _list_events(control=None, **kw):
+    try:
+        from_ts, _ = clock.parse_local(kw["from"])
+        to_ts, _ = clock.parse_local(kw["to"])
+        return ek.list_events(from_ts, to_ts)
+    except ImportError:
+        raise RuntimeError(_OFF) from None
+
+
+def _add_event(title, start, end, control=None):
+    try:
+        start_ts, _ = clock.parse_local(start)
+        end_ts, _ = clock.parse_local(end)
+        return ek.add_event(title, start_ts, end_ts)
+    except ImportError:
+        raise RuntimeError(_OFF) from None
+
+
+TOOLS = {
+    "list_events": ToolSpec(
+        name="list_events", description="List calendar events in a local time range.",
+        params={
+            "from": {"type": "string", "format": "local_datetime", "description": "local time, YYYY-MM-DD HH:MM"},
+            "to": {"type": "string", "format": "local_datetime", "description": "local time, YYYY-MM-DD HH:MM"},
+        },
+        required=["from", "to"], handler=_list_events, normalize=normalize_local_datetime("from", "to"),
+    ),
+    "add_event": ToolSpec(
+        name="add_event", description="Add a calendar event.",
+        params={
+            "title": {"type": "string"},
+            "start": {"type": "string", "format": "local_datetime", "description": "local time, YYYY-MM-DD HH:MM"},
+            "end": {"type": "string", "format": "local_datetime", "description": "local time, YYYY-MM-DD HH:MM"},
+        },
+        required=["title", "start", "end"], handler=_add_event,
+        normalize=normalize_local_datetime("start", "end"), write=True,  # a calendar write may sync and invite - not reversible
+    ),
+}

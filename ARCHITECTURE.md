@@ -4,12 +4,13 @@
 `docs/decisions/DECISIONS.md`. What measurement changed: `HISTORY.md`. Every name here exists in
 the tree. Korean mirror: `ARCHITECTURE.ko.md` (updated in the same commit).
 
-Built so far: **partition 3 (step 2 of its build order) — the world speaks.** The assistant
-talks (1) and calls tools (2); now a schedule the user set, or a shell command that failed or
-finished, becomes a `Signal`; cheap rules (`RULES.md`) decide speak/silence/defer/ask_model for
-free, and only a `speak` opens a short model turn whose notice waits for the session to be free
-before it goes out. Calendar, mail, the `attach`/`claude_code` senses and the fenced-judgment
-model call are the next step; jobs, the memory vault and the TUI are later partitions still.
+Built so far: **partition 3 — the world speaks.** The assistant talks (1) and calls tools (2);
+now a schedule, a shell command, a calendar event or reminder, new mail, the working directory a
+client attaches with, and Claude Code's own hooks all become a `Signal`; cheap rules
+(`RULES.md`) decide speak/silence/defer/ask_model for free, `ask_model` gets one small fenced
+judgment call (D13), and only a `speak` opens a short model turn whose notice waits for the
+session to be free before it goes out. Jobs, the memory vault, rule proposals and the TUI are
+later partitions still.
 
 ## 0. One sentence
 
@@ -90,9 +91,13 @@ Partition 3 adds `signals(key, ts, sense, kind)` (the 24 h dedupe: `seen(key, si
 `decisions(signal_key, ts, action, why, notice_id, session, text, signal_keys)`, `judgments(ts)`,
 `deliveries(id, ts, session, via)`, `reactions(ts, delivery_id, vote)`, `presence(session, ts,
 idle_s)` and `signal_turns(ts)` (one row per signal-origin `turn_start`, for the rate limit).
-`today(now)` (`clock.day_start`-scoped) returns the counters `rules.decide` needs: `spoken`,
-`judgments`, `last_signal_ts`, `burst` (signal turns in the last 60 s) and `kind_counts` (today's
-decisions per kind, for `count_over`). `undelivered()` finds a `decision speak` with no matching
+`today(now, session=, idle_threshold_s=)` returns the counters `rules.decide` needs: `spoken`
+and `judgments` (`clock.day_start`-scoped), `last_signal_ts`, `burst` (signal turns in the last
+60 s), `recent_counts` (signals of a kind in the last 600 s, from `signals` not `decisions` - a
+signal is recorded before its own decision, so "including this one" falls out for free; `>= N`
+means the Nth occurrence itself speaks) and `away` (from `presence`, only when the daemon's
+signal-turn triage passes `session`/`idle_threshold_s` - a rule predicate never sees `rules` or
+`state` itself). `undelivered()` finds a `decision speak` with no matching
 `delivery` — what `deliver.Outbox.rebuild()` restores after a crash. `rebuild(ledger)` drops and
 replays these tables too.
 
@@ -179,7 +184,8 @@ ask → `raise Gate(id, name, arguments)`, allow → `emit("tool_call")`, run th
 
 ## 7. The daemon (`pathfinder/daemon.py`)
 
-- Protocol, one JSON object per line. In: `attach {session?}`, `say {text}`, `interrupt`,
+- Protocol, one JSON object per line. In: `attach {session?, cwd?}` (a string `cwd` pushes the
+  `attach` sense's `context` signal, when that sense is on), `say {text}`, `interrupt`,
   `approve {id}`, `deny {id}`, `signal {sense, fields}` (a push door — the sense must be loaded
   and push-capable, i.e. export `build(fields)`), `presence {idle_s}`, `react {vote, id?}`. Out:
   `attached`, `turn.start`, `delta`, `tool {name, ok}`, `gate {id, tool, args}`, `turn.end {kind}`,
@@ -227,10 +233,14 @@ Daemon.push_signal ── record "signal" ── state.seen(key, 24h)? ── ye
 session lane: ("signal", Signal) — every consecutive one behind it drains into one bundle
         │
         ▼
-Daemon.run_signal_turn ── signals.hold_for (rate limit) ── rules.decide per signal:
+Daemon.run_signal_turn ── rules.decide per signal FIRST (never held, never sleeps):
         defer / silence ──▶ recorded, done, free
-        ask_model ──▶ judgment_cap? defer : rules.judge (stub) ──▶ recorded "judgment", then decided
-        speak (all of them) ──▶ Daemon._signal_model_turn
+        ask_model ──▶ judgment_cap? defer : rules.judge (one small model call) ──▶ "judgment", then decided
+        speak, but today.spoken + bundle-so-far >= daily_budget ──▶ defer instead (trust "user" exempt)
+        speak (what's left) ──▶ signals.hold_for: 0 ──▶ Daemon._signal_model_turn
+                                                  >0 ──▶ loop.call_later(wait, requeue "signal_ready")
+                                                          (the lane is free the instant this returns -
+                                                          a `say` right behind a held signal never waits)
                 │
                 ▼
         one model turn: origin "signal", Broker(origin="signal"), no history, budget 4,
@@ -247,7 +257,7 @@ Daemon.run_signal_turn ── signals.hold_for (rate limit) ── rules.decide 
 ```
 
 - **`clock.py`** — the only module besides `ledger.py` allowed to compute a date (`test_invariants`
-  gives it no limit, everywhere else zero). `now_line()`, `local_day(ts)`, `day_start(ts)`,
+  gives it no limit, everywhere else zero). `now_line()`, `day_start(ts)`,
   `hour(ts)`, `parse_local(text) -> (ts, canonical)` (refuses a `Z` or offset), `format_local(ts)`,
   `minutes_until`, `next_repeat`. Local time is always a naive wall-clock string; `time.mktime`
   turns it into the same epoch every other timestamp already uses.
@@ -266,11 +276,17 @@ Daemon.run_signal_turn ── signals.hold_for (rate limit) ── rules.decide 
   `ask_model`). `RULES.md`: frontmatter (`quiet_hours, daily_budget, min_interval_s, burst_limit,
   judgment_cap, idle_threshold_s`) plus one `## <kind>` table per kind, first match wins. The
   condition vocabulary is closed: `always, count_over, minutes_until_under, minutes_over` (core)
-  plus whatever the loaded senses register; a section whose kind belongs to no loaded sense is
-  parsed but not checked. `decide(signal, rules, user_lists, today, now)`: quiet hours -> defer;
-  daily budget spent -> defer (a `trust: user` signal, e.g. a schedule, is exempt); then the
-  table; no match -> `ask_model`. `judge(signal, cfg, today)` is a stub (D13's model call lands in
-  step 3) returning `(False, "not implemented")` — the seam the daemon already calls through.
+  plus whatever the loaded senses register (`all_day`, `sender_in`/`sender_domain_in`/
+  `subject_has`, `away`); a section whose kind belongs to no loaded sense is parsed but not
+  checked. `decide(signal, rules, user_lists, today, now)`: quiet hours -> defer, daily budget
+  spent -> defer (a `trust: user` signal, e.g. a schedule or a claude_code kind's own instance,
+  is exempt from **both** — an alarm the user set is theirs to hear at 3 a.m. too); then the
+  table; no match -> `ask_model`. `judge(signal, cfg, today)` (D13) is one request on
+  `worker_model` if set else `model`, no tools, no history, messages = a short fixed system
+  ("answer only JSON: `{\"speak\": ..., \"reason\": ...}`") plus that one signal's envelope;
+  strict `json.loads`, anything else (or a blocked/unset model) is `(False, why)` - the only
+  place this module reaches for an llm module, and only inside this function
+  (`test_rules_imports_no_llm_at_top_level`).
 - **`deliver.py`** — `Notice(id, session, text, why, signal_keys)`; `Outbox.hold(session)` is true
   while `is_running(session)` or a fresh (< 60 s) `presence` row says `idle_s < idle_threshold_s`;
   `release()` sends every releasable notice in FIFO order, stopping at the first still held.
@@ -279,17 +295,40 @@ Daemon.run_signal_turn ── signals.hold_for (rate limit) ── rules.decide 
   notification by default — injectable for tests). `rebuild()` restores the queue from
   `state.undelivered()`; nothing is auto-flushed until the next natural `release()` trigger, so a
   restart never pops a banner out of nowhere before anything else has happened.
-- **`senses/`** — one file each, capped at 150 lines. `schedule.py`: reads `cfg["schedules"]`
-  (poll, 30 s), fires a due row once, advances `at` through `config.set` for a repeat, drops a
-  one-shot row; ships `add_schedule`/`list_schedules`/`remove_schedule` (the first and third
-  `write=True, reversible=True`). `shell.py`: push-only (`build(fields, now)`), `command_failed`
-  (exit != 0) / `command_finished` (exit == 0), registers `exit_nonzero` and `duration_over`; its
-  dedupe key includes the arrival time, since a repeat is exactly what `count_over` needs to see.
-  `docs/senses.md` has the zsh hook (backgrounded, errors swallowed — a hook must never block the
-  shell) and a placeholder for the Claude Code hooks step 3 adds.
+- **`senses/`** — one file each, capped at 150 lines (a leading-underscore file is a shared
+  adapter, outside that budget). `schedule.py`: reads `cfg["schedules"]` (poll, 30 s), fires a
+  due row once, advances `at` through `config.set` for a repeat, drops a one-shot row; ships
+  `add_schedule`/`list_schedules`/`remove_schedule` (the first and third `write=True,
+  reversible=True`). `shell.py`: push-only (`build(fields, now)`), `command_failed` (exit != 0) /
+  `command_finished` (exit == 0), registers `exit_nonzero` and `duration_over`; its dedupe key
+  includes the arrival time, since a repeat is exactly what `count_over` needs to see.
+  `calendar.py`/`reminders.py`: two sense modules over one adapter, `_eventkit.py` (158 lines,
+  PyObjC's `EventKit`/`Foundation` imported lazily inside each function - trimmed from Mark.5's
+  `eventkit_bridge.py` to list/add only, timestamps as plain epoch floats so no second date
+  format has to stay in sync with `clock.py`'s); split in two because their `TRUST` differs (an
+  event may be someone else's invitation, `third_party`; a reminder is the user's own note,
+  `user`) - one `TRUST` string per sense module is why they can't share a file. Off without
+  PyObjC: `poll` raises once (`SenseLoop.on_error` logs it as an `error` event) and quietly
+  returns `[]` on every later poll; the tools raise the same message, caught by the broker like
+  any handler exception. `mail.py`: IMAP headers only (`imaplib`, `BODY.PEEK[HEADER...]`, a
+  read-only `SELECT` - `poll` never fetches a body), the account password from the macOS
+  Keychain (`security find-generic-password`) - never config or the environment; an in-memory
+  UID watermark avoids re-fetching mail already turned into a Signal this process, while the
+  real 24 h dedupe is `state.seen`. `attach.py`: fed by the daemon's own `attach {cwd}` message,
+  not a hook - always silence, exists so rules and the future catalog know what the user is
+  working on. `claude_code.py`: pushed by Claude Code's `Stop`/`Notification` hooks, registers
+  `away` (read `state.Today.away`, computed by the daemon from `presence` before `decide` runs -
+  a condition predicate only ever sees `(signal, value, today, now)`, never `rules` or `state`
+  itself, so the `idle_threshold_s` comparison has to happen in `state.today()`, not in the
+  predicate). `docs/senses.md` has the zsh hook (backgrounded, errors swallowed - a hook must
+  never block the shell) and the Claude Code `settings.json` hooks block.
 - **`config.py`** additions: `senses` (`{name: options}` — present key = on; `_check` imports the
   named sense module and validates its options against `OPTIONS`) and `schedules` (a list of
   `{id, at, repeat, text}`; `at` must already be `clock.parse_local`'s canonical string).
+- **Second and third external dependencies.** `calendar`/`reminders` need
+  `pyobjc-framework-EventKit`; `mail` needs nothing extra (`imaplib` is stdlib) but does need a
+  Keychain entry (`docs/senses.md`) and network access to an IMAP server. Both optional -
+  everything else runs without them.
 
 ## 9. Invariants and the tests that hold them
 
@@ -318,11 +357,17 @@ Daemon.run_signal_turn ── signals.hold_for (rate limit) ── rules.decide 
 | D22: a reversible write runs by itself for the user, still asks for signal/job, still denied for system; an irreversible write is unchanged | `test_policy.test_policy_reversible` |
 | `local_datetime` refuses a `Z`/offset and canonicalizes; a schedule fires once and a repeat advances; three same-kind failures speak, fewer stay silent | `test_tools.test_local_datetime_normalize`, `test_senses.*` |
 | `state.db` deleted: `seen()` and `undelivered()` come back from the ledger alone | `test_daemon.ReindexRestoresSignalsTest.test_reindex_restores_seen_and_undelivered` |
+| `judge` returns strict-JSON-only, `(False, ...)` on garbage/missing fields/a blocked or unset model, and reads `worker_model` over `model` | `test_rules.JudgeTest.*`, `test_daemon.JudgmentCapTest.test_judge_never_runs_over_cap` |
+| calendar/reminders are off (not crashed) without PyObjC, log the failure once, then stay quiet; their tools return the same message | `test_calendar.CalendarOffTest.*` |
+| mail's `poll` never issues a body fetch (`PEEK[HEADER` only); its password comes only from the Keychain, never a config key | `test_mail.MailHeadersOnlyTest.*` |
+| `attach {cwd}` pushes exactly one `context` signal when the sense is on, none otherwise | `test_daemon.AttachSenseTest.*` |
+| `claude_code`'s `task_done`/`needs_input` speak only when `today.away` is true | `test_claude_code.ClaudeCodeAwayTest.test_claude_code_speaks_only_when_away` |
+| A `local_datetime` gate shows the canonical string, not what the model wrote | `test_calendar.AddEventGateTest.test_add_event_gate_shows_canonical_datetime` |
 
 ## 10. How to count
 
 ```bash
-python3 -m unittest discover -s tests            # all tests, no network (123)
+python3 -m unittest discover -s tests            # all tests, no network (142)
 wc -l pathfinder/*.py pathfinder/senses/*.py     # core; budgets: ledger 400, state 600, daemon 600,
                                                   # loop 400, broker+policy 350, exec 300, tools 300,
                                                   # clock+signals+rules 450, deliver 250, a sense file 150
@@ -340,8 +385,10 @@ python3 -m pathfinder approvals                   # pending gates, read from sta
 python3 -m pathfinder approve ID | deny ID        # resumes the gated turn and prints its answer
 python3 -m pathfinder interrupt                   # stops the running turn of the latest session
 python3 -m pathfinder config set grants '{"write_file": "allow"}'
-python3 -m pathfinder config set senses '{"schedule": {}, "shell": {}}'
+python3 -m pathfinder config set senses '{"schedule": {}, "shell": {}, "calendar": {}, "reminders": {}}'
 python3 -m pathfinder signal shell '{"cmd": "make test", "exit": 1, "seconds": 3, "cwd": "/tmp"}'
+python3 -m pathfinder config set senses '{"mail": {"host": "imap.example.com", "user": "you@example.com"}}'
+security add-generic-password -s pathfinder-mail -a you@example.com -w   # once, before turning mail on
 python3 -m pathfinder react up                    # thumbs-up the latest delivery
 python3 -m pathfinder rules                       # print the path of RULES.md
 python3 -m pathfinder reindex                     # refuses while a daemon is serving

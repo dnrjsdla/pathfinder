@@ -12,7 +12,7 @@ import asyncio
 import importlib
 import json
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Callable
 
 from . import ledger, tools
@@ -79,18 +79,15 @@ def _validate(name, mod):
         raise ValueError(f"sense {name}: TRUST must be one of {sorted(ledger.TRUST)}, got {trust!r}")
     kinds = getattr(mod, "KINDS", None)
     if not kinds or any(row[2] != "silence" for row in kinds.values()):
-        # the built-in fallback used only when RULES.md has no section at all for a kind -
-        # every sense must promise it defaults to quiet, whatever the authored rules say
         raise ValueError(f"sense {name}: KINDS must export a default silence row for every kind")
     return trust, kinds
 
 
 def load(cfg: dict, home=None) -> list:
     """Import `pathfinder.senses.<name>` for each key in cfg["senses"], validate it, merge its
-    tools into the shared registry (so the model sees them), and return the loaded senses.
-    `home` (when given) is injected into each sense's resolved options as `_home` - the one
-    thing a poll needs that is not a per-sense option (e.g. schedule reads its list of
-    schedules from there)."""
+    tools into the shared registry, and return the loaded senses. `home` becomes both the
+    `_home` a poll reads from `options` and `HOME` bound onto the module itself for a tool
+    handler (which gets no `options`) - the one home this load bound, never `config.home()`."""
     senses = []
     for name, options in (cfg.get("senses") or {}).items():
         mod = importlib.import_module(f"pathfinder.senses.{name}")
@@ -99,6 +96,7 @@ def load(cfg: dict, home=None) -> list:
         resolved.update(options or {})
         if home is not None:
             resolved["_home"] = home
+            mod.HOME = home
         for tool_name, spec in (getattr(mod, "TOOLS", {}) or {}).items():
             tools.TOOLS[tool_name] = spec
         senses.append(Sense(name=name, trust=trust, kinds=dict(kinds),
@@ -116,14 +114,23 @@ class SenseLoop:
         self.push = push
         self.on_error = on_error or (lambda name, exc: None)
         self._task = None
+        self._inflight: set = set()  # in-flight _poll_one tasks - stop() waits for these too
 
     def start(self):
         self._task = asyncio.ensure_future(self._run())
         return self._task
 
-    def stop(self):
+    async def stop(self):
+        """Cancels the scheduler and waits for any poll already in flight - else it can land
+        (call `self.push`, touch `state`) after the daemon has closed out from under it."""
         if self._task is not None:
             self._task.cancel()
+            try:
+                await self._task
+            except asyncio.CancelledError:
+                pass
+        if self._inflight:
+            await asyncio.gather(*self._inflight, return_exceptions=True)
 
     async def _run(self):
         last = dict.fromkeys((s.name for s in self.senses), 0.0)
@@ -132,7 +139,9 @@ class SenseLoop:
             for s in self.senses:
                 if now - last[s.name] >= s.cadence_s:
                     last[s.name] = now
-                    asyncio.ensure_future(self._poll_one(s))
+                    task = asyncio.ensure_future(self._poll_one(s))
+                    self._inflight.add(task)
+                    task.add_done_callback(self._inflight.discard)
             await asyncio.sleep(1)
 
     async def _poll_one(self, s):
@@ -151,8 +160,8 @@ def seen_recently(state, key, now=None) -> bool:
 
 
 def hold_for(state, rules, now=None) -> float:
-    """Seconds to wait before a signal turn may open (0 = open now). The daemon re-queues the
-    whole bundle after sleeping this long - a hold, not a discard."""
+    """Seconds to wait before a signal turn may open (0 = open now) - the caller re-schedules
+    with `call_later`, never sleeps in place, so this never blocks the lane."""
     now = now if now is not None else time.time()
     today = state.today(now)
     if today.last_signal_ts is not None:

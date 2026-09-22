@@ -100,6 +100,17 @@ follow-up questions while an answer streams.
 showed families differ in how they treat arguments; two families cost about 0.24M tokens. —
 *Reversed if* the two disagree by more than 10 points: run the third.
 
+**D19. Steer stays in v1 in both forms (amends D12's fallback).** At a tool boundary the steer is
+a plain user message (m2: reflected 10/10 and 8/8, kept 9/10 and 7/8). Mid-stream the answer is
+cut and continued in the same turn with the steer inside an envelope that tells the model its
+answer was interrupted and to apply the instruction from where it stopped (m2: reflected
+70-100%, kept 70-90% - below the 18/20 line, accepted knowingly). — D12's fallback "interrupt,
+then a new turn" puts the same partial and the same words in front of the model without the
+envelope, which measured worst (kept 3/10 and 6/10); the real alternative is not accepting
+mid-stream interjections at all, which is a step back from D8. — *Reversed if* mid-stream steers
+earn more than 20% thumbs-down in two weeks of real use: then a mid-turn `say` waits for the turn
+end and interrupt stays explicit.
+
 **Approval is explicit** (`approve`/`deny` messages, a `y` key in the screen later). A "yes" in
 conversation is never read as approval by the model: the evaluating side has no model (blueprint
 §2). Not a decision with a reversal condition — a principle already agreed.

@@ -8,9 +8,8 @@ second, the ledger has `interrupted`, the turn ends `cancelled`; (4) deleting `s
 `reindex` brings the pending approval back.
 
 Decisions this partition rests on: D11 (native tool calling), D12 + D17 (steer; a mid-turn `say` is
-a steer), D16 (a gate ends the turn; approval starts a new one), D18 (m2 on two families). The
-steer section is conditional on m2 passing; if it fails, steer is dropped and a mid-turn `say`
-queues as before (D12's fallback).
+a steer), D16 (a gate ends the turn; approval starts a new one), D18 (m2 on two families), D19
+(after m2: steer in both forms; the mid-stream steer travels in an envelope).
 
 NOT in this partition: calendar/reminder/mail tools (partition 3, with their senses), the
 `local_datetime` argument kind (lands with the first tool that takes a time, partition 3), signals
@@ -117,8 +116,12 @@ Transplanted from Mark.5 `exec/sandbox.py` (the shell profile, not the executor 
   - Before every model call: drain `control.steers` into `{"role": "user"}` messages.
   - `("cancelled", None)` from the step: if `control.interrupt` is set →
     `Outcome("cancelled")`; else (a steer cut) → append `{"role": "assistant", "content":
-    partial}` if any text, clear `steer_cut`, drain steers, continue with the next step. A steer
-    cut counts as a step (the budget is a cost ceiling).
+    partial}` if any text, clear `steer_cut`, drain steers **inside the envelope**
+    (`STEER_ENVELOPE + text`: "[The user interrupted mid-answer with the instruction below.
+    Apply it and continue from exactly where the answer above stopped; do not repeat what was
+    already written.]" - the exact string measured in m2 run 3, one constant in `loop.py`),
+    continue with the next step. A steer drained at a tool boundary is a plain user message
+    (no envelope). A steer cut counts as a step (the budget is a cost ceiling).
   - `settle(messages, call_tool, emit, control)` executes the tool calls of the trailing
     assistant message that have no `tool` result yet (matched by `tool_call_id`), in order. `run`
     calls it after every step; with `resume=True` it calls it first, before any model call. A

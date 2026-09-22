@@ -191,3 +191,63 @@ write in parallel before the steer could be sent - excluded as `too_late`, not s
   scorer defect surfaced in run 2 and was fixed by rescoring the saved traces: a cut mid-word
   leaves a fragment ("미" of "미국") that is not an item, and re-typing it is correct.
 - Cost: about 60k tokens over the three runs, one to two seconds per request.
+
+## 2026-09-22 — Partition 2: hands
+
+"It runs" was checked against a live model: a file write streams a gate, the turn ends `gated`,
+the daemon is killed and restarted, `pathfinder approvals` still lists it with the absolute path,
+`approve` writes the file and the answer continues; a `say` while "1..40" streams switches the
+count to English words at 8 without losing the count; `interrupt` kills `sleep 60` in 4.1 s
+(0.1 s after the message) with `interrupted` in the ledger; `state.db` deleted and `reindex`
+brings the pending approval back. 84 offline tests. Core 1,495 lines against 5,500; every module
+inside its budget (broker+policy 105/350, exec 217/300, tools 171/300, daemon 333/600, loop
+178/400).
+
+### What changed against the plan
+
+- **`ToolSpec.normalize`** (not in the contract): the first live gate showed
+  `{"path": "Desktop/pf-hello.txt"}` - a relative path the handler would have resolved against
+  the daemon's cwd, the repository. The rule from m1 ("the gate shows the normalized value")
+  applies to paths as it will to times: a hook after coerce and before policy makes the gate
+  show where the file really lands. Partition 3's local-time rule goes in the same hook.
+- `write_file` refuses `SECRET_PATHS` like `read_file` does (review): a shell rc is code
+  execution on the next login, and a `grants` line must not make that silent.
+- A `grants` entry never covers a sandboxed tool that left its box (escalate, or no sandbox on
+  the machine) - "do not ask me about the shell" is not "run anything bare".
+- The system prompt had to say *never ask for permission in chat*: the first live run answered
+  "may I write the file?" in text instead of calling the tool.
+
+### Defects found, by whom
+
+- **Lead, first live run (tests green, product broken - twice):** the daemon's step factory never
+  passed the tool schemas to the adapter, so the model had no tools; every daemon test used a
+  fake model. And `Gate(Exception)` kept the arguments in `self.args`, which `BaseException`
+  silently turns into a tuple of keys - the ledger recorded `["path", "content"]`. Both now have
+  tests that exercise the real path (`RealStepFactoryTest`, the gate tests read the args back).
+- **Reviewer (opus), NO-GO with six reproduced blockers**, three of one class - *the tool-call id
+  is a string the model chose and re-uses, and the code used it as a primary key and as a
+  capability token*: two gates with the same id left one unresolvable forever and resumed the
+  wrong write (fixed: the approval has its own id, the call id is a column); one approval was a
+  standing permission for the rest of the turn - eight writes from one `approve` (fixed:
+  single-use, and it must match the approved tool and arguments); a typo in `grants` switched the
+  gate off, fail-open (fixed: refused at config and ignored by policy); a `say` landing in the
+  0.4 ms between the model's last chunk and the turn's end was recorded and never answered
+  (fixed: leftover steers get a `continue` turn, and a gate takes them into its messages); the
+  text streamed before a gate was never recorded (fixed: `Gate.said`); an interrupt already set
+  still spent a full model request because the real adapter only sees `cancel` between chunks
+  while the fake step checked it first (fixed: the loop checks before every call). Also from the
+  review: the CLI hung forever on an `error` before `turn.start`; a `steer_cut` left set after a
+  tool discarded the next request whole; `tool_call` args were unclipped in the ledger; gated
+  turns counted as exchanges; a sandboxed interrupt test now covers the real process tree.
+- Verified sound by the reviewer, by running: the sandbox profile is clause-for-clause the Mark.5
+  one (all secrets denied, Apple Events blocked, writes confined, env allow-list applied);
+  `read_file` cannot be talked into a secret via `~`, `..` or a symlink; the process-group kill
+  reaches a backgrounded grandchild in 0.5 s; the policy table matches the contract cell by cell;
+  the single-writer rule holds across worker threads; every malformed protocol line keeps the
+  connection.
+
+### Left open on purpose
+
+The adapter checks `cancel` before processing a chunk, so a mid-stream cut drops the chunk that
+arrived with it (one line of the partial); `approval_pending` stores the whole message list
+(a resume needs it) - a large history makes a large event; sessions are still never evicted.

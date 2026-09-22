@@ -14,6 +14,7 @@ from pathlib import Path
 TYPES = frozenset({
     "session_start", "user", "assistant", "tool_call", "tool_result",
     "turn_start", "turn_end", "error", "config_set",
+    "approval_pending", "approval", "interrupted",
 })
 ORIGINS = frozenset({"user", "signal", "job", "system"})
 TRUST = frozenset({"user", "self", "third_party"})

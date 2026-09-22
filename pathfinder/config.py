@@ -17,6 +17,7 @@ DEFAULTS = {
     "providers": {"ollama": {"base_url": "http://localhost:11434/v1", "api_key_env": ""}},
     "max_steps": 8,
     "session_resume_s": 7200,
+    "grants": {},
 }
 
 
@@ -31,6 +32,10 @@ def _check(key, value):
     if key in ("max_steps", "session_resume_s") and value < 1:
         # max_steps 0 runs the model zero times: no output, no error, a turn that "ends" silently
         raise ConfigError(f"{key} must be at least 1")
+    if key == "grants":
+        bad = {k: v for k, v in value.items() if v not in ("allow", "ask", "deny")}
+        if bad:  # a typo here would otherwise read as "never ask" - fail closed at the door
+            raise ConfigError(f"grants values must be allow, ask or deny: {bad}")
 
 
 def home() -> Path:

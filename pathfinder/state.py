@@ -1,6 +1,7 @@
 """Derived state: a SQLite projection of the ledger. Always rebuildable, never
 the source of truth - the daemon does ledger.append() then state.apply() so
 live writes and rebuild share one code path."""
+import json
 import sqlite3
 import threading
 import time
@@ -10,6 +11,10 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, started_ts REAL, last_ts REAL, turns INTEGER DEFAULT 0);
 CREATE TABLE IF NOT EXISTS messages (seq INTEGER PRIMARY KEY, session TEXT, role TEXT, content TEXT, ts REAL);
+CREATE TABLE IF NOT EXISTS approvals (
+    id TEXT PRIMARY KEY, call_id TEXT, session TEXT, turn TEXT, tool TEXT,
+    args_json TEXT, messages_json TEXT, ts REAL, decision TEXT
+);
 """
 
 
@@ -62,7 +67,17 @@ class State:
         if event["type"] == "assistant" and event.get("final"):
             self._insert_message(seq, session, "assistant", event.get("text", ""), event["ts"])
         if event["type"] == "turn_end" and session:
-            self.db.execute("UPDATE sessions SET turns = turns + 1 WHERE id = ?", (session,))
+            if event.get("kind") != "gated":  # a gate is a pause, not an exchange
+                self.db.execute("UPDATE sessions SET turns = turns + 1 WHERE id = ?", (session,))
+        if event["type"] == "approval_pending":
+            self.db.execute(
+                "INSERT OR IGNORE INTO approvals (id, call_id, session, turn, tool, args_json, messages_json, ts, decision) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)",
+                (event["id"], event["call_id"], session, event.get("turn", ""), event["tool"],
+                 json.dumps(event["args"]), json.dumps(event["messages"]), event["ts"]),
+            )
+        if event["type"] == "approval":
+            self.db.execute("UPDATE approvals SET decision = ? WHERE id = ?", (event["decision"], event["id"]))
         if session:
             self.db.execute("UPDATE sessions SET last_ts = ? WHERE id = ?", (event["ts"], session))
         self.db.execute("UPDATE meta SET value = ? WHERE key = 'cursor'", (str(seq),))
@@ -80,7 +95,7 @@ class State:
 
     def rebuild(self, ledger) -> int:
         self.db.executescript(
-            "DROP TABLE sessions; DROP TABLE messages; DROP TABLE meta;"
+            "DROP TABLE sessions; DROP TABLE messages; DROP TABLE meta; DROP TABLE approvals;"
         )
         self.db.executescript(SCHEMA)
         self.db.execute("INSERT OR IGNORE INTO meta (key, value) VALUES ('cursor', '0')")
@@ -100,6 +115,25 @@ class State:
         if row is None:
             return None
         return {"id": row[0], "started_ts": row[1], "last_ts": row[2], "turns": row[3]}
+
+    def pending(self) -> list:
+        """Approvals with no decision yet, oldest first - what survives a restart."""
+        rows = self.db.execute(
+            "SELECT id, session, turn, tool, args_json, ts FROM approvals WHERE decision IS NULL ORDER BY ts"
+        ).fetchall()
+        return [{"id": r[0], "session": r[1], "turn": r[2], "tool": r[3], "args": json.loads(r[4]), "ts": r[5]}
+                for r in rows]
+
+    def approval(self, id: str):
+        row = self.db.execute(
+            "SELECT id, session, turn, tool, args_json, messages_json, ts, decision, call_id FROM approvals WHERE id = ?",
+            (id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return {"id": row[0], "session": row[1], "turn": row[2], "tool": row[3],
+                "args": json.loads(row[4]), "messages": json.loads(row[5]), "ts": row[6], "decision": row[7],
+                "call_id": row[8]}
 
     def latest_session(self, max_age_s: float, now=None):
         now = time.time() if now is None else now

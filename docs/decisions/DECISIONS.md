@@ -114,3 +114,27 @@ end and interrupt stays explicit.
 **Approval is explicit** (`approve`/`deny` messages, a `y` key in the screen later). A "yes" in
 conversation is never read as approval by the model: the evaluating side has no model (blueprint
 §2). Not a decision with a reversal condition — a principle already agreed.
+
+## 2026-09-22 — Partition 3 (owner's choices on the contract's three questions)
+
+**D20. A `speak` decision delivers the code-assembled notice plus one step from the model.** The
+signal turn (origin `signal`, envelope, no history, read tools run, writes and network gate,
+budget 4) appends one or two sentences to the sense's one-line summary; when the model is blocked
+or silent the summary alone goes out. — D8: "meeting in ten minutes" is a notification, "meeting in
+ten minutes - yesterday's draft is here" is an assistant; the morning brief only exists in this
+form. Cost is inside m6's twenty signal turns a day. The notice line itself is never the model's
+(blueprint §8). — *Reversed if* signal-turn additions earn more than 20% thumbs-down in two weeks:
+then the summary alone, and the model joins when the user replies.
+
+**D21. Mail arrives through IMAP headers only (Mark.5 bridge, password in the Keychain).** MCP
+mail servers are reviewed at the entrance of partition 6, when the MCP client exists: if one
+serves, the mail sense becomes a thin file over its tools and nothing else changes. — Proven
+bridge, no body ever fetched, no client to pull forward. — *Reversed if* the partition 6 review
+finds an MCP mail source that needs no app password and passes m3.
+
+**D22. The policy table gains a `reversible` column: user allow, signal ask, job ask, system
+deny.** A tool that is a write the user can undo by deleting a row (`add_schedule`,
+`remove_schedule`) declares it; a calendar write does not (it may sync and invite). — The
+invariant "only what can be undone runs by itself" becomes a cell of the table instead of a
+`grants` default; a mail-opened turn still asks. — *Reversed if* a reversible tool is ever found
+to have had an effect outside its own row: then it loses the flag.

@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
+from . import clock
 from . import exec as _exec
 
 READ_CLIP = 8000
@@ -23,8 +24,10 @@ class ToolSpec:
     write: bool = False       # has an external side effect -> needs the user's ok
     network: bool = False     # can send data out
     sandboxed: bool = False   # side effects are confined by exec.py
+    reversible: bool = False  # a write the user can undo by deleting a row (D22) -> user: allow
     # Runs after coerce and before policy: what the gate shows is what will happen. A relative
-    # path becomes absolute here; partition 3 puts the local-time rule for time arguments here.
+    # path becomes absolute here; a local_datetime param is canonicalized by normalize_local_datetime.
+    # May raise ValueError with a message the model can act on - the broker turns it into a tool error.
     normalize: Callable[[dict], dict] | None = None
 
     def schema(self) -> dict:
@@ -107,6 +110,20 @@ def _clip(text: str) -> str:
     head = tail = READ_CLIP // 2
     dropped = len(text) - head - tail
     return f"{text[:head]}\n...({dropped} characters omitted)...\n{text[-tail:]}"
+
+
+def normalize_local_datetime(*keys):
+    """Build a `normalize` for a spec whose params declare `"format": "local_datetime"` on
+    `keys`: parses each with clock.parse_local and rewrites it canonical, so the gate and
+    RULES.md show exactly when it lands. `parse_local`'s ValueError (a `Z` or an offset) is
+    left to propagate - the broker turns it into a tool error the model can act on."""
+    def normalize(args):
+        out = dict(args)
+        for key in keys:
+            if key in out:
+                _, out[key] = clock.parse_local(out[key])
+        return out
+    return normalize
 
 
 def _absolute_path(args):

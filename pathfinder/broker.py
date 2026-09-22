@@ -44,7 +44,10 @@ class Broker:
         if error:
             return {"ok": False, "error": error}
         if spec.normalize:
-            coerced = spec.normalize(coerced)  # before the gate: the user approves what will run
+            try:
+                coerced = spec.normalize(coerced)  # before the gate: the user approves what will run
+            except ValueError as e:
+                return {"ok": False, "error": str(e)}
 
         if id in self.denied:
             self.denied.discard(id)

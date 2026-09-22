@@ -15,4 +15,4 @@ build-backend = "setuptools.build_meta"
 include = ["pathfinder*"]
 
 [tool.setuptools.package-data]
-pathfinder = ["prompts/*.txt"]
+pathfinder = ["prompts/*.txt", "prompts/*.md"]

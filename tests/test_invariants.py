@@ -1,9 +1,11 @@
 """Invariants that are properties of the source, not of one function (blueprint section 11)."""
+import importlib.util
 import re
 import unittest
 from pathlib import Path
 
 SRC = Path(__file__).resolve().parent.parent / "pathfinder"
+REPO_ROOT = SRC.parent
 
 
 def sources():
@@ -24,17 +26,53 @@ class SourceInvariants(unittest.TestCase):
         self.assertEqual(len(re.findall(r"^def partition\(", ledger, re.M)), 1)
         # A date computed anywhere else is a second definition of "the day" - the exact
         # boundary bug that killed the predecessor. Scan the WHOLE package, not just the ledger.
+        # Partition 3: clock.py becomes the one place a *local* calendar is computed, so it is
+        # unlimited; ledger.py keeps its allowance of 3 (partition()'s one line); every other
+        # module stays at 0.
         day_maths = r"%Y-%m-%d|strftime|isoformat\(|\.date\(\)|fromtimestamp|timedelta"
         for name, text in sources().items():
+            if name == "clock.py":
+                continue
             hits = re.findall(day_maths, text)
-            allowed = 3 if name == "ledger.py" else 0  # the one line in partition(): fromtimestamp, strftime, its format
-            self.assertLessEqual(len(hits), allowed, f"{name} computes dates ({hits}); only ledger.partition() may")
+            allowed = 3 if name == "ledger.py" else 0
+            self.assertLessEqual(len(hits), allowed,
+                                 f"{name} computes dates ({hits}); only ledger.partition() and clock.py may")
 
     def test_no_model_ids_or_tcp_in_source(self):
         for name, text in sources().items():
             # \b: the provider key "ollama" is configuration, the model family "llama" would not be
             self.assertNotRegex(text, r"\b(gpt-|claude-|gemma|nemotron|llama|qwen)", f"{name} hardcodes a model name")
             self.assertNotRegex(text, r"start_server\(|AF_INET", f"{name} opens TCP; the daemon is unix-socket only")
+
+    def test_sense_files_under_150_lines(self):
+        for p in (SRC / "senses").glob("*.py"):
+            if p.name == "__init__.py":
+                continue
+            n = len(p.read_text(encoding="utf-8").splitlines())
+            self.assertLessEqual(n, 150, f"{p.name} is {n} lines, over the sense budget of 150")
+
+    def test_rules_imports_no_llm_at_top_level(self):
+        """rules.judge() is where the model call lands (D13); nothing else in the module may
+        import an llm module - a live model call must not hide behind decide()'s cheap path."""
+        for line in sources()["rules.py"].splitlines():
+            if line.startswith(("import ", "from ")):
+                self.assertNotIn("llm", line, f"rules.py imports llm at module level: {line!r}")
+
+
+class SignalEnvelopeInvariants(unittest.TestCase):
+    """m3 (HISTORY.md) measured that this exact wording keeps the injection defense at 0/20;
+    the package's constants must stay byte-identical to the bench that measured them."""
+
+    @classmethod
+    def setUpClass(cls):
+        spec = importlib.util.spec_from_file_location("m3_injection", REPO_ROOT / "bench" / "m3_injection.py")
+        cls.bench = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.bench)
+
+    def test_envelope_and_clause_match_the_bench(self):
+        from pathfinder import signals
+        self.assertEqual(signals.SIGNAL_ENVELOPE, self.bench.SIGNAL_ENVELOPE)
+        self.assertEqual(signals.SIGNAL_TURNS_CLAUSE, self.bench.SIGNAL_TURNS_CLAUSE)
 
 
 if __name__ == "__main__":

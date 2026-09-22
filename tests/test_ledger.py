@@ -29,6 +29,12 @@ class LedgerClosedVocabTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.ledger.append("user", seq=999)
 
+    def test_ledger_closed_vocab_partition_3_types(self):
+        """signal, decision, judgment, delivery, reaction - partition 3's new event types."""
+        for type_ in ("signal", "decision", "judgment", "delivery", "reaction", "presence"):
+            event = self.ledger.append(type_, origin="signal")
+            self.assertEqual(event["type"], type_)
+
 
 class PartitionRoundtripTest(unittest.TestCase):
     def setUp(self):

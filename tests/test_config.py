@@ -82,6 +82,27 @@ class ConfigTest(unittest.TestCase):
         with self.assertRaises(config.ConfigError):
             config.load(self.home)
 
+    def test_sense_options_checked_by_config(self):
+        with self.assertRaises(config.ConfigError):
+            config.set(self.home, "senses", {"no_such_sense": {}})
+        with self.assertRaises(config.ConfigError):
+            config.set(self.home, "senses", {"schedule": {"no_such_option": 1}})
+        cfg = config.set(self.home, "senses", {"schedule": {}})
+        self.assertEqual(cfg["senses"], {"schedule": {}})
+
+    def test_schedules_validated_shape_and_canonical_time(self):
+        good = [{"id": "a", "at": "2026-09-22 09:00", "repeat": "none", "text": "x"}]
+        cfg = config.set(self.home, "schedules", good)
+        self.assertEqual(cfg["schedules"], good)
+        with self.assertRaises(config.ConfigError):
+            config.set(self.home, "schedules", [{"id": "a", "at": "2026-09-22 09:00", "text": "x"}])  # missing repeat
+        with self.assertRaises(config.ConfigError):
+            config.set(self.home, "schedules",
+                      [{"id": "a", "at": "2026-09-22 09:00", "repeat": "monthly", "text": "x"}])
+        with self.assertRaises(config.ConfigError):
+            config.set(self.home, "schedules",
+                      [{"id": "a", "at": "2026-09-22T09:00Z", "repeat": "none", "text": "x"}])
+
     def test_home_tightens_an_existing_directory(self):
         loose = self.home / "loose"
         loose.mkdir(mode=0o755)

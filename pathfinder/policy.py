@@ -10,12 +10,12 @@ DENIED_TEXT = (
 )
 
 # origin -> category -> decision. "read" is any tool that is none of write,
-# network, or sandboxed.
+# network, sandboxed or reversible.
 _TABLE = {
-    "user":   {"read": "allow", "sandboxed": "allow", "network": "allow", "write": "ask"},
-    "signal": {"read": "allow", "sandboxed": "ask",    "network": "ask",   "write": "ask"},
-    "job":    {"read": "allow", "sandboxed": "ask",    "network": "ask",   "write": "ask"},
-    "system": {"read": "allow", "sandboxed": "deny",   "network": "deny",  "write": "deny"},
+    "user":   {"read": "allow", "sandboxed": "allow", "network": "allow", "write": "ask",  "reversible": "allow"},
+    "signal": {"read": "allow", "sandboxed": "ask",    "network": "ask",   "write": "ask",  "reversible": "ask"},
+    "job":    {"read": "allow", "sandboxed": "ask",    "network": "ask",   "write": "ask",  "reversible": "ask"},
+    "system": {"read": "allow", "sandboxed": "deny",   "network": "deny",  "write": "deny", "reversible": "deny"},
 }
 
 
@@ -28,7 +28,9 @@ def _category(spec, args) -> str:
         escalate = bool((args or {}).get("escalate"))
         return "write" if (escalate or not _exec.available()) else "sandboxed"
     if spec.write:
-        return "write"
+        # D22: a write the user can undo by deleting a row (add_schedule, remove_schedule)
+        # runs by itself for the user; a calendar write may sync and invite, so it stays "write".
+        return "reversible" if spec.reversible else "write"
     if spec.network:
         return "network"
     return "read"

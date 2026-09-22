@@ -13,6 +13,7 @@ READ = _spec("read_thing")
 NET = _spec("net_thing", network=True)
 SHELL = _spec("shell_thing", write=True, sandboxed=True)
 WRITE = _spec("write_thing", write=True)
+REVERSIBLE = _spec("reversible_thing", write=True, reversible=True)
 
 
 class PolicyTableTest(unittest.TestCase):
@@ -61,6 +62,21 @@ class PolicyTableTest(unittest.TestCase):
         grants = {"read_thing": "deny"}
         with mock.patch("pathfinder.policy._exec.available", return_value=True):
             self.assertEqual(policy.decide(READ, "user", {}, grants), "deny")
+
+    def test_policy_reversible(self):
+        """D22: a reversible write (add_schedule, remove_schedule) runs by itself for the
+        user; every other origin still asks (job/signal) or denies (system) exactly as an
+        ordinary write; an irreversible write's own row is unchanged; grants still win for user."""
+        cases = [
+            ("user", REVERSIBLE, "allow"), ("signal", REVERSIBLE, "ask"),
+            ("job", REVERSIBLE, "ask"), ("system", REVERSIBLE, "deny"),
+        ]
+        with mock.patch("pathfinder.policy._exec.available", return_value=True):
+            for origin, spec, expected in cases:
+                self.assertEqual(policy.decide(spec, origin, {}, {}), expected, f"{origin} x {spec.name}")
+            self.assertEqual(policy.decide(WRITE, "user", {}, {}), "ask")  # irreversible: unchanged
+            grants = {"reversible_thing": "deny"}
+            self.assertEqual(policy.decide(REVERSIBLE, "user", {}, grants), "deny")  # grants still win
 
 
 if __name__ == "__main__":

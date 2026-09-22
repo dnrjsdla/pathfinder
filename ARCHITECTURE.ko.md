@@ -4,27 +4,35 @@
 `docs/decisions/DECISIONS.md`, 실측이 바꾼 것은 `HISTORY.md`. 여기 적힌 이름은 전부 트리에
 실존한다. 정본은 영어 `ARCHITECTURE.md` 이고 이 파일은 같은 커밋에서 함께 고친다.
 
-지금까지 지은 것: **구획 2 — 손.** 비서가 말하고(1), 이제 툴을 부르고 · 셸을 샌드박스에 가두고 ·
-쓰기 전에 묻고 · 도는 중에 한 말을 받고 · 멈추라면 멈춘다(2). 신호 · 작업자 · 기억 · 설치기는
-아직 없다.
+지금까지 지은 것: **구획 3(그 착수 순서의 2단계) — 세상이 말한다.** 비서가 말하고(1) 툴을
+부르고(2); 이제 사용자가 정한 일정, 실패하거나 끝난 셸 명령이 `Signal` 이 된다. 값싼 규칙
+(`RULES.md`) 이 speak · silence · defer · ask_model 을 공짜로 정하고, `speak` 만 짧은 모델 턴을
+열며, 그 알림은 세션이 비기를 기다렸다가 나간다. 캘린더 · 메일 · `attach`/`claude_code` 감각과
+울타리 친 판정의 모델 호출은 다음 단계이고, 작업자 · 기억 볼트 · TUI 는 그 뒤 구획들이다.
 
 ## 0. 한 문장
 
 모든 사실은 먼저 장부 하나에 적히고, 나머지는 전부 거기서 파생되며 지워도 된다.
 
 ```
-클라이언트 (nc -U, `pathfinder say|approve|deny|interrupt`)
+클라이언트 (nc -U, `pathfinder say|listen|signal|react|approve|deny|interrupt`)
    │  <홈>/pathfinder.sock 위의 NDJSON  (0600, TCP 없음)
    ▼
-daemon.Daemon ── 세션마다 lane 하나 (큐 + 워커); 큐 항목: say | resume | continue
+daemon.Daemon ── 세션마다 lane 하나 (큐 + 워커); 큐 항목: say | resume | continue | signal
    │  record(): event = ledger.append(...)  →  state.apply(event)      (이벤트 루프 스레드에서만)
    ├─▶ ledger.Ledger   <홈>/events/<UTC 날짜>.jsonl   append-only, 진실
-   ├─▶ state.State     <홈>/state.db                  파생, 다시 만들 수 있음 (메시지 · 승인)
-   └─▶ loop.run(step, messages, call_tool, emit, control)   워커 스레드에서
-            ├─ step = llm.openai_compat.stream(endpoint, messages, tools, cancel=control)
-            └─ call_tool = broker.Broker.call ── coerce → normalize → policy.decide → 핸들러
-                                                   allow: 실행 · ask: Gate 예외 · deny: DENIED_TEXT
-                     tools.TOOLS: run_command (exec.py, Seatbelt) · read_file · write_file
+   ├─▶ state.State     <홈>/state.db                  파생, 다시 만들 수 있음 (메시지 · 승인 ·
+   │                                                    signals · decisions · judgments · deliveries)
+   ├─▶ loop.run(step, messages, call_tool, emit, control)   워커 스레드에서 (유저 턴과 신호 턴 모두)
+   │        ├─ step = llm.openai_compat.stream(endpoint, messages, tools, cancel=control)
+   │        └─ call_tool = broker.Broker.call ── coerce → normalize → policy.decide → 핸들러
+   │                                               allow: 실행 · ask: Gate 예외 · deny: DENIED_TEXT
+   │                 tools.TOOLS: run_command · read_file · write_file · schedule 의 add/list/remove
+   ├─▶ signals.SenseLoop ── senses/schedule.py 를 자기 주기로 폴링; senses/shell.py 는 push 만
+   │        push_signal → 중복 제거 (state.seen) → lane 의 "signal" 항목 → rules.decide → 말할까?
+   │        → 위의 그 모델 턴 하나 (origin "signal", Signal-turns 절, 이력 없음, budget 4)
+   └─▶ deliver.Outbox ── 턴이 도는 중이거나 presence 가 "타이핑 중"이면 알림을 들고 있는다;
+            모든 turn.end 와 presence 갱신 뒤 풀린다; 붙은 클라이언트가 있으면 소켓, 없으면 배너
 ```
 
 ## 1. 무엇이 어디에 사나
@@ -33,9 +41,11 @@ daemon.Daemon ── 세션마다 lane 하나 (큐 + 워커); 큐 항목: say | 
 |---|---|---|---|
 | `<홈>/events/<날짜>.jsonl` | 사건 전부, 한 줄에 JSON 하나 | `ledger.Ledger.append()` 하나뿐 | 기록을 잃는다 — 유일한 진실 |
 | `<홈>/state.db` | 세션 · 메시지 · 커서 · 승인 | `state.State.apply()` | `pathfinder reindex`, 또는 그냥 재시작 |
-| `<홈>/config.json` | 모델 이름 · provider · `grants` · 손잡이 | `config.set()` 하나뿐 | 기본값(모델 미설정) |
+| `<홈>/config.json` | 모델 이름 · provider · `grants` · `senses` · `schedules` · 손잡이 | `config.set()` 하나뿐 | 기본값(모델 미설정) |
 | `<홈>/workspace/` | 샌드박스 셸이 쓸 수 있는 유일한 곳 · 모든 셸 명령의 cwd · 상대경로 파일이 놓이는 곳 | 사용자의 요청으로 툴이 | PATHFINDER 의 것은 없음 |
 | `<홈>/pathfinder.sock` | 데몬의 소켓 | 데몬 | 뜰 때 다시 만든다 |
+| `<홈>/RULES.md` | speak/silence/defer/ask_model 규칙, 사람이 읽을 수 있는 한 장 | 첫 시작에 `pathfinder/prompts/RULES.md` 에서 만들어짐; 손으로 고침 | 다음 시작에 기본값으로 다시 씀 |
+| `<홈>/USER.md` | RULES.md 의 `USER.xxx` 조건이 읽는 목록; 지금은 비어 있음 | 첫 시작에 빈 채로 만들어짐; 구획 5 가 채움 | 빈 앞머리 |
 
 `<홈>` 은 `$PATHFINDER_HOME` 또는 `~/.pathfinder` (권한 0700).
 
@@ -52,9 +62,13 @@ daemon.Daemon ── 세션마다 lane 하나 (큐 + 워커); 큐 항목: say | 
 - 알려진 천장: `fsync` 없이 `flush()` 만 한다.
 
 지금의 사건 종류: `session_start, user, assistant, tool_call, tool_result, turn_start, turn_end,
-error, config_set, approval_pending, approval, interrupted`. `config_set` 은 키만 적는다. 턴 도중의
-steer 는 `steer: true` 가 붙은 `user` 사건이다. `tool_call` 의 인자와 `tool_result` 의 결과는
-2,000자로 자른다. `approval_pending` 은 도는 중이던 메시지를 통째로 싣는다(재개에 필요).
+error, config_set, approval_pending, approval, interrupted, signal, decision, judgment, delivery,
+reaction, presence`. `config_set` 은 키만 적는다. 턴 도중의 steer 는 `steer: true` 가 붙은 `user`
+사건이다. `tool_call` 의 인자와 `tool_result` 의 결과는 2,000자로 자른다. `approval_pending` 은
+도는 중이던 메시지를 통째로 싣는다(재개에 필요). `signal` 사건의 `trust` 는 감각 자신의 선언
+(`ledger.TRUST`)이지 데이터가 주장하는 값이 아니다. `decision` 은 `signal_key, action, why` 를
+싣고, 알림까지 이어진 `speak` 에 한해 `notice_id, text, signal_keys` 도 싣는다(재시작 뒤
+`Outbox` 가 이것으로 복구한다).
 
 ## 3. 파생 상태 (`pathfinder/state.py`)
 
@@ -67,6 +81,16 @@ steer 는 `steer: true` 가 붙은 `user` 사건이다. `tool_call` 의 인자�
 decision)`: `approval_pending` 이 넣고 `approval` 이 결정을 적는다. `pending()` · `approval(id)` 로
 읽는다. `catch_up(ledger)` 는 데몬이 뜰 때, `rebuild(ledger)` 는 표를 버리고 다시 흘린다 —
 승인 대기도 함께 돌아온다.
+
+구획 3 이 더한 것: `signals(key, ts, sense, kind)`(24시간 중복 제거: `seen(key, since)`),
+`decisions(signal_key, ts, action, why, notice_id, session, text, signal_keys)`, `judgments(ts)`,
+`deliveries(id, ts, session, via)`, `reactions(ts, delivery_id, vote)`, `presence(session, ts,
+idle_s)`, `signal_turns(ts)`(신호 기원 `turn_start` 한 번마다 한 줄 — 속도 제한용). `today(now)`
+(`clock.day_start` 기준)는 `rules.decide` 가 필요로 하는 계수들을 준다: `spoken`, `judgments`,
+`last_signal_ts`, `burst`(최근 60초 안의 신호 턴 수), `kind_counts`(오늘 종류별 판정 수,
+`count_over` 용). `undelivered()` 는 `delivery` 가 아직 없는 `decision speak` 를 찾는다 —
+`deliver.Outbox.rebuild()` 가 죽었다 살아날 때 복구하는 것. `rebuild(ledger)` 는 이 표들도
+같이 버리고 다시 흘린다.
 
 ## 4. 모델 층 (`pathfinder/llm/`)
 
@@ -81,29 +105,36 @@ decision)`: `approval_pending` 이 넣고 `approval` 이 결정을 적는다. `p
 ## 5. 툴 · 정책 · 샌드박스 · 브로커
 
 **`tools.py`** — `ToolSpec(name, description, params, required, handler, write, network,
-sandboxed, normalize)`; `schema()` 는 OpenAI 툴 dict; `coerce(spec, args)` 는 선언된 인자를
-JSON 스키마 타입으로 캐스팅하고(문자열 `"false"` 가 참으로 통과해 escalate 가 되면 안 된다),
-선언 안 된 키를 버리고, 빠진 필수 키를 오류로 낸다. `normalize` 는 coerce 뒤 · policy 앞에 돌아
-**게이트에 보이는 것이 실제로 일어날 일**이 되게 한다: `read_file` · `write_file` 의 상대경로는
-`<workspace>/경로` 가 되고 `~` 는 펼쳐진다. 툴 셋: `run_command(command, escalate)`(write,
-sandboxed) · `read_file(path)` · `write_file(path, content)`(write). 파일 툴 둘은
-`exec.SECRET_PATHS` 를 거부한다.
+sandboxed, reversible, normalize)`; `schema()` 는 OpenAI 툴 dict; `coerce(spec, args)` 는 선언된
+인자를 JSON 스키마 타입으로 캐스팅하고(문자열 `"false"` 가 참으로 통과해 escalate 가 되면 안
+된다), 선언 안 된 키를 버리고, 빠진 필수 키를 오류로 낸다. `normalize` 는 coerce 뒤 · policy 앞에
+돌아 **게이트에 보이는 것이 실제로 일어날 일**이 되게 한다: `read_file` · `write_file` 의
+상대경로는 `<workspace>/경로` 가 되고 `~` 는 펼쳐진다; `"format": "local_datetime"` 을 선언한
+인자는 `normalize_local_datetime(*keys)` 가 `clock.parse_local` 로 정규화하고, 그 `ValueError`
+(`Z` 나 오프셋)는 모델이 손볼 수 있는 툴 오류가 된다. 핵심 툴: `run_command(command,
+escalate)`(write, sandboxed) · `read_file(path)` · `write_file(path, content)`(write) — 파일 툴
+둘은 `exec.SECRET_PATHS` 를 거부한다. 감각이 툴을 더 얹을 수 있다(schedule 의
+`add_schedule`/`list_schedules`/`remove_schedule` — §8), `signals.load` 가 이 같은 레지스트리에
+합친다.
 
 **`policy.py`** — `decide(spec, origin, args, grants) -> allow | ask | deny`. 모델 없음, 셸 문법
 해석 없음, 읽는 인자는 `escalate` 하나. 샌드박스 툴은 `sandboxed` 로 판정하되 escalate 하거나
-이 기계에 샌드박스가 없으면 `write` 다.
+이 기계에 샌드박스가 없으면 `write` 다; `reversible=True` 를 선언한 보통 write 는 `write` 대신
+`reversible` 로 판정된다(D22).
 
-| 출처 \ 툴 | read | sandboxed | network | write |
-|---|---|---|---|---|
-| `user` | allow | allow | allow | **ask** |
-| `signal` | allow | ask | ask | ask |
-| `job` | allow | ask | ask | ask |
-| `system` | allow | deny | deny | deny |
+| 출처 \ 툴 | read | sandboxed | network | write | reversible |
+|---|---|---|---|---|---|
+| `user` | allow | allow | allow | **ask** | **allow** |
+| `signal` | allow | ask | ask | ask | ask |
+| `job` | allow | ask | ask | ask | ask |
+| `system` | allow | deny | deny | deny | deny |
 
 `config.json` 의 `grants`(`{툴: allow|ask|deny}`) 는 `user` 턴에서만 표를 이기고, 상자를 벗어난
 샌드박스 툴(escalate, 샌드박스 없음)에는 절대 적용되지 않으며, 세 낱말 중 하나일 때만 먹는다 —
 config 가 다른 값을 거부하고 policy 도 무시한다. 오타가 게이트를 끄면 안 된다. `DENIED_TEXT` 는
-실패가 아니라 정책이라고 말해 모델이 우회로를 찾지 않게 한다.
+실패가 아니라 정책이라고 말해 모델이 우회로를 찾지 않게 한다. `reversible` 은 자기가 만든 줄을
+지워 되돌릴 수 있는 write(`add_schedule`, `remove_schedule`)를 뜻한다 — 사용자에게는 그 자체로
+돌지만, 신호가 연 턴(그런 줄을 심으려는 메일)은 다른 write 와 똑같이 여전히 묻는다.
 
 **`exec.py`** — Mark.5 의 Seatbelt 프로파일(실측은 HISTORY): `(deny default)`, 프로세스
 exec/fork, HOME 아래 `SECRET_PATHS`(`.ssh .aws .gnupg .config/gh .docker Library/Keychains
@@ -143,11 +174,18 @@ dict 를 키 튜플로 바꿔 버린다.
 ## 7. 데몬 (`pathfinder/daemon.py`)
 
 - 규약, 한 줄에 JSON 하나. 들어오는 것 `attach {session?}` · `say {text}` · `interrupt` ·
-  `approve {id}` · `deny {id}`. 나가는 것 `attached` · `turn.start` · `delta` · `tool {name, ok}` ·
-  `gate {id, tool, args}` · `turn.end {kind}` · `error`. 깨진 줄 · 모르는 종류 · 없거나 이미 결정된
-  승인 id · 도는 턴이 없는 interrupt 는 `error` 한 줄이고 연결은 안 끊는다.
-- 세션 = 큐 + 워커 하나. 큐 항목: `("say", text)` · `("resume", approval_id)` ·
-  `("continue", steer_text)`. `attach` 는 `session_resume_s` 안의 최근 세션을 잇는다.
+  `approve {id}` · `deny {id}` · `signal {sense, fields}`(push 문 — 감각이 로드되어 있고
+  push 가능해야 한다, 즉 `build(fields)` 를 내보내야 한다) · `presence {idle_s}` ·
+  `react {vote, id?}`. 나가는 것 `attached` · `turn.start` · `delta` · `tool {name, ok}` ·
+  `gate {id, tool, args}` · `turn.end {kind}` · `notice {id, text, why}` · `error`. 깨진 줄 ·
+  모르는 종류 · 없거나 이미 결정된 승인 id · 도는 턴이 없는 interrupt 는 `error` 한 줄이고
+  연결은 안 끊는다.
+- 세션 = 큐 + 워커 하나(`_Lane`, deque 로 만든 큐 — 보통 `asyncio.Queue` 에는 미리보기가 없다).
+  큐 항목: `("say", text)` · `("resume", approval_id)` · `("continue", steer_text)` ·
+  `("signal", Signal)`. `attach` 는 `session_resume_s` 안의 최근 세션을 잇는다.
+- **상주 시스템 프롬프트는 `prompts/system.txt` + `signals.SIGNAL_TURNS_CLAUSE` 이고, 유저 턴과
+  신호 턴을 가리지 않고 모든 턴에서 바이트 단위로 같다**(캐시); 두 번째 시스템 메시지
+  `clock.now_line()`("Local time now: ...")만 턴마다 바뀐다.
 - **턴이 도는 중의 `say` 는 steer 다**(D17): `user {steer: true}` 로 적히고 `control.steers` 에
   들어가며, 툴 핸들러가 도는 중(`in_tool`)이 아니면 `steer_cut` 이 선다 — 스트림은 끊지만 툴은
   안 끊는다. 모델의 마지막 청크 뒤에 도착한 steer 도 잃지 않는다: 턴이 끝났는데 steer 가 남아
@@ -168,7 +206,86 @@ dict 를 키 튜플로 바꿔 버린다.
 - 모델이 막혀도 데몬은 산다: `LLMError` 는 `error` 사건 · `error` 줄 · `turn.end {kind: "error"}`.
   소켓은 0600 으로 태어나고, 살아 있는 소켓이면 거부한다.
 
-## 8. 불변조건과 그것을 붙드는 테스트
+## 8. 신호 · 규칙 · 전달 · 감각 (구획 3)
+
+신호가 흐르는 길, 처음부터 끝까지:
+
+```
+sense.poll(options, now) -> [Signal]           (schedule.py, 30초마다)
+sense.build(fields, now) -> Signal             (shell.py, 훅이 `signal` 로 push)
+        │
+        ▼
+Daemon.push_signal ── "signal" 기록 ── state.seen(key, 24h)? ── 예: "decision silence, seen"
+        │ 아니오                                                    (버려짐, 큐에 안 들어감)
+        ▼
+세션 lane: ("signal", Signal) — 바로 뒤에 연달아 있는 것들이 한 다발로 모인다
+        │
+        ▼
+Daemon.run_signal_turn ── signals.hold_for (속도 제한) ── 신호마다 rules.decide:
+        defer / silence ──▶ 적히고 끝, 공짜
+        ask_model ──▶ judgment_cap? defer : rules.judge (스텁) ──▶ "judgment" 적고 다시 결정
+        speak (전부) ──▶ Daemon._signal_model_turn
+                │
+                ▼
+        모델 턴 하나: origin "signal", Broker(origin="signal"), 이력 없음, budget 4,
+        messages = system_prompt + now_line + signals.render_envelope(다발)
+        전달할 글 = 감각의 요약들 + 모델의 한마디 (LLMError/빈 답/게이트면 요약만) ──▶
+        "decision speak" 로 적힘(이번엔 notice_id/text 를 담고) ──▶
+        deliver.Outbox.enqueue(Notice)
+                │
+                ▼
+        대상 세션의 턴이 도는 중이거나 presence 가 "타이핑 중"이면 들고 있는다; 모든 turn.end 와
+        presence 갱신 뒤 풀린다 ──▶ 붙어 있으면 소켓 `notice`, 없으면 macOS 배너 ──▶
+        "delivery" 와 "assistant {origin: signal, final: true}" 로 적힘(이력에 남아 나중에
+        `pathfinder listen` 이 봄)
+```
+
+- **`clock.py`** — `ledger.py` 말고 날짜를 계산해도 되는 유일한 모듈(`test_invariants` 는 여기에
+  천장을 안 두고, 다른 곳은 전부 0). `now_line()`, `local_day(ts)`, `day_start(ts)`, `hour(ts)`,
+  `parse_local(text) -> (ts, canonical)`(`Z` 나 오프셋을 거부), `format_local(ts)`,
+  `minutes_until`, `next_repeat`. 로컬 시각은 항상 오프셋 없는 벽시계 문자열이고, `time.mktime`
+  이 다른 모든 타임스탬프와 같은 epoch 로 바꾼다.
+- **`signals.py`** — `Signal(sense, kind, key, summary, fields, trust)`; `SIGNAL_ENVELOPE` 와
+  `SIGNAL_TURNS_CLAUSE` 는 `bench/m3_injection.py` 에서 그대로 복사했다(m3, HISTORY.md: 바로 이
+  문구가 모델이 신호 안에 숨은 지시를 따르지 않고 데이터로만 읽게 한다 — 주입 0/20, 대조군
+  5/5). `render_envelope(signals)` 는 봉투 뒤에 신호마다 `render_block` 하나씩
+  (kind/trust/key/summary/fields-as-JSON) — 블록의 `trust` 는 감각 자신의 선언이 쓰는 것이지
+  데이터가 아니다. `load(cfg, home)` 은 설정된 `pathfinder.senses.<name>` 을 하나씩 임포트해서
+  `OPTIONS`, 올바른 `TRUST`, 모든 줄이 `silence` 인 `KINDS`(침묵할 길이 없는 감각은 거부됨)를
+  갖췄는지 보고, `TOOLS` 를 공용 레지스트리에 합치고, `home` 을 옵션에 `_home` 으로 심는다.
+  `SenseLoop` 는 로드된 폴링 감각마다 자기 `CADENCE_S` 로 스레드에서 돌리고, 예외를 낸 감각은
+  죽이지 않고 로그만 남긴다. `seen_recently`/`hold_for` 는 state 에서 읽는 중복 제거와 속도
+  제한이다.
+- **`rules.py`** — Mark.5 `brain/rules.py` 를 옮겨왔다(`prepare` 는 뺐고 `model` 은 `ask_model`
+  로 이름을 바꿨다). `RULES.md`: 앞머리(`quiet_hours, daily_budget, min_interval_s, burst_limit,
+  judgment_cap, idle_threshold_s`)에 종류마다 `## <kind>` 표 하나, 첫 매치가 이긴다. 조건 어휘는
+  닫혀 있다: 핵심 `always, count_over, minutes_until_under, minutes_over` 에 로드된 감각들이
+  등록한 것을 더한 것; 로드된 감각이 없는 종류의 절은 파싱은 되지만 검사는 안 한다.
+  `decide(signal, rules, user_lists, today, now)`: 조용한 시간 -> defer; 하루 예산 소진 ->
+  defer(`trust: user` 신호, 예를 들어 일정은 예외); 그다음 표; 매치 없음 -> `ask_model`.
+  `judge(signal, cfg, today)` 는 스텁이고(D13 의 모델 호출은 구획 3의 다음 단계에 온다)
+  `(False, "not implemented")` 를 돌려준다 — 데몬이 이미 그 자리를 부르고 있는 이음매다.
+- **`deliver.py`** — `Notice(id, session, text, why, signal_keys)`; `Outbox.hold(session)` 은
+  `is_running(session)` 이거나, 신선한(60초 이내) `presence` 줄이 `idle_s < idle_threshold_s`
+  라고 말하는 동안 참이다. `release()` 는 풀 수 있는 알림을 FIFO 순서로 다 보내고, 아직 걸린
+  첫 알림에서 멈춘다. `_deliver` 는 `delivery {id, via}` 와 `assistant {origin: signal, final:
+  true}` 를 적고, 붙은 클라이언트가 있으면 소켓 `notice` 를, 없으면 `banner` 를 부른다(기본은
+  macOS `osascript` 알림 — 테스트를 위해 갈아 끼울 수 있다). `rebuild()` 는 `state.undelivered()`
+  에서 큐를 복구한다; 여기서 곧바로 흘려보내지는 않고 다음 자연스러운 `release()` 계기를
+  기다린다 — 재시작이 아무 일도 일어나기 전에 느닷없이 배너를 띄우는 일이 없도록.
+- **`senses/`** — 파일마다 150줄 천장. `schedule.py`: `cfg["schedules"]` 를 읽고(폴링, 30초),
+  때가 된 줄을 한 번만 울리고, 반복이면 `config.set` 으로 `at` 을 미루고, 1회성이면 줄을 지운다;
+  `add_schedule`/`list_schedules`/`remove_schedule` 을 내놓는다(첫째와 셋째는 `write=True,
+  reversible=True`). `shell.py`: push 전용(`build(fields, now)`), `command_failed`(exit != 0) /
+  `command_finished`(exit == 0), `exit_nonzero` 와 `duration_over` 를 등록한다; 중복 제거 열쇠에
+  도착 시각이 들어가는데, 반복 자체가 `count_over` 가 보려는 것이기 때문이다. `docs/senses.md`
+  에 zsh 훅(백그라운드로 돌리고 오류를 삼킴 — 훅이 셸을 막으면 안 된다)과 다음 단계가 더할
+  Claude Code 훅의 자리표시가 있다.
+- **`config.py`** 이 더한 것: `senses`(`{name: options}` — 키가 있으면 켜짐; `_check` 가 그
+  감각 모듈을 임포트해 옵션을 `OPTIONS` 로 검사)와 `schedules`(`{id, at, repeat, text}` 목록;
+  `at` 은 이미 `clock.parse_local` 의 표준 문자열이어야 한다).
+
+## 9. 불변조건과 그것을 붙드는 테스트
 
 | 불변조건 | 테스트 |
 |---|---|
@@ -186,24 +303,40 @@ dict 를 키 튜플로 바꿔 버린다.
 | 샌드박스가 workspace 밖 쓰기와 급소 읽기를 막음 · 파일 툴이 급소 경로를 거부 | `test_exec.*`, `test_tools.*` |
 | 예산이 바닥나도 흘려보낸 말은 이력에 남음 · 스트림 도중 실패도 `LLMError` · reasoning 을 되돌리지 않음 | `test_daemon.test_exhausted_turn_still_records_what_was_said`, `test_llm.*`, `test_loop.test_loop_does_not_echo_reasoning` |
 | 소켓 0600 · 유닉스 소켓만 · 소스에 모델 ID · TCP 없음 | `test_daemon.test_socket_perms`, `test_invariants.test_no_model_ids_or_tcp_in_source` |
+| `signals.SIGNAL_ENVELOPE`/`SIGNAL_TURNS_CLAUSE` 가 그것을 잰 bench 와 바이트 단위로 같음(m3); 150줄을 넘는 감각 파일 없음; `rules.py` 는 `judge` 밖에서 llm 모듈을 임포트하지 않음 | `test_invariants.SignalEnvelopeInvariants`, `test_sense_files_under_150_lines`, `test_rules_imports_no_llm_at_top_level` |
+| RULES.md 의 조건 어휘는 절마다 닫혀 있고 검사됨; 첫 매치가 이김; 전역 게이트(조용한 시간 · 예산)가 표보다 먼저 돎; 매치 없음은 `ask_model` | `test_rules.*` |
+| 신호는 24시간 중복 제거됨; 몰림은 다발 전체를 들고 있음; 기본 침묵 `KINDS` 줄이 없는 감각은 거부됨; 모르는 감각이나 옵션은 `config.set` 이 거부함 | `test_signals.*`, `test_config.test_sense_options_checked_by_config` |
+| 알림은 세션의 턴이 도는 중이거나 presence 가 "타이핑 중"이면 들려 있다가 `turn.end`/`presence` 뒤 순서대로 풀리고, 클라이언트가 없으면 배너를 띄우고, 장부에 아직 `delivery` 가 없는 `decision speak` 줄에서 복구됨 | `test_daemon.DeliverTest.*` |
+| 신호 턴의 origin 은 `signal`(write 는 게이트에 걸려 절대 안 돎); 봉투는 `state.history` 에 안 남고 전달된 글은 남음; 막힌 모델도 감각의 요약은 전달함 | `test_daemon.SignalTurnTest.*` |
+| 상주 시스템 프롬프트(`system.txt` + Signal-turns 절)는 턴마다 바이트 단위로 같음; 로컬 시각 줄은 따로 떨어진 시스템 메시지 | `test_daemon.ResidentPromptTest.test_resident_prompt_frozen` |
+| D22: reversible write 는 사용자에게 그 자체로 돌고, signal/job 에는 여전히 묻고, system 에는 여전히 거부됨; 되돌릴 수 없는 write 는 그대로임 | `test_policy.test_policy_reversible` |
+| `local_datetime` 은 `Z`/오프셋을 거부하고 표준화함; 일정은 한 번만 울리고 반복은 미뤄짐; 같은 종류의 실패 세 번은 말하고 그보다 적으면 침묵함 | `test_tools.test_local_datetime_normalize`, `test_senses.*` |
+| `state.db` 삭제: `seen()` 과 `undelivered()` 가 장부만으로 돌아옴 | `test_daemon.ReindexRestoresSignalsTest.test_reindex_restores_seen_and_undelivered` |
 
-## 9. 세는 법
+## 10. 세는 법
 
 ```bash
-python3 -m unittest discover -s tests            # 전체 테스트, 네트워크 없음 (84)
-wc -l pathfinder/*.py                            # 코어; 배분: ledger 400 · state 600 · daemon 600 · loop 400 · broker+policy 350 · exec 300 · tools 300
+python3 -m unittest discover -s tests            # 전체 테스트, 네트워크 없음 (123)
+wc -l pathfinder/*.py pathfinder/senses/*.py     # 코어; 배분: ledger 400 · state 600 · daemon 600 ·
+                                                  # loop 400 · broker+policy 350 · exec 300 · tools 300 ·
+                                                  # clock+signals+rules 450 · deliver 250 · 감각 파일 150
 python3 scripts/scan_personal.py --all           # 추적 파일 전체 개인정보 스캔
 ```
 
-## 10. 돌리는 법
+## 11. 돌리는 법
 
 ```bash
 python3 -m pathfinder config set model provider:model-name
 python3 -m pathfinder daemon
 python3 -m pathfinder say "안녕"                  # 답이 흐르는 중의 두 번째 `say` 는 steer
+python3 -m pathfinder listen                      # 붙어서 델타와 신호 알림을 출력
 python3 -m pathfinder approvals                   # 승인 대기 목록, state.db 에서 읽음
 python3 -m pathfinder approve ID | deny ID        # 게이트에 걸린 턴을 재개하고 답을 출력
 python3 -m pathfinder interrupt                   # 최근 세션의 도는 턴을 멈춤
 python3 -m pathfinder config set grants '{"write_file": "allow"}'
+python3 -m pathfinder config set senses '{"schedule": {}, "shell": {}}'
+python3 -m pathfinder signal shell '{"cmd": "make test", "exit": 1, "seconds": 3, "cwd": "/tmp"}'
+python3 -m pathfinder react up                    # 최근 전달에 엄지척
+python3 -m pathfinder rules                       # RULES.md 의 경로를 출력
 python3 -m pathfinder reindex                     # 데몬이 도는 중에는 거부
 ```

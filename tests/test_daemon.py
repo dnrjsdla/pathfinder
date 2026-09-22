@@ -1,5 +1,6 @@
 """The daemon end to end over a real unix socket, against a fake model."""
 import asyncio
+import dataclasses
 import json
 import os
 import stat
@@ -11,9 +12,11 @@ from pathlib import Path
 
 from pathfinder import tools as tools_mod
 from pathfinder.daemon import SOCKET, Daemon
+from pathfinder.deliver import Notice
 from pathfinder.ledger import Ledger
 from pathfinder.llm import LLMError
 from pathfinder.loop import TurnControl
+from pathfinder.signals import Signal
 from pathfinder.state import State
 from pathfinder.tools import ToolSpec
 
@@ -123,7 +126,8 @@ class DaemonTest(DaemonHarness):
             c.close()
 
         self.run_with(factory, scenario)
-        roles = [(m["role"], m["content"].strip()) for m in factory.seen[-1][1:]]
+        # messages[0] is the resident system prompt, messages[1] the local-time line (partition 3)
+        roles = [(m["role"], m["content"].strip()) for m in factory.seen[-1][2:]]
         self.assertEqual(roles, [("user", "first"), ("assistant", "ok"), ("user", "second")])
 
     def test_daemon_survives_model_402(self):
@@ -258,7 +262,7 @@ class DaemonTest(DaemonHarness):
         self.assertTrue(second["resumed"])
         self.assertEqual(second["session"], first["session"])
         self.assertEqual(second["turns"], 1)
-        history = [m["content"].strip() for m in factory.seen[-1][1:]]
+        history = [m["content"].strip() for m in factory.seen[-1][2:]]
         self.assertEqual(history, ["remember the word plum", "noted", "remember the word plum"])
 
     def test_daemon_gate_survives_restart(self):
@@ -571,6 +575,217 @@ class RealStepFactoryTest(unittest.TestCase):
         list(daemon.default_step_factory(cfg, control)([]))
         self.assertEqual({t["function"]["name"] for t in seen["tools"]}, set(tools_mod.TOOLS))
         self.assertIs(seen["cancel"], control)
+
+
+def _never_quiet(daemon):
+    """Real wall-clock quiet hours (default 23-8) would make a signal-turn test flaky
+    depending on when it happens to run - pin it open for the duration of the test."""
+    daemon.rules = dataclasses.replace(daemon.rules, quiet_hours="0-0")
+
+
+class ResidentPromptTest(DaemonHarness):
+    def test_resident_prompt_frozen(self):
+        """The time line is its own system message; the resident prompt text is byte-identical
+        across turns (D20 - it must stay cache-stable)."""
+        factory = fake_model("ok")
+
+        async def scenario(daemon):
+            c = await Client.open(self.home)
+            c.send({"type": "say", "text": "one"})
+            await c.until("turn.end")
+            c.send({"type": "say", "text": "two"})
+            await c.until("turn.end")
+            c.close()
+
+        self.run_with(factory, scenario)
+        first_call, second_call = factory.seen[0], factory.seen[-1]
+        self.assertEqual(first_call[0], second_call[0])  # resident system prompt, byte-identical
+        self.assertEqual((first_call[0]["role"], first_call[1]["role"]), ("system", "system"))
+        self.assertIn("Local time now:", first_call[1]["content"])
+        self.assertNotEqual(first_call[0]["content"], first_call[1]["content"])
+
+
+class SignalTurnTest(DaemonHarness):
+    def _wait_for_delivery(self):
+        for _ in range(300):
+            if any(e["type"] == "delivery" for e in Ledger(self.home).read()):
+                return
+            time.sleep(0.01)
+
+    def test_signal_turn_origin_is_signal(self):
+        """A write tool call in a signal turn gates (never runs); the envelope never reaches
+        state.history, but the delivered text does."""
+        note_path = str(self.home / "signal-note.txt")
+
+        def gate_model(cfg, control=None):
+            def step(messages):
+                yield ("tool_calls", [{"id": "c1", "name": "write_file",
+                                        "arguments": {"path": note_path, "content": "y"}}])
+            return step
+
+        async def scenario(daemon):
+            _never_quiet(daemon)
+            daemon.push_signal(Signal(sense="schedule", kind="schedule_due", key="sig-origin",
+                                      summary="Scheduled note: ping",
+                                      fields={"id": "s1", "text": "ping", "at": "2026-09-22 09:00"},
+                                      trust="user"))
+            await asyncio.to_thread(self._wait_for_delivery)
+            return list(Ledger(self.home).read())
+
+        events = self.run_with(gate_model, scenario)
+        self.assertEqual([e for e in events if e["type"] == "tool_call"], [])  # the write never ran
+        self.assertFalse(Path(note_path).exists())
+        delivery = next(e for e in events if e["type"] == "delivery")
+        state = State(self.home / "state.db")
+        history = state.history(delivery["session"])
+        state.close()
+        self.assertTrue(any(m["role"] == "assistant" and "Scheduled note: ping" in m["content"] for m in history))
+        self.assertFalse(any("[Signal" in m["content"] for m in history))  # the envelope is never history
+
+    def test_signal_turn_survives_model_402(self):
+        """LLMError (blocked model): the sense's summary alone is delivered."""
+        async def scenario(daemon):
+            _never_quiet(daemon)
+            daemon.push_signal(Signal(sense="schedule", kind="schedule_due", key="sig-402",
+                                      summary="Scheduled note: budget",
+                                      fields={"id": "s2", "text": "budget", "at": "2026-09-22 09:00"},
+                                      trust="user"))
+            await asyncio.to_thread(self._wait_for_delivery)
+            return list(Ledger(self.home).read())
+
+        events = self.run_with(blocked_model, scenario)
+        delivery = next(e for e in events if e["type"] == "delivery")
+        state = State(self.home / "state.db")
+        history = state.history(delivery["session"])
+        state.close()
+        self.assertEqual([m["content"] for m in history if m["role"] == "assistant"], ["Scheduled note: budget"])
+
+
+class DeliverTest(DaemonHarness):
+    def test_deliver_holds_while_turn_runs(self):
+        """A notice enqueued while the session's turn is running is held; it is released (and
+        arrives after `turn.end`) once the turn ends."""
+        proceed = threading.Event()
+
+        def slow_handler(control=None):
+            proceed.wait(2)
+            return {"done": True}
+
+        tools_mod.TOOLS["slow_tool"] = ToolSpec(
+            name="slow_tool", description="", params={}, required=[], handler=slow_handler)
+        self.addCleanup(tools_mod.TOOLS.pop, "slow_tool", None)
+
+        def factory(cfg, control=None):
+            calls = {"n": 0}
+
+            def step(messages):
+                n = calls["n"]
+                calls["n"] += 1
+                if n == 0:
+                    yield ("tool_calls", [{"id": "c1", "name": "slow_tool", "arguments": {}}])
+                else:
+                    yield ("text", "done")
+            return step
+
+        async def scenario(daemon):
+            c = await Client.open(self.home)
+            c.send({"type": "say", "text": "go"})
+            await c.until("turn.start")
+            s = next(iter(daemon.sessions.values()))
+            for _ in range(200):
+                if s.control is not None and s.control.in_tool:
+                    break
+                await asyncio.sleep(0.01)
+            self.assertTrue(s.control.in_tool)
+
+            daemon.outbox.enqueue(Notice("n1", s.id, "held text", "w", []))
+            await asyncio.sleep(0.05)
+            self.assertEqual(len(daemon.outbox.queue), 1)  # still held: the turn is running
+
+            proceed.set()
+            seen = await c.until("turn.end")
+            notice = await c.recv()  # arrives after turn.end, not before
+            c.close()
+            return seen, notice
+
+        seen, notice = self.run_with(factory, scenario)
+        self.assertEqual(seen[-1]["type"], "turn.end")
+        self.assertEqual(notice, {"type": "notice", "id": "n1", "text": "held text", "why": "w"})
+
+    def test_deliver_presence_typing_holds(self):
+        async def scenario(daemon):
+            c = await Client.open(self.home)
+            c.send({"type": "attach"})
+            attached = await c.recv()
+            sid = attached["session"]
+            c.send({"type": "presence", "idle_s": 1})
+            await asyncio.sleep(0.05)
+            daemon.outbox.enqueue(Notice("n2", sid, "typing text", "w", []))
+            await asyncio.sleep(0.05)
+            still_held = len(daemon.outbox.queue)
+            c.send({"type": "presence", "idle_s": 999})  # stopped typing
+            notice = await c.recv()
+            c.close()
+            return still_held, notice
+
+        still_held, notice = self.run_with(fake_model(), scenario)
+        self.assertEqual(still_held, 1)
+        self.assertEqual(notice, {"type": "notice", "id": "n2", "text": "typing text", "why": "w"})
+
+    def test_deliver_banner_when_no_client(self):
+        async def scenario(daemon):
+            calls = []
+            daemon.outbox.banner = calls.append
+            daemon.record("session_start", session="no-client")
+            daemon.outbox.enqueue(Notice("n3", "no-client", "banner text", "w", []))
+            return calls
+
+        calls = self.run_with(fake_model(), scenario)
+        self.assertEqual(calls, ["banner text"])
+        deliveries = [e for e in self.events() if e["type"] == "delivery"]
+        self.assertEqual(deliveries[-1]["via"], "banner")
+
+    def test_deliver_outbox_rebuilt_from_ledger(self):
+        """A `decision speak` with no matching `delivery` is restored into a fresh daemon's
+        outbox - a crash with a full outbox does not lose the pending notice."""
+        async def make_pending(daemon):
+            daemon.record("session_start", session="pending-session")
+            daemon.record("decision", session="pending-session", origin="signal", signal_key="k-rebuild",
+                          action="speak", why="always=-", notice_id="notice-1", text="rebuilt notice",
+                          signal_keys=["k-rebuild"])
+
+        self.run_with(fake_model(), make_pending)  # closes without notice-1 ever being delivered
+
+        async def scenario(daemon2):
+            return list(daemon2.outbox.queue)
+
+        queue = self.run_with(fake_model(), scenario)
+        self.assertEqual(len(queue), 1)
+        self.assertEqual((queue[0].id, queue[0].text, queue[0].session),
+                         ("notice-1", "rebuilt notice", "pending-session"))
+
+
+class ReindexRestoresSignalsTest(DaemonHarness):
+    def test_reindex_restores_seen_and_undelivered(self):
+        async def make_events(daemon):
+            _never_quiet(daemon)
+            daemon.push_signal(Signal(sense="shell", kind="command_failed", key="k-seen",
+                                      summary="s", fields={"exit": 1}, trust="self"))
+            daemon.record("decision", session="s1", origin="signal", signal_key="k-pending",
+                          action="speak", why="w", notice_id="notice-x", text="pending text",
+                          signal_keys=["k-pending"])
+            await asyncio.sleep(0.2)  # let the pushed signal's own triage settle
+
+        self.run_with(fake_model(), make_events)
+
+        for leftover in self.home.glob("state.db*"):
+            leftover.unlink()  # the derived state is gone; the ledger is all that is left
+
+        state = State(self.home / "state.db")
+        state.rebuild(Ledger(self.home))
+        self.assertTrue(state.seen("k-seen", since=0))
+        self.assertTrue(any(u["id"] == "notice-x" for u in state.undelivered()))
+        state.close()
 
 
 if __name__ == "__main__":

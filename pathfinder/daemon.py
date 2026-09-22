@@ -6,14 +6,17 @@ event, so deleting state.db loses nothing and live writes cannot drift from a re
 from __future__ import annotations
 
 import asyncio
+import collections
 import json
 import os
 import socket
+import time
 import uuid
 from pathlib import Path
 
-from . import config, loop, tools
+from . import clock, config, deliver, loop, rules as rules_mod, signals, tools
 from .broker import Broker, Gate
+from .deliver import Notice, Outbox
 from .ledger import Ledger
 from .llm import LLMError, openai_compat, resolve
 from .loop import TurnControl
@@ -23,6 +26,7 @@ SOCKET = "pathfinder.sock"
 PROMPT = Path(__file__).parent / "prompts" / "system.txt"
 LINE_LIMIT = 1 << 20  # one NDJSON line; asyncio's 64 KiB default is too small for a pasted file
 LEDGER_CLIP = 2000  # a tool result recorded in the ledger is clipped shorter than the 8000-char read clip
+SIGNAL_TURN_BUDGET = 4  # D20: a signal turn is a few tool calls plus a sentence, not a conversation
 
 
 def default_step_factory(cfg, control):
@@ -41,10 +45,40 @@ def _clip_for_ledger(result, limit=LEDGER_CLIP):
     return result if len(text) <= limit else text[:limit] + "...(truncated)"
 
 
+class _Lane:
+    """A session's waiting queue: ("say", text) | ("resume", approval_id) | ("signal", Signal).
+    Plain `asyncio.Queue` has no peek, and a signal bundle needs one: when several signals
+    arrive back to back, the daemon drains every consecutive `signal` item behind the one it
+    just popped into one turn, without disturbing anything queued after them."""
+
+    def __init__(self):
+        self._items: collections.deque = collections.deque()
+        self._event = asyncio.Event()
+
+    def put_nowait(self, item) -> None:
+        self._items.append(item)
+        self._event.set()
+
+    async def get(self):
+        while not self._items:
+            self._event.clear()
+            await self._event.wait()
+        return self._items.popleft()
+
+    def drain_signals(self) -> list:
+        out = []
+        while self._items and self._items[0][0] == "signal":
+            out.append(self._items.popleft()[1])
+        return out
+
+    def empty(self) -> bool:
+        return not self._items
+
+
 class Session:
     def __init__(self, sid):
         self.id = sid
-        self.queue = asyncio.Queue()  # the lane: ("say", text) | ("resume", approval_id)
+        self.queue = _Lane()  # the lane: ("say", text) | ("resume", approval_id) | ("signal", Signal)
         self.conns = set()
         self.worker = None
         self.control: TurnControl | None = None  # of the running turn; None between turns
@@ -58,9 +92,21 @@ class Daemon:
         self.state = State(self.home / "state.db")
         self.state.catch_up(self.ledger)  # a deleted or stale DB heals itself here
         self.step_factory = step_factory or default_step_factory
-        self.system_prompt = PROMPT.read_text(encoding="utf-8")
+        # Byte-stable across every turn, user and signal alike (cache): the Signal-turns clause
+        # is part of the resident prompt itself, never appended per-turn. Only the local-time
+        # line (added separately in turn()/_signal_model_turn) changes turn to turn.
+        self.system_prompt = PROMPT.read_text(encoding="utf-8") + "\n\n" + signals.SIGNAL_TURNS_CLAUSE
         self.sessions = {}
         self.server = None
+
+        cfg = config.load(self.home)
+        self.senses = {s.name: s for s in signals.load(cfg, self.home)}
+        self.rules = rules_mod.load(self.home, list(self.senses.values()))
+        self.outbox = Outbox(self.state, self.rules, is_running=self._is_running,
+                             attached=self._is_attached, send=self._send_to_session, record=self.record)
+        self.outbox.rebuild()
+        self.sense_loop = signals.SenseLoop(list(self.senses.values()), push=self.push_signal,
+                                            on_error=self._sense_error)
 
     # -- recording: ledger first, then the same event into the state. Loop thread only:
     #    the SQLite connection belongs to it, and turns run in worker threads.
@@ -86,10 +132,13 @@ class Daemon:
 
     async def serve(self):
         await self.start()
+        self.sense_loop.start()
+        self.outbox.release()  # flush anything a previous crash left pending, now that we can
         async with self.server:
             await self.server.serve_forever()
 
     async def close(self):
+        self.sense_loop.stop()
         for s in self.sessions.values():
             if s.worker:
                 s.worker.cancel()
@@ -100,6 +149,27 @@ class Daemon:
             await self.server.wait_closed()
         (self.home / SOCKET).unlink(missing_ok=True)
         self.state.close()
+
+    def _sense_error(self, name, exc):
+        try:
+            self.record("error", origin="system", message=f"sense {name}: {type(exc).__name__}: {exc}"[:300])
+        except Exception:
+            pass  # the ledger itself failing must not take a poll loop down with it
+
+    def _is_running(self, sid) -> bool:
+        s = self.sessions.get(sid)
+        return s is not None and s.control is not None
+
+    def _is_attached(self, sid) -> bool:
+        s = self.sessions.get(sid)
+        return bool(s and s.conns)
+
+    def _send_to_session(self, sid, msg) -> None:
+        """Outbox knows sessions only by id (it never touches daemon internals) - resolve it
+        here before handing off to `send`, which wants the Session object."""
+        s = self.sessions.get(sid)
+        if s is not None:
+            self.send(s, msg)
 
     async def handle(self, reader, writer):
         session = None
@@ -153,6 +223,31 @@ class Daemon:
                     self.record("approval", session=row["session"], turn=row["turn"], origin="user",
                                 id=approval_id, decision="approved" if kind == "approve" else "denied")
                     session.queue.put_nowait(("resume", approval_id))
+                elif kind == "signal":
+                    sense_name, fields = msg.get("sense"), msg.get("fields")
+                    sense = self.senses.get(sense_name)
+                    if sense is None or not sense.push_capable or not isinstance(fields, dict):
+                        _write(writer, {"type": "error", "message": f"unknown or non-push sense: {sense_name!r}"})
+                        continue
+                    self.push_signal(sense.module.build(fields))
+                elif kind == "presence":
+                    idle_s = msg.get("idle_s")
+                    if not isinstance(idle_s, (int, float)) or isinstance(idle_s, bool):
+                        _write(writer, {"type": "error", "message": "presence needs a numeric idle_s"})
+                        continue
+                    session = session or self.attach(writer, None, None)
+                    self.record("presence", session=session.id, origin="user", idle_s=idle_s)
+                    self.outbox.release()
+                elif kind == "react":
+                    vote = msg.get("vote")
+                    if vote not in ("up", "down"):
+                        _write(writer, {"type": "error", "message": "react needs \"vote\": \"up\"|\"down\""})
+                        continue
+                    delivery_id = msg.get("id") or self.state.latest_delivery()
+                    if delivery_id is None:
+                        _write(writer, {"type": "error", "message": "no delivery to react to"})
+                        continue
+                    self.record("reaction", origin="user", delivery_id=delivery_id, vote=vote)
                 else:
                     _write(writer, {"type": "error", "message": f"unknown type: {kind!r}"})
         finally:
@@ -203,6 +298,9 @@ class Daemon:
     async def lane(self, s):
         while True:
             item_kind, payload = await s.queue.get()
+            if item_kind == "signal":
+                await self.run_signal_turn(s, [payload] + s.queue.drain_signals())
+                continue
             turn = uuid.uuid4().hex[:12]
             leftover = []
             try:
@@ -225,6 +323,7 @@ class Daemon:
                     leftover = list(s.control.steers)  # said after the last drain: recorded, not yet answered
                     s.control, s.turn = None, ""
             self.send(s, {"type": "turn.end", "turn": turn, "kind": kind})
+            self.outbox.release()  # a held notice may be releasable now that this turn ended
             if leftover and kind != "gated":  # a gate took its leftovers into the pending messages
                 s.queue.put_nowait(("continue", "\n".join(leftover)))
 
@@ -234,10 +333,130 @@ class Daemon:
         if text is not None:
             self.record("user", session=s.id, turn=turn, origin="user", trust="user", text=text)
         self.record("turn_start", session=s.id, turn=turn, origin="user")
-        messages = [{"role": "system", "content": self.system_prompt}] + self.state.history(s.id)
+        messages = [{"role": "system", "content": self.system_prompt},
+                   {"role": "system", "content": clock.now_line()}] + self.state.history(s.id)
         if trailing:
             messages.append({"role": "user", "content": trailing})
         return await self._run_turn(s, turn, messages, resume=False)
+
+    # -- signals (D20) -------------------------------------------------------------------
+    def push_signal(self, signal) -> None:
+        """The push door, for a hook client's `signal` message and a poll sense's SenseLoop
+        alike. Every occurrence is recorded, even a duplicate - `state.seen` is checked
+        against what was on disk *before* this call, so the first occurrence of a key always
+        goes through and only a later repeat of the same key within 24 h is silenced."""
+        now = time.time()
+        dup = self.state.seen(signal.key, since=now - 86400)
+        self.record("signal", origin="signal", trust=signal.trust, sense=signal.sense,
+                    kind=signal.kind, key=signal.key, summary=signal.summary, fields=signal.fields)
+        if dup:
+            self.record("decision", origin="signal", signal_key=signal.key, action="silence", why="seen")
+            return
+        target = self._target_session()
+        target.queue.put_nowait(("signal", signal))
+
+    def _target_session(self) -> Session:
+        cfg = config.load(self.home)
+        sid = self.state.latest_session(cfg["session_resume_s"])
+        if sid is None:
+            sid = uuid.uuid4().hex[:12]
+            self.record("session_start", session=sid)
+        return self._session(sid)
+
+    async def run_signal_turn(self, s, bundle) -> None:
+        """Triage a bundle through rules.decide (D8): a defer/silence/ask_model result is
+        recorded and done for free; only the `speak` set opens the one model turn (D20)."""
+        wait = signals.hold_for(self.state, self.rules)
+        if wait > 0:
+            await asyncio.sleep(wait)
+            for sig in bundle:
+                s.queue.put_nowait(("signal", sig))  # re-queued whole, not discarded
+            return
+        lists = rules_mod.user_lists(self.home)
+        to_speak = []
+        for sig in bundle:
+            today = self.state.today()
+            action, why = rules_mod.decide(sig, self.rules, lists, today, time.time())
+            if action == "ask_model":
+                if today.judgments >= self.rules.judgment_cap:
+                    action, why = "defer", "judgment cap"
+                else:
+                    speak, reason = await asyncio.to_thread(rules_mod.judge, sig, config.load(self.home), today)
+                    self.record("judgment", session=s.id, origin="signal", signal_key=sig.key,
+                                speak=speak, reason=reason)
+                    action, why = ("speak" if speak else "silence"), "judged"
+            if action == "speak":
+                to_speak.append((sig, why))  # recorded once, with the notice, once it exists
+            else:
+                self.record("decision", session=s.id, origin="signal", signal_key=sig.key, action=action, why=why)
+        if to_speak:
+            await self._signal_model_turn(s, to_speak)
+
+    async def _signal_model_turn(self, s, to_speak) -> None:
+        """D20: origin signal, no history, budget 4. Delivered text is the sense summaries
+        joined, plus the model's one or two sentences when it answers - the summaries alone on
+        a gate, an LLMError, or an empty answer."""
+        turn = uuid.uuid4().hex[:12]
+        sigs = [sig for sig, _why in to_speak]
+        self.record("turn_start", session=s.id, turn=turn, origin="signal")
+        messages = [
+            {"role": "system", "content": self.system_prompt},
+            {"role": "system", "content": clock.now_line()},
+            {"role": "user", "content": signals.render_envelope(sigs)},  # never recorded as `user`
+        ]
+        cfg = config.load(self.home)
+        control = TurnControl()
+        aio = asyncio.get_running_loop()
+        out_q = asyncio.Queue()
+
+        def emit(kind, payload):
+            aio.call_soon_threadsafe(out_q.put_nowait, (kind, payload))
+
+        broker = Broker(tools.TOOLS, "signal", cfg["grants"], control=control, emit=emit)
+        step = self.step_factory(cfg, control)
+
+        def work():
+            try:
+                return loop.run(step, messages, call_tool=broker.call, emit=emit,
+                                budget=SIGNAL_TURN_BUDGET, control=control)
+            finally:
+                aio.call_soon_threadsafe(out_q.put_nowait, (None, None))
+
+        answer, gated, ending = "", False, {"kind": "answer"}
+        try:
+            running = asyncio.create_task(asyncio.to_thread(work))
+            while True:
+                kind, payload = await out_q.get()
+                if kind is None:
+                    break
+                if kind == "tool_call":
+                    recorded = {**payload, "args": _clip_for_ledger(payload["args"])}
+                    self.record("tool_call", session=s.id, turn=turn, origin="signal", **recorded)
+                elif kind == "tool_result":
+                    recorded = {**payload, "result": _clip_for_ledger(payload["result"])}
+                    self.record("tool_result", session=s.id, turn=turn, origin="signal", **recorded)
+            out = await running
+            answer = out.text
+            ending = {"kind": out.kind, "steps": out.steps, "usage": out.usage}
+        except Gate:
+            # A signal turn has no history to resume into and policy already asks for every
+            # write/network call from origin "signal" - the attempt is dropped, not approved
+            # later; the notice still goes out with the sense's own summary.
+            gated, ending = True, {"kind": "gated"}
+        except LLMError as e:
+            # summaries alone (D20's own fallback); the blocked call is a fact worth one line
+            self.record("error", session=s.id, turn=turn, origin="signal", status=e.status, message=str(e)[:300])
+            ending = {"kind": "error"}
+
+        summaries = "\n".join(sig.summary for sig in sigs)
+        text = f"{summaries}\n{answer}".strip() if answer and not gated else summaries
+        notice_id = uuid.uuid4().hex[:12]
+        keys = [sig.key for sig in sigs]
+        for sig, why in to_speak:
+            self.record("decision", session=s.id, origin="signal", signal_key=sig.key, action="speak",
+                        why=why, notice_id=notice_id, text=text, signal_keys=keys)
+        self.record("turn_end", session=s.id, turn=turn, origin="signal", **ending)
+        self.outbox.enqueue(Notice(id=notice_id, session=s.id, text=text, why=to_speak[0][1], signal_keys=keys))
 
     async def resume_turn(self, s, turn, approval_id):
         row = self.state.approval(approval_id)

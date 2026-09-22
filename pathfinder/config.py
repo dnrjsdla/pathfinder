@@ -1,9 +1,12 @@
 """Configuration: one file (config.json), one writer (set()). A model name is
 data, never code - DEFAULTS keeps it empty so nothing ships a hardcoded model."""
+import importlib
 import json
 import os
 import tempfile
 from pathlib import Path
+
+from . import clock
 
 
 class ConfigError(Exception):
@@ -18,7 +21,43 @@ DEFAULTS = {
     "max_steps": 8,
     "session_resume_s": 7200,
     "grants": {},
+    "senses": {},      # sense name -> options dict; present key = on (signals.load imports it)
+    "schedules": [],   # [{id, at, repeat, text}], written only through schedule.py's tools
 }
+
+_SCHEDULE_KEYS = {"id", "at", "repeat", "text"}
+_REPEATS = ("none", "daily", "weekly")
+
+
+def _check_senses(value):
+    if not isinstance(value, dict):
+        raise ConfigError("senses must be an object of name -> options")
+    for name, options in value.items():
+        try:
+            mod = importlib.import_module(f"pathfinder.senses.{name}")
+        except ImportError:
+            raise ConfigError(f"unknown sense: {name}")
+        if not isinstance(options, dict):
+            raise ConfigError(f"senses.{name} options must be an object")
+        bad = frozenset(options) - frozenset(mod.OPTIONS)
+        if bad:  # a typo here would otherwise silently run with the default - refuse at the door
+            raise ConfigError(f"unknown option(s) for sense {name}: {sorted(bad)}")
+
+
+def _check_schedules(value):
+    if not isinstance(value, list):
+        raise ConfigError("schedules must be a list")
+    for row in value:
+        if not isinstance(row, dict) or frozenset(row) != _SCHEDULE_KEYS:
+            raise ConfigError(f"schedule row must have exactly {sorted(_SCHEDULE_KEYS)}: {row}")
+        if row["repeat"] not in _REPEATS:
+            raise ConfigError(f"schedule repeat must be one of {_REPEATS}: {row}")
+        try:
+            _, canonical = clock.parse_local(row["at"])
+        except ValueError as e:
+            raise ConfigError(f"schedule at: {e}")
+        if canonical != row["at"]:
+            raise ConfigError(f"schedule at must be the canonical local string: {row['at']!r} (want {canonical!r})")
 
 
 def _check(key, value):
@@ -36,6 +75,10 @@ def _check(key, value):
         bad = {k: v for k, v in value.items() if v not in ("allow", "ask", "deny")}
         if bad:  # a typo here would otherwise read as "never ask" - fail closed at the door
             raise ConfigError(f"grants values must be allow, ask or deny: {bad}")
+    if key == "senses":
+        _check_senses(value)
+    if key == "schedules":
+        _check_schedules(value)
 
 
 def home() -> Path:

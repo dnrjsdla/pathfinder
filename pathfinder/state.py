@@ -5,7 +5,10 @@ import json
 import sqlite3
 import threading
 import time
+from dataclasses import dataclass
 from pathlib import Path
+
+from . import clock
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
@@ -15,7 +18,29 @@ CREATE TABLE IF NOT EXISTS approvals (
     id TEXT PRIMARY KEY, call_id TEXT, session TEXT, turn TEXT, tool TEXT,
     args_json TEXT, messages_json TEXT, ts REAL, decision TEXT
 );
+CREATE TABLE IF NOT EXISTS signals (key TEXT PRIMARY KEY, ts REAL, sense TEXT, kind TEXT);
+CREATE TABLE IF NOT EXISTS decisions (
+    signal_key TEXT, ts REAL, action TEXT, why TEXT,
+    notice_id TEXT, session TEXT, text TEXT, signal_keys TEXT
+);
+CREATE TABLE IF NOT EXISTS judgments (ts REAL);
+CREATE TABLE IF NOT EXISTS deliveries (id TEXT PRIMARY KEY, ts REAL, session TEXT, via TEXT);
+CREATE TABLE IF NOT EXISTS reactions (ts REAL, delivery_id TEXT, vote TEXT);
+CREATE TABLE IF NOT EXISTS presence (session TEXT PRIMARY KEY, ts REAL, idle_s REAL);
+CREATE TABLE IF NOT EXISTS signal_turns (ts REAL);
 """
+
+NEW_TABLES = ("signals", "decisions", "judgments", "deliveries", "reactions", "presence", "signal_turns")
+
+
+@dataclass
+class Today:
+    """The counters `rules.decide` needs, all local-day scoped (`clock.day_start`)."""
+    spoken: int               # decisions {action: speak} today - the daily budget
+    judgments: int            # judgment events today - the judgment_cap
+    last_signal_ts: float | None  # ts of the last signal turn opened (rate limit)
+    burst: int                # signal turns opened in the last 60 s
+    kind_counts: dict         # kind -> decisions today of that kind (count_over)
 
 
 class State:
@@ -78,6 +103,31 @@ class State:
             )
         if event["type"] == "approval":
             self.db.execute("UPDATE approvals SET decision = ? WHERE id = ?", (event["decision"], event["id"]))
+        if event["type"] == "signal":
+            self.db.execute("INSERT OR IGNORE INTO signals (key, ts, sense, kind) VALUES (?, ?, ?, ?)",
+                            (event["key"], event["ts"], event["sense"], event["kind"]))
+        if event["type"] == "decision":
+            keys = event.get("signal_keys")
+            self.db.execute(
+                "INSERT INTO decisions (signal_key, ts, action, why, notice_id, session, text, signal_keys) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (event.get("signal_key"), event["ts"], event["action"], event.get("why", ""),
+                 event.get("notice_id"), session, event.get("text"), json.dumps(keys) if keys else None))
+        if event["type"] == "judgment":
+            self.db.execute("INSERT INTO judgments (ts) VALUES (?)", (event["ts"],))
+        if event["type"] == "delivery":
+            self.db.execute("INSERT OR IGNORE INTO deliveries (id, ts, session, via) VALUES (?, ?, ?, ?)",
+                            (event["id"], event["ts"], session, event["via"]))
+        if event["type"] == "reaction":
+            self.db.execute("INSERT INTO reactions (ts, delivery_id, vote) VALUES (?, ?, ?)",
+                            (event["ts"], event.get("delivery_id"), event["vote"]))
+        if event["type"] == "presence" and session:
+            self.db.execute(
+                "INSERT INTO presence (session, ts, idle_s) VALUES (?, ?, ?) "
+                "ON CONFLICT(session) DO UPDATE SET ts = excluded.ts, idle_s = excluded.idle_s",
+                (session, event["ts"], event["idle_s"]))
+        if event["type"] == "turn_start" and event.get("origin") == "signal":
+            self.db.execute("INSERT INTO signal_turns (ts) VALUES (?)", (event["ts"],))
         if session:
             self.db.execute("UPDATE sessions SET last_ts = ? WHERE id = ?", (event["ts"], session))
         self.db.execute("UPDATE meta SET value = ? WHERE key = 'cursor'", (str(seq),))
@@ -94,9 +144,8 @@ class State:
         return self.cursor
 
     def rebuild(self, ledger) -> int:
-        self.db.executescript(
-            "DROP TABLE sessions; DROP TABLE messages; DROP TABLE meta; DROP TABLE approvals;"
-        )
+        drops = "sessions", "messages", "meta", "approvals", *NEW_TABLES
+        self.db.executescript("".join(f"DROP TABLE {t};" for t in drops))
         self.db.executescript(SCHEMA)
         self.db.execute("INSERT OR IGNORE INTO meta (key, value) VALUES ('cursor', '0')")
         self.db.commit()
@@ -142,3 +191,42 @@ class State:
             (now, max_age_s),
         ).fetchone()
         return row[0] if row else None
+
+    def presence(self, session: str):
+        row = self.db.execute("SELECT ts, idle_s FROM presence WHERE session = ?", (session,)).fetchone()
+        return None if row is None else {"ts": row[0], "idle_s": row[1]}
+
+    def latest_delivery(self):
+        row = self.db.execute("SELECT id FROM deliveries ORDER BY ts DESC LIMIT 1").fetchone()
+        return row[0] if row else None
+
+    def seen(self, key: str, since: float) -> bool:
+        """True when `key` was recorded (any sense, any kind) at or after `since` - the 24 h
+        dedupe window is the caller's `since = now - 86400`."""
+        row = self.db.execute("SELECT 1 FROM signals WHERE key = ? AND ts >= ?", (key, since)).fetchone()
+        return row is not None
+
+    def today(self, now: float | None = None) -> Today:
+        now = now if now is not None else time.time()
+        start = clock.day_start(now)
+        spoken = self.db.execute(
+            "SELECT COUNT(*) FROM decisions WHERE action = 'speak' AND ts >= ?", (start,)).fetchone()[0]
+        judgments = self.db.execute("SELECT COUNT(*) FROM judgments WHERE ts >= ?", (start,)).fetchone()[0]
+        last_signal_ts = self.db.execute("SELECT MAX(ts) FROM signal_turns").fetchone()[0]
+        burst = self.db.execute(
+            "SELECT COUNT(*) FROM signal_turns WHERE ts >= ?", (now - 60,)).fetchone()[0]
+        kind_counts = dict(self.db.execute(
+            "SELECT s.kind, COUNT(*) FROM decisions d JOIN signals s ON d.signal_key = s.key "
+            "WHERE d.ts >= ? GROUP BY s.kind", (start,)).fetchall())
+        return Today(spoken, judgments, last_signal_ts, burst, kind_counts)
+
+    def undelivered(self) -> list:
+        """Notices from a `decision speak` never confirmed by a `delivery` - what a daemon
+        killed mid-outbox must still hand over on the next start."""
+        rows = self.db.execute(
+            "SELECT DISTINCT d.notice_id, d.session, d.text, d.why, d.signal_keys FROM decisions d "
+            "LEFT JOIN deliveries dl ON dl.id = d.notice_id "
+            "WHERE d.action = 'speak' AND d.notice_id IS NOT NULL AND dl.id IS NULL"
+        ).fetchall()
+        return [{"id": r[0], "session": r[1], "text": r[2], "why": r[3],
+                "signal_keys": json.loads(r[4]) if r[4] else []} for r in rows]

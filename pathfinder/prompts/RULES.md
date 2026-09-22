@@ -40,7 +40,8 @@ one" - the third failure in ten minutes is itself the one that matches `count_ov
 
 | condition | value | action | note |
 | --- | --- | --- | --- |
-| `count_over` | `3` | `speak` | three or more failures in ten minutes - something is stuck |
+| `count_over` | `4` | `silence` | already said "stuck" at the third - not again on every further failure |
+| `count_over` | `3` | `speak` | three failures in ten minutes - something is stuck |
 | `always` | `-` | `silence` | one failure alone is ordinary noise |
 
 ## command_finished

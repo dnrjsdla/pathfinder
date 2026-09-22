@@ -14,6 +14,7 @@ TRUST = "third_party"  # an invitation is someone else's words, even though it l
 KINDS = {"upcoming_event": ("always", "-", "silence", "no rule configured for this kind")}
 CADENCE_S = 300
 _WINDOW_S = 3600  # look one hour ahead; RULES.md's minutes_until_under does the real filtering
+_MAX_WINDOW_S = 31 * 86400  # list_events window cap - an unbounded range is an unbounded EventKit scan
 _OFF = "calendar sense is off: install pyobjc-framework-EventKit"
 _off_logged = False
 
@@ -50,18 +51,22 @@ def poll(options, now):
 
 
 def _list_events(control=None, **kw):
+    from_ts, _ = clock.parse_local(kw["from"])
+    to_ts, _ = clock.parse_local(kw["to"])
+    if to_ts - from_ts > _MAX_WINDOW_S:
+        raise ValueError("list_events window must not exceed 31 days")
     try:
-        from_ts, _ = clock.parse_local(kw["from"])
-        to_ts, _ = clock.parse_local(kw["to"])
         return ek.list_events(from_ts, to_ts)
     except ImportError:
         raise RuntimeError(_OFF) from None
 
 
 def _add_event(title, start, end, control=None):
+    start_ts, _ = clock.parse_local(start)
+    end_ts, _ = clock.parse_local(end)
+    if end_ts < start_ts:
+        raise ValueError("end must not be before start")
     try:
-        start_ts, _ = clock.parse_local(start)
-        end_ts, _ = clock.parse_local(end)
         return ek.add_event(title, start_ts, end_ts)
     except ImportError:
         raise RuntimeError(_OFF) from None

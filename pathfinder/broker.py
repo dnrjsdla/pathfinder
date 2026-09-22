@@ -1,8 +1,19 @@
 """The one door every tool call goes through. The broker never writes the
 ledger itself - it emits, and the daemon records tool_call/tool_result on the
 event-loop thread, so the single-writer rule from partition 1 still holds."""
+import json
+
 from . import policy
-from .tools import coerce
+from .tools import READ_CLIP, clip, coerce
+
+
+def _clip_for_model(value):
+    """Every tool result reaches `loop.settle` as `json.dumps(this)` - clip here, the one
+    place, so no tool (or a future one) can push an unbounded blob into the model's context."""
+    if isinstance(value, str):
+        return clip(value)
+    text = json.dumps(value, ensure_ascii=False)
+    return value if len(text) <= READ_CLIP else clip(text)
 
 
 USER_DENIED_TEXT = ("The user looked at this call and declined it. This is their decision, not an "
@@ -69,4 +80,5 @@ class Broker:
             result = str(e)
             ok = False
         self.emit("tool_result", {"id": id, "name": name, "ok": ok, "result": result})
-        return {"ok": True, "result": result} if ok else {"ok": False, "error": result}
+        clipped = _clip_for_model(result)
+        return {"ok": True, "result": clipped} if ok else {"ok": False, "error": clipped}

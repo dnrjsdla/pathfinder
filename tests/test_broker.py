@@ -80,6 +80,26 @@ class BrokerTest(unittest.TestCase):
         result = b.call("c1", "boom_thing", {})
         self.assertEqual(result, {"ok": False, "error": "kaboom"})
 
+    def test_broker_clips_a_huge_result_before_returning_it(self):
+        """Should-fix 7: loop.py appends `json.dumps(result)` unclipped - the broker is the
+        one place every tool's result passes through, so it clips there."""
+        huge = _spec("huge_thing", handler=lambda control=None: {"text": "x" * 20000})
+        b, emitted = self._broker()
+        b.tools = {**TOOLS, "huge_thing": huge}
+        result = b.call("c1", "huge_thing", {})
+        self.assertTrue(result["ok"])
+        serialized = str(result["result"])
+        self.assertLess(len(serialized), 20000)
+        self.assertIn("omitted", serialized)
+        # the ledger's own ("tool_result") emit still carries the full, unclipped result -
+        # only what reaches the model (the return value) is bounded
+        self.assertEqual(len(emitted[1][1]["result"]["text"]), 20000)
+
+    def test_broker_small_result_passes_through_unclipped(self):
+        b, emitted = self._broker()
+        result = b.call("c1", "read_thing", {})
+        self.assertEqual(result, {"ok": True, "result": {"done": True}})
+
 
 if __name__ == "__main__":
     unittest.main()

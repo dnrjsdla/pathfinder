@@ -65,7 +65,7 @@ class Outbox:
         fresh = time.time() - presence["ts"] < 60
         return fresh and presence["idle_s"] < self.rules.idle_threshold_s
 
-    def release(self, session: str | None = None) -> None:
+    def release(self) -> None:
         """Deliver every releasable notice, in order; one still held for its own session (or
         whose banner just failed) stays queued in place - it does not block another session's
         notice behind it, and it is retried on the next release()."""

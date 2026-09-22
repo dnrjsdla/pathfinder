@@ -178,9 +178,8 @@ def decide(signal, rules: Rules, user_lists: dict, today, now: float) -> tuple:
 _JUDGE_SYSTEM = ('You decide whether a resident assistant should interrupt its user now. Answer only '
                 'JSON: {"speak": true|false, "reason": "..."}')
 
-def judge(signal, cfg: dict, today) -> tuple:
-    """D13: one request, no tools, no history. Strict JSON only - the only place this module
-    reaches for an llm module (test_invariants checks it stays that way)."""
+def judge(signal, cfg: dict) -> tuple:
+    """D13: one request, no tools, no history, strict JSON - the only llm import here (see test_invariants)."""
     from . import signals as _signals
     from .llm import LLMError, openai_compat, resolve
     try:
@@ -190,6 +189,7 @@ def judge(signal, cfg: dict, today) -> tuple:
         text = "".join(p for k, p in openai_compat.stream(endpoint, messages, tools=None) if k == "text")
     except LLMError:
         return False, "model unavailable"
+    text = text.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
     try:
         data = json.loads(text)
     except (TypeError, ValueError):

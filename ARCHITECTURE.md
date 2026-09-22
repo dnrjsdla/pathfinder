@@ -367,7 +367,7 @@ Daemon.run_signal_turn ── rules.decide per signal FIRST (never held, never s
 ## 10. How to count
 
 ```bash
-python3 -m unittest discover -s tests            # all tests, no network (142)
+python3 -m unittest discover -s tests            # all tests, no network (171)
 wc -l pathfinder/*.py pathfinder/senses/*.py     # core; budgets: ledger 400, state 600, daemon 600,
                                                   # loop 400, broker+policy 350, exec 300, tools 300,
                                                   # clock+signals+rules 450, deliver 250, a sense file 150

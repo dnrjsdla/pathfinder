@@ -60,5 +60,25 @@ class AddEventGateTest(unittest.TestCase):
         self.assertIn("offset", result["error"])
 
 
+class AddEventEndBeforeStartTest(unittest.TestCase):
+    def test_end_before_start_refused_before_any_eventkit_call(self):
+        """Should-fix 6: caught before `_eventkit` is ever touched - no PyObjC needed here."""
+        with self.assertRaises(ValueError):
+            calendar_sense._add_event("x", "2026-09-22 10:00", "2026-09-22 09:00")
+
+
+class ListEventsWindowCapTest(unittest.TestCase):
+    def test_window_over_31_days_refused(self):
+        """Should-fix 7: an unbounded `list_events` window is an unbounded EventKit scan."""
+        with self.assertRaises(ValueError):
+            calendar_sense._list_events(**{"from": "2026-01-01 00:00", "to": "2026-03-01 00:00"})
+
+    def test_window_at_31_days_is_fine(self):
+        with _no_pyobjc():  # still refused, but for being off, not for the window size
+            with self.assertRaises(RuntimeError) as cm:
+                calendar_sense._list_events(**{"from": "2026-01-01 00:00", "to": "2026-02-01 00:00"})
+            self.assertIn("install pyobjc-framework-EventKit", str(cm.exception))
+
+
 if __name__ == "__main__":
     unittest.main()

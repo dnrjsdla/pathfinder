@@ -88,22 +88,28 @@ class JudgeTest(unittest.TestCase):
     def test_judge_strict_json(self):
         with mock.patch("pathfinder.llm.openai_compat.stream",
                         return_value=iter([("text", '{"speak": true, "reason": "waiting for this"}')])):
-            self.assertEqual(rules.judge(_signal(), self.CFG, _today()), (True, "waiting for this"))
+            self.assertEqual(rules.judge(_signal(), self.CFG), (True, "waiting for this"))
+
+    def test_judge_strips_a_json_fence(self):
+        """Note 8: a model that wraps its answer in a ```json fence must still parse."""
+        fenced = '```json\n{"speak": true, "reason": "fenced"}\n```'
+        with mock.patch("pathfinder.llm.openai_compat.stream", return_value=iter([("text", fenced)])):
+            self.assertEqual(rules.judge(_signal(), self.CFG), (True, "fenced"))
 
     def test_judge_garbage_is_false(self):
         with mock.patch("pathfinder.llm.openai_compat.stream", return_value=iter([("text", "not json at all")])):
-            self.assertEqual(rules.judge(_signal(), self.CFG, _today()), (False, "unparseable"))
+            self.assertEqual(rules.judge(_signal(), self.CFG), (False, "unparseable"))
 
     def test_judge_missing_fields_is_false(self):
         with mock.patch("pathfinder.llm.openai_compat.stream", return_value=iter([("text", '{"speak": true}')])):
-            self.assertEqual(rules.judge(_signal(), self.CFG, _today()), (False, "unparseable"))
+            self.assertEqual(rules.judge(_signal(), self.CFG), (False, "unparseable"))
 
     def test_judge_llm_error_is_false(self):
         with mock.patch("pathfinder.llm.openai_compat.stream", side_effect=LLMError(402, "no credit")):
-            self.assertEqual(rules.judge(_signal(), self.CFG, _today()), (False, "model unavailable"))
+            self.assertEqual(rules.judge(_signal(), self.CFG), (False, "model unavailable"))
 
     def test_judge_no_model_configured_is_false(self):
-        self.assertEqual(rules.judge(_signal(), {}, _today()), (False, "model unavailable"))
+        self.assertEqual(rules.judge(_signal(), {}), (False, "model unavailable"))
 
     def test_judge_uses_worker_model_when_set(self):
         cfg = {**self.CFG, "worker_model": "p:worker"}
@@ -114,7 +120,7 @@ class JudgeTest(unittest.TestCase):
             return iter([("text", '{"speak": false, "reason": "not urgent"}')])
 
         with mock.patch("pathfinder.llm.openai_compat.stream", side_effect=fake_stream):
-            rules.judge(_signal(), cfg, _today())
+            rules.judge(_signal(), cfg)
         self.assertEqual(seen["model"], "worker")
 
 

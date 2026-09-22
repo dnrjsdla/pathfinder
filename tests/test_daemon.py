@@ -809,6 +809,31 @@ class DeliverTest(DaemonHarness):
         self.assertEqual((queue[0].id, queue[0].text, queue[0].session),
                          ("notice-1", "rebuilt notice", "pending-session"))
 
+    def test_speak_decision_survives_close_during_hold(self):
+        """Should-fix 5: a rate-limit-held `speak` set must have its `decision speak` rows on
+        disk BEFORE the hold - a held set otherwise lives only in a call_later timer, and
+        closing during the hold would lose it (a signal event with no decision at all)."""
+        async def make_held(daemon):
+            _never_quiet(daemon)
+            daemon.rules = dataclasses.replace(daemon.rules, min_interval_s=999, burst_limit=999)
+            daemon.record("turn_start", session="S", turn="t0", origin="signal")  # "just spoke"
+            daemon.push_signal(Signal(sense="schedule", kind="schedule_due", key="k-hold",
+                                      summary="Scheduled note: A", fields={}, trust="user"))
+            for _ in range(200):
+                if any(e["type"] == "decision" and e["action"] == "speak" for e in Ledger(self.home).read()):
+                    return
+                await asyncio.sleep(0.01)
+            self.fail("decision speak was never recorded before the hold")
+
+        self.run_with(fake_model(), make_held)  # closes with the hold's call_later still pending
+
+        async def scenario(daemon2):
+            return list(daemon2.outbox.queue)
+
+        queue = self.run_with(fake_model(), scenario)
+        self.assertEqual(len(queue), 1)
+        self.assertEqual(queue[0].text, "Scheduled note: A")
+
 
 class ReindexRestoresSignalsTest(DaemonHarness):
     def test_reindex_restores_seen_and_undelivered(self):
@@ -860,6 +885,36 @@ class AttachSenseTest(DaemonHarness):
 
         self.run_with(fake_model(), scenario)
         self.assertEqual([e for e in self.events() if e["type"] == "signal"], [])
+
+    def test_repeated_attach_same_cwd_pushes_once(self):
+        """Should-fix 4: a client reattaching every second (the same cwd, over and over) must
+        not write a ledger line per attach."""
+        config.set(self.home, "senses", {"attach": {}})
+
+        async def scenario(daemon):
+            c = await Client.open(self.home)
+            attached = None
+            for _ in range(5):
+                c.send({"type": "attach", "session": attached, "cwd": "/Users/you/project-name"})
+                attached = (await c.recv())["session"]
+            c.close()
+
+        self.run_with(fake_model(), scenario)
+        self.assertEqual(len([e for e in self.events() if e["type"] == "signal"]), 1)
+
+    def test_attach_cwd_change_pushes_again(self):
+        config.set(self.home, "senses", {"attach": {}})
+
+        async def scenario(daemon):
+            c = await Client.open(self.home)
+            c.send({"type": "attach", "cwd": "/Users/you/project-a"})
+            attached = (await c.recv())["session"]
+            c.send({"type": "attach", "session": attached, "cwd": "/Users/you/project-b"})
+            await c.recv()
+            c.close()
+
+        self.run_with(fake_model(), scenario)
+        self.assertEqual(len([e for e in self.events() if e["type"] == "signal"]), 2)
 
 
 class JudgmentCapTest(DaemonHarness):

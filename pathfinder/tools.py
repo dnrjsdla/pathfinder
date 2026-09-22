@@ -104,10 +104,12 @@ def coerce(spec: ToolSpec, args: dict) -> tuple:
     return out, ""
 
 
-def _clip(text: str) -> str:
-    if len(text) <= READ_CLIP:
+def clip(text: str, limit: int = READ_CLIP) -> str:
+    """The one clip helper - `_read_file` uses it directly; `broker.call` reuses it to bound
+    every tool result the model ever sees, regardless of which tool produced it."""
+    if len(text) <= limit:
         return text
-    head = tail = READ_CLIP // 2
+    head = tail = limit // 2
     dropped = len(text) - head - tail
     return f"{text[:head]}\n...({dropped} characters omitted)...\n{text[-tail:]}"
 
@@ -139,7 +141,7 @@ def _read_file(path, control=None):
     p = Path(path)
     if _exec.is_secret(p):
         raise ValueError(f"refused: {path} is a secret path")
-    return _clip(p.read_text(encoding="utf-8"))
+    return clip(p.read_text(encoding="utf-8"))
 
 
 def _write_file(path, content, control=None):

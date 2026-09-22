@@ -84,6 +84,7 @@ class Session:
         self.worker = None
         self.control: TurnControl | None = None  # of the running turn; None between turns
         self.turn = ""  # id of the running turn, valid while control is not None
+        self.last_cwd = None  # attach()'s last pushed cwd - dedupes a client reattaching every second
 
 
 class Daemon:
@@ -287,10 +288,11 @@ class Daemon:
             self.record("session_start", session=sid)
         s = self._session(sid)
         s.conns.add(writer)
-        if isinstance(cwd, str):
+        if isinstance(cwd, str) and cwd != s.last_cwd:  # a client reattaching every second must not spam the ledger
             sense = self.senses.get("attach")
             if sense is not None and sense.push_capable:
                 self.push_signal(sense.module.build({"cwd": cwd}))
+            s.last_cwd = cwd
         _write(writer, {"type": "attached", "session": sid, "resumed": bool(known),
                         "turns": known["turns"] if known else 0})
         return s
@@ -316,13 +318,14 @@ class Daemon:
                 await self.run_signal_turn(s, [payload] + s.queue.drain_signals())
                 continue
             if item_kind == "signal_ready":
-                # a `speak` set whose rate-limit hold has (or may have) elapsed - re-check
-                # rather than re-triage: the decision was already made and recorded as such.
+                # a `speak` set (notice_id, to_speak) whose rate-limit hold has (or may have)
+                # elapsed - re-check rather than re-triage: already decided and recorded.
+                notice_id, to_speak = payload
                 wait = signals.hold_for(self.state, self.rules)
                 if wait > 0:
                     asyncio.get_running_loop().call_later(wait, s.queue.put_nowait, ("signal_ready", payload))
                 else:
-                    await self._signal_model_turn(s, payload)
+                    await self._signal_model_turn(s, notice_id, to_speak)
                 continue
             turn = uuid.uuid4().hex[:12]
             leftover = []
@@ -401,7 +404,7 @@ class Daemon:
                 if today.judgments >= self.rules.judgment_cap:
                     action, why = "defer", "judgment cap"
                 else:
-                    speak, reason = await asyncio.to_thread(rules_mod.judge, sig, config.load(self.home), today)
+                    speak, reason = await asyncio.to_thread(rules_mod.judge, sig, config.load(self.home))
                     self.record("judgment", session=s.id, origin="signal", signal_key=sig.key,
                                 speak=speak, reason=reason)
                     action, why = ("speak" if speak else "silence"), "judged"
@@ -411,21 +414,34 @@ class Daemon:
                     and today.spoken + len(to_speak) >= self.rules.daily_budget):
                 action, why = "defer", "daily budget spent"
             if action == "speak":
-                to_speak.append((sig, why))  # recorded once, with the notice, once it exists
+                to_speak.append((sig, why))
             else:
                 self.record("decision", session=s.id, origin="signal", signal_key=sig.key, action=action, why=why)
         if not to_speak:
             return
+        # should-fix 5: record `decision speak` now, before the rate-limit hold - a held set
+        # lives only in a call_later timer otherwise, and a stop in that window loses it
+        # (the signal event has no decision, so undelivered() finds nothing to rebuild).
+        # The text here is the summaries only; _signal_model_turn's own notice may say more,
+        # but that richer text reaches the ledger through `delivery`/`assistant`, not this row.
+        notice_id = uuid.uuid4().hex[:12]
+        keys = [sig.key for sig, _why in to_speak]
+        summaries = "\n".join(sig.summary for sig, _why in to_speak)
+        for sig, why in to_speak:
+            self.record("decision", session=s.id, origin="signal", signal_key=sig.key, action="speak",
+                        why=why, notice_id=notice_id, text=summaries, signal_keys=keys)
         wait = signals.hold_for(self.state, self.rules)
         if wait > 0:
-            asyncio.get_running_loop().call_later(wait, s.queue.put_nowait, ("signal_ready", to_speak))
+            asyncio.get_running_loop().call_later(
+                wait, s.queue.put_nowait, ("signal_ready", (notice_id, to_speak)))
         else:
-            await self._signal_model_turn(s, to_speak)
+            await self._signal_model_turn(s, notice_id, to_speak)
 
-    async def _signal_model_turn(self, s, to_speak) -> None:
+    async def _signal_model_turn(self, s, notice_id, to_speak) -> None:
         """D20: origin signal, no history, budget 4. Delivered text is the sense summaries
         joined, plus the model's one or two sentences when it answers - the summaries alone on
-        a gate, an LLMError, or an empty answer."""
+        a gate, an LLMError, or an empty answer. `notice_id` and the `decision speak` rows for
+        `to_speak` were already recorded by the caller, before any rate-limit hold."""
         turn = uuid.uuid4().hex[:12]
         sigs = [sig for sig, _why in to_speak]
         self.record("turn_start", session=s.id, turn=turn, origin="signal")
@@ -484,11 +500,7 @@ class Daemon:
 
         summaries = "\n".join(sig.summary for sig in sigs)
         text = f"{summaries}\n{answer}".strip() if answer and not gated else summaries
-        notice_id = uuid.uuid4().hex[:12]
         keys = [sig.key for sig in sigs]
-        for sig, why in to_speak:
-            self.record("decision", session=s.id, origin="signal", signal_key=sig.key, action="speak",
-                        why=why, notice_id=notice_id, text=text, signal_keys=keys)
         self.record("turn_end", session=s.id, turn=turn, origin="signal", **ending)
         self.outbox.enqueue(Notice(id=notice_id, session=s.id, text=text, why=to_speak[0][1], signal_keys=keys))
 

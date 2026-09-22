@@ -113,15 +113,15 @@ def summarize(rows: list, verbose: bool) -> bool:
 _SELFCHECK_ITEMS = [
     {"id": "sc-1", "sense": "shell", "kind": "command_failed", "trust": "self", "at": "2026-09-23 10:00",
      "fields": {"cmd": "x", "exit": 1, "cwd": "p", "seconds": 1},
-     "context": {"quiet": False, "spoken_today": 0, "idle_s": None, "recent_same_kind": 3},
+     "context": {"spoken_today": 0, "idle_s": None, "recent_same_kind": 3},
      "label": "speak", "note": "third failure"},
     {"id": "sc-2", "sense": "schedule", "kind": "schedule_due", "trust": "user", "at": "2026-09-23 02:00",
      "fields": {"id": "s", "text": "t", "at": "2026-09-23 02:00"},
-     "context": {"quiet": True, "spoken_today": 0, "idle_s": None, "recent_same_kind": 0},
+     "context": {"spoken_today": 0, "idle_s": None, "recent_same_kind": 0},
      "label": "speak", "note": "user's own alarm at night"},
     {"id": "sc-3", "sense": "attach", "kind": "context", "trust": "self", "at": "2026-09-23 12:00",
      "fields": {"cwd": "p", "project": "p"},
-     "context": {"quiet": False, "spoken_today": 0, "idle_s": None, "recent_same_kind": 0},
+     "context": {"spoken_today": 0, "idle_s": None, "recent_same_kind": 0},
      "label": "silence", "note": "context never speaks"},
 ]
 

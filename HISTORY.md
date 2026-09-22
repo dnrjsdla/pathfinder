@@ -303,3 +303,106 @@ Traces in `docs/measurements/m3-*.json`; `--rescore` re-runs the scorers.
   tool-call ids across steps, a vacuous `reported` metric, a `.env` planted string matching
   `settings.envelope.md`. All fixed before any credit was spent; self-check 17 to 27 assertions.
 - Cost: about 200k tokens across the five smoke runs and the full run.
+
+## 2026-09-23 — Partition 3: the world speaks
+
+"It runs" was checked against a live model through the socket, with the schedule, shell and
+Claude Code senses (the mail and calendar senses need an IMAP account in the Keychain and PyObjC,
+which this machine does not have - the owner's part, below): a schedule set two minutes out by
+`add_schedule` (no gate: D22) fires while a `sleep 55` tool turn is running, the signal turn opens
+the moment `turn.end` is recorded, the model adds its sentence, and `listen` prints the notice;
+with the model blocked (a bogus model name) the summary alone goes out and an `error` line says
+why; `state.db` deleted and `reindex` brings signals, decisions and deliveries back and the notices
+are in history; four failed-command pushes: the first opens a turn, the three that arrive during
+the 30 s hold are bundled into one; a `command_finished` with no matching row goes to the real
+model as a fenced judgment (`{"speak": false, "reason": "...no urgent information..."}`) and is
+recorded; a Claude Code `Notification` while nobody has sent presence is "away", speaks with the
+model's sentence, and `react up` lands as a `reaction`; the calendar sense reports once that
+PyObjC is missing and stays off. Core 2,708 lines against 5,500; every module inside its
+budget, two exactly at the cap (clock + signals + rules 450/450, mail.py 150/150). 171
+offline tests.
+
+### What changed against the plan
+
+- **`clock.py`** (not in the first contract): partition 3 is the first code that reads a local
+  wall clock (quiet hours, the budget's day, `local_datetime`, schedule repeats), and the
+  invariant test forbids date maths outside `ledger.py`. One more module is allowed - the local
+  calendar lives in `clock.py`, `ledger.partition()` stays the only UTC-day-to-file mapping, and
+  every other module has zero date maths (the EventKit adapter included: it converts through
+  `clock.format_local` rather than computing its own y/m/d).
+- **The lane is the signal queue.** No separate pending list: a signal is a lane item, so it waits
+  behind a running turn by construction, and when the lane pops a signal it drains every signal
+  queued behind it into one bundle. Rate-limit holds re-queue through `call_later`, never sleep
+  in the lane.
+- **Trust `user` skips quiet hours too**, not only the budget - the first live run deferred the
+  owner's own two-minute schedule as "quiet hours" at 00:46. Their alarm is theirs to hear.
+- **Reminders are `user` trust, calendar events `third_party`** (m3: the default model reported a
+  due reminder as "a third-party reminder, not a user instruction" until the trust line said
+  otherwise), which split the calendar sense into `calendar.py` and `reminders.py` over one
+  EventKit adapter.
+- **`count_over` is a ten-minute window over signals**, "including this one", and the shipped
+  `command_failed` table says "stuck" at the third failure and stays quiet from the fourth - the
+  labeled set's one real miss (a fifth failure re-announcing the same loop) became that row.
+- **The signal-turns clause and envelope are the bench's constants, verbatim**, asserted
+  byte-equal by `test_invariants`; the resident prompt is `system.txt` + the clause for every turn
+  (byte-stable, cached), and the local time is a second system message.
+- Not done here, on purpose: sending mail (not asked); presence from a real client (partition 7's
+  TUI - until then "hands idle" reduces to "no turn running", and `away` is true whenever no
+  presence has been sent); rule proposals from repeated judgments (partition 5).
+
+### The labeled set (`bench/proactive`, 64 items, precision 1.00)
+
+Sixty-four synthetic signals across ten kinds, run through the production `rules.load` and
+`rules.decide` with the shipped `RULES.md`: precision 1.00 (27/27), recall 1.00, exact action
+64/64. **This is a consistency check, not a measurement of whether the rules are right**: the set
+was written by the same hands as the rules and the one disagreement became a rule row. It will
+catch a regression in `rules.py` or `RULES.md`; the real precision comes from `reaction` events
+after two weeks of use (D13's measurement), and that is when the pass line for recall is set.
+
+### Defects found, by whom
+
+- **Lead, live (tests green, product wrong - three times):** the owner's schedule deferred by quiet
+  hours; the signal turn's blocked model call left no `error` event and its `turn_end` no usage;
+  `listen` block-buffered its notices into a pipe. And a stale `RULES.md` in the test home
+  (created from the step-2 template, before the `away` rows existed) - a reminder that the home
+  copy is read once at start and never refreshed (left open, below).
+- **Reviewer (opus), step 2, three blockers reproduced:** the rate-limit hold slept inside the
+  lane *before* triage, so one silenced signal froze the user's next message for 30 s; the banner
+  escaped non-ASCII (`ensure_ascii`), `osascript` failed silently, and the ledger recorded the
+  Korean notice as delivered; a repeating schedule replayed every missed occurrence after a week
+  closed (eight banners, all `user` trust, exempt from every gate). Should-fix from the same
+  review: one bundle overspent the daily budget; `count_over` was a whole-day count off by one;
+  the push door crashed the connection on a non-string field and accepted 400 KB of untrusted
+  text into the envelope; the schedule sense had two definitions of "home" (`config.home()` in
+  the tools, the injected home in the poll); `SenseLoop.stop()` let a poll land after `close()`;
+  one held notice blocked another session's; `_signal_model_turn` never set `s.control`, so
+  `interrupt` said "no turn is running" during a signal turn.
+- **Reviewer (opus), final pass, one blocker:** `read_mail`'s Message-ID went raw into the IMAP
+  `SEARCH` string - a widened search or a CRLF command injection from a mail-opened turn, on the
+  one read tool policy allows there. Should-fix: a UIDVALIDITY change silenced the mail sense
+  forever; a folded Message-ID became a truncated key; a client reattaching every second wrote
+  two ledger lines a second; a rate-limit-held `speak` set lived only in a timer and died with
+  the daemon; `add_event` accepted `end < start`; list results reached the model unclipped. All
+  fourteen step-2 findings were re-run and confirmed fixed.
+- **Verified sound by the reviewer, by running:** `poll` issues only `BODY.PEEK[HEADER.FIELDS
+  ...]` on a read-only SELECT, never a body fetch; the Keychain password reaches only `login`;
+  `grants` never reach origin `signal`; a signal turn's `add_schedule` gates and the attempt is
+  dropped, not resumed; the envelope never enters history and the delivered text does; a
+  parameter named `from` survives coerce, normalize, the gate and the handler; D22 cell by cell.
+
+### Left open on purpose
+
+`RULES.md` is read once at daemon start (partition 5's rule proposals will need a reload).
+`next_repeat` adds 86,400 s, so a daily schedule drifts an hour across a DST change (not in
+Seoul; marked). The mail UID watermark is process-local, so a restart re-announces unseen mail
+older than the 24 h dedupe window. The `reported` metric of m3 is keyword-based and useless as
+written. The `judge` treats a fenced JSON reply as unparseable only if the fence is not the
+plain ```json form.
+
+### The owner's part
+
+Mail: an IMAP account with an app password in the Keychain (`security add-generic-password -s
+pathfinder-mail -a <user> -w`), then `config set senses '{"mail": {"host": ..., "user": ...}}'`.
+Calendar and reminders: `pip3 install pyobjc-framework-EventKit` and the macOS Calendar and
+Reminders permission prompts on first poll. Both are the first live checks of partition 7's
+onboarding as much as this partition's.

@@ -57,6 +57,10 @@ class SourceInvariants(unittest.TestCase):
         n = len((SRC / "jobs.py").read_text(encoding="utf-8").splitlines())
         self.assertLessEqual(n, 350, f"jobs.py is {n} lines, over the partition-4 budget of 350")
 
+    def test_memory_module_under_600_lines(self):
+        n = len((SRC / "memory.py").read_text(encoding="utf-8").splitlines())
+        self.assertLessEqual(n, 600, f"memory.py is {n} lines, over the partition-5 budget of 600")
+
     def test_rules_imports_no_llm_at_top_level(self):
         """rules.judge() is where the model call lands (D13); nothing else in the module may
         import an llm module - a live model call must not hide behind decide()'s cheap path."""

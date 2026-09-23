@@ -237,6 +237,39 @@ class State:
         row = self.db.execute("SELECT MAX(ts) FROM messages WHERE role = 'user'").fetchone()
         return row[0] if row and row[0] is not None else None
 
+    def last_user_seq(self, session: str) -> int | None:
+        """Max seq of `session`'s own user messages - a user turn's `edit_memory` has no seq of
+        its own to cite, so this is the evidence the gate fills in for it."""
+        row = self.db.execute(
+            "SELECT MAX(seq) FROM messages WHERE session = ? AND role = 'user'", (session,)).fetchone()
+        return row[0] if row and row[0] is not None else None
+
+    def nth_newest_message_seq(self, session: str, n: int) -> int | None:
+        """The seq of the session's n-th newest message, or None when fewer than n exist - the
+        boundary a pass's session summary keeps verbatim (the last n-1 messages stay out of it)."""
+        row = self.db.execute(
+            "SELECT seq FROM messages WHERE session = ? ORDER BY seq DESC LIMIT 1 OFFSET ?",
+            (session, n - 1)).fetchone()
+        return row[0] if row else None
+
+    def signal_kind(self, signal_key: str) -> str | None:
+        row = self.db.execute("SELECT kind FROM signals WHERE key = ?", (signal_key,)).fetchone()
+        return row[0] if row else None
+
+    def reaction_kinds(self, delivery_id: str) -> str:
+        """The kinds behind one delivery's `decision speak` rows, joined - what a `[reaction]`
+        ledger line says it was a reaction to. 'unknown' when nothing is found."""
+        rows = self.db.execute(
+            "SELECT signal_keys FROM decisions WHERE notice_id = ? AND signal_keys IS NOT NULL",
+            (delivery_id,)).fetchall()
+        kinds = []
+        for (keys_json,) in rows:
+            for key in json.loads(keys_json):
+                kind = self.signal_kind(key)
+                if kind and kind not in kinds:
+                    kinds.append(kind)
+        return ", ".join(kinds) if kinds else "unknown"
+
     def summary(self, session: str):
         row = self.db.execute("SELECT upto, text FROM summaries WHERE session = ?", (session,)).fetchone()
         return None if row is None else {"upto": row[0], "text": row[1]}

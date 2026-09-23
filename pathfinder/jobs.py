@@ -23,6 +23,7 @@ from .broker import Broker, Gate
 from .llm import LLMError, resolve
 from .llm import slot as slot_mod
 from .loop import TurnControl
+from .senses.jobs import TRUST
 from .signals import Signal
 from .state import State
 from .tools import ToolSpec
@@ -252,7 +253,7 @@ class Manager:
         self.push(Signal(sense="jobs", kind="job_done", key=f"job:{job.id}:done",
                          summary=f"Job done: {job.goal}\n{summary}",
                          fields={"goal": job.goal, "exhausted": out.kind == "exhausted"},
-                         trust="user"))
+                         trust=TRUST, exempt=True))
         job.state = "done"  # after recording/pushing: a caller polling `job.state` sees both too
         job.messages = []   # a finished job's context is in the ledger, not in memory for the daemon's life
 
@@ -260,6 +261,6 @@ class Manager:
         self.record("job_failed", session=job.session, origin="job", id=job.id, reason=reason)
         self.push(Signal(sense="jobs", kind="job_failed", key=f"job:{job.id}:failed",
                          summary=f"Job failed: {job.goal} — {reason}",
-                         fields={"goal": job.goal, "reason": reason}, trust="user"))
+                         fields={"goal": job.goal, "reason": reason}, trust=TRUST, exempt=True))
         job.state = "cancelled" if reason == "stopped" else "failed"
         job.messages = []

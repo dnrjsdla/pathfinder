@@ -415,7 +415,8 @@ class Daemon:
         now = time.time()
         dup = signals.seen_recently(self.state, signal.key, now)
         self.record("signal", origin="signal", trust=signal.trust, sense=signal.sense,
-                    kind=signal.kind, key=signal.key, summary=signal.summary, fields=signal.fields)
+                    kind=signal.kind, key=signal.key, summary=signal.summary, fields=signal.fields,
+                    exempt=signal.exempt)
         if dup:
             self.record("decision", origin="signal", signal_key=signal.key, action="silence", why="seen")
             return
@@ -451,7 +452,7 @@ class Daemon:
                     action, why = ("speak" if speak else "silence"), "judged"
             # should-fix 4: the budget is spent per bundle as it is built, not only once the
             # turn ends - a bundle of 5 with daily_budget=1 must not speak all 5.
-            if (action == "speak" and sig.trust != "user" and self.rules.daily_budget
+            if (action == "speak" and sig.trust != "user" and not sig.exempt and self.rules.daily_budget
                     and today.spoken + len(to_speak) >= self.rules.daily_budget):
                 action, why = "defer", "daily budget spent"
             if action == "speak":

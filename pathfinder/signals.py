@@ -44,6 +44,10 @@ class Signal:
     summary: str        # one line the sense assembled from fields - the code-assembled notice
     fields: dict        # structured values rules read; never prose
     trust: str          # written by the sense's TRUST declaration, never by the data itself
+    # The user started what this reports (a job they asked for): no budget, no quiet hours - the
+    # exemption `user` trust also carries, WITHOUT its envelope authority. A job's summary is
+    # model-written from whatever it read, so it must not be "the user's own words" to the model.
+    exempt: bool = False
 
 
 def render_block(signal: Signal) -> str:

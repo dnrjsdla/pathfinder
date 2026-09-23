@@ -370,9 +370,10 @@ Daemon.run_signal_turn ── rules.decide per signal FIRST (never held, never s
   Outcome `answer`/`exhausted` → `job_done {id, summary (clipped 2000), steps, usage, exhausted?}`;
   `cancelled` → `job_failed {reason: "stopped"}`; `LLMError` → `job_failed {reason: "model: ..."}`;
   any other exception → `job_failed {reason: "internal: <type>"}`. Both terminal events push a
-  `Signal(sense="jobs", kind="job_done"|"job_failed", trust="user", ...)` - `record`/`push` are set
-  on the `Job` object *after* the ledger write, so anything polling `job.state` never observes a
-  state change before the fact it describes is on disk.
+  `Signal(sense="jobs", kind="job_done"|"job_failed", trust="self", exempt=True, ...)` (D26: the
+  summary is the model's text, so no envelope authority; the user's own job still skips budget and
+  quiet hours through `exempt`) - `job.state` is set *after* the ledger write and the push, so
+  anything polling it never observes a state change before the fact it describes is on disk.
 - **Gate (D24)**: a `Gate` out of `loop.run` records `approval_pending {..., job: id}` and sets the
   job `gated`; the thread ends, the lane stays free. `approve`/`deny` on a row with `job` set skips
   the session lane entirely and calls `Manager.resume(approval_id, decision)`, which re-enters
@@ -402,9 +403,9 @@ Daemon.run_signal_turn ── rules.decide per signal FIRST (never held, never s
   here - it is `Manager`'s own in-memory state, found instead via a pending approval's `job`
   column); `approvals` gains a `job` column; `jobs()`, `job(id)`, `running_jobs()`. `Today` gains
   `jobs` (count of `job_start` today, `clock.day_start`-scoped).
-- **`senses/jobs.py`** declares `TRUST = "user"` and `KINDS = {job_done, job_failed}` (both
+- **`senses/jobs.py`** declares `TRUST = "self"` and `KINDS = {job_done, job_failed}` (both
   `always -> speak` in the shipped RULES.md - D8 §8: the outcome of what the user started spends no
-  budget and honours no quiet hours) purely as documentation for the shape `Manager`'s own `Signal`
+  budget and honours no quiet hours, carried by `Signal.exempt`) purely as documentation for the shape `Manager`'s own `Signal`
   objects already match; it exports no `build`, so it is never `push_capable` and `signal jobs ...`
   from the socket is refused like any unknown sense.
 
@@ -445,7 +446,7 @@ Daemon.run_signal_turn ── rules.decide per signal FIRST (never held, never s
 | `start_job` is user-only; a job's and a signal turn's own tool registry never contains it | `test_tools.OriginRegistryTest.test_tools_for_origin` |
 | A job runs to a summary with its tool events tagged `origin: job`; refuses over budget and when one is already running; `stop` kills a blocking tool within a second; a steer reaches the next step; a gate pauses and both `approve`/`deny` resume it correctly; a gate survives a restart, an ungated crash is closed as `job_failed`; an `LLMError` fails the job, not the daemon; an exhausted budget is `done` with `exhausted: true` | `test_jobs.*` |
 | `state.db` deleted: a job and its gated approval (with the `job` column) come back from the ledger alone | `test_jobs.ReindexRestoresJobsTest.test_reindex_restores_jobs_and_job_approvals` |
-| A session's own turn still answers while a job is running; `job_done`'s trust is `user`, so it speaks even with the daily budget spent and in quiet hours | `test_daemon.JobDaemonIntegrationTest.test_daemon_answers_while_job_runs`, `test_daemon.JobSignalTest.test_job_done_speaks_without_budget` |
+| A session's own turn still answers while a job is running; `job_done` is `exempt`, so it speaks even with the daily budget spent and in quiet hours - with trust `self`, never `user` | `test_daemon.JobDaemonIntegrationTest.test_daemon_answers_while_job_runs`, `test_daemon.JobSignalTest.test_job_done_speaks_without_budget` |
 | The socket refuses `signal jobs ...`; `jobs.py` <= 350 lines | `test_daemon.PushDoorValidationTest.test_socket_refuses_signal_jobs`, `test_invariants.test_jobs_module_under_350_lines` |
 
 ## 11. How to count

@@ -175,8 +175,9 @@ def _quiet(spec: str, hour: int) -> bool:
 def decide(signal, rules: Rules, user_lists: dict, today, now: float) -> tuple:
     """(action, why). Quiet hours, then the daily budget - a signal the user started (trust
     `user`) is exempt from both: an alarm they set for 3 a.m. is theirs to hear, and their own
-    reminder spends no budget. Then the kind's table, first match wins; no row -> `ask_model`."""
-    if signal.trust != "user":
+    reminder spends no budget - and so is one marked `exempt` (a job they started; its text is
+    the model's, not theirs). Then the kind's table, first match wins; no row -> `ask_model`."""
+    if signal.trust != "user" and not signal.exempt:
         if _quiet(rules.quiet_hours, clock.hour(now)):
             return "defer", "quiet hours"
         if rules.daily_budget and today.spoken >= rules.daily_budget:

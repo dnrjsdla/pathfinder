@@ -545,7 +545,9 @@ run once, on one model family.
 
 ### The owner's part
 
-D23's five-pair spot check (sheet sent with the brief). And a decision the review surfaced: a
-job's summary is model-written from whatever it read, yet it enters the signal envelope as
-`trust: user` because that is the tier D8 §8 exempts from budget and quiet hours - `trust` is
-doing two jobs (exemption and authority) and partition 4 is the first place they must differ.
+D23's five-pair spot check (sheet sent with the brief; pending, above). The review surfaced a
+decision - a job's summary is model-written from whatever it read, yet it entered the envelope as
+`trust: user`, the tier D8 §8 exempts from budget and quiet hours; `trust` was doing two jobs
+(exemption and authority) and partition 4 is the first place they differ. **The owner chose the
+split: D26** - `Signal.exempt` carries the exemption, `job_done`/`job_failed` are `trust: self`
++ `exempt`, and the user's own schedule/reminders keep `trust: user` as before.

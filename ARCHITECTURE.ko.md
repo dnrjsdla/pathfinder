@@ -359,8 +359,9 @@ Daemon.run_signal_turn ── 신호마다 rules.decide 를 먼저(절대 안 �
   결말 `answer`/`exhausted` → `job_done {id, summary(2000자로 자름), steps, usage, exhausted?}`;
   `cancelled` → `job_failed {reason: "stopped"}`; `LLMError` → `job_failed {reason: "model:
   ..."}`; 그 밖의 예외 → `job_failed {reason: "internal: <타입>"}`. 두 결말 다
-  `Signal(sense="jobs", kind="job_done"|"job_failed", trust="user", ...)` 을 push 한다 —
-  `record`/`push` 는 장부에 적힌 *뒤에* `Job` 객체의 상태를 바꾸므로, `job.state` 를 지켜보는
+  `Signal(sense="jobs", kind="job_done"|"job_failed", trust="self", exempt=True, ...)` 을 push
+  한다(D26: 요약은 모델의 글이라 봉투 안 권위는 없고, 사용자가 시킨 작업이라는 면제 — 예산·조용한
+  시간 — 는 `exempt` 가 든다) — `job.state` 는 장부에 적고 push 한 *뒤에* 바뀌므로, 지켜보는
   쪽은 그 사실이 디스크에 있기 전에 상태가 바뀐 걸 절대 못 본다.
 - **게이트(D24)**: `loop.run` 에서 올라온 `Gate` 는 `approval_pending {..., job: id}` 을 적고
   그 작업을 `gated` 로 만든다; 스레드는 끝나고 lane 은 비어 있다. `job` 이 있는 줄에 대한
@@ -391,9 +392,9 @@ Daemon.run_signal_turn ── 신호마다 rules.decide 를 먼저(절대 안 �
   `Manager` 자신의 메모리 상태이고, 대기 중인 승인의 `job` 칸으로 대신 찾는다); `approvals` 에
   `job` 칸이 늘고; `jobs()`, `job(id)`, `running_jobs()`. `Today` 에 `jobs`(오늘의 `job_start`
   수, `clock.day_start` 기준)가 늘었다.
-- **`senses/jobs.py`** 는 `TRUST = "user"` 와 `KINDS = {job_done, job_failed}`(둘 다 기본
+- **`senses/jobs.py`** 는 `TRUST = "self"` 와 `KINDS = {job_done, job_failed}`(둘 다 기본
   RULES.md 에서 `always -> speak` — D8 §8: 사용자가 시작한 것의 결말은 예산도 안 쓰고 조용한
-  시간도 안 따진다)를 선언하는데, `Manager` 자신의 `Signal` 객체가 이미 맞추고 있는 모양을
+  시간도 안 따진다, `Signal.exempt` 가 든다)를 선언하는데, `Manager` 자신의 `Signal` 객체가 이미 맞추고 있는 모양을
   문서로 남기기 위해서일 뿐이다; `build` 를 안 내보내므로 `push_capable` 이 절대 안 되고,
   소켓에서 온 `signal jobs ...` 는 모르는 감각과 똑같이 거부된다.
 
@@ -434,7 +435,7 @@ Daemon.run_signal_turn ── 신호마다 rules.decide 를 먼저(절대 안 �
 | `start_job` 은 유저 전용; 작업과 신호 턴 자신의 레지스트리엔 절대 없음 | `test_tools.OriginRegistryTest.test_tools_for_origin` |
 | 작업이 요약까지 돌고 그 툴 사건은 `origin: job` 을 닮; 예산 초과와 중복 실행을 거절; `stop` 이 막힌 툴을 1초 안에 죽임; steer 가 다음 스텝에 닿음; 게이트가 서고 `approve`/`deny` 둘 다 올바르게 재개함; 게이트가 재시작을 견디고, 게이트 없이 죽은 것은 `job_failed` 로 닫힘; `LLMError` 는 작업만 실패시킴; 스텝 예산 소진은 `exhausted: true` 를 단 `done` | `test_jobs.*` |
 | `state.db` 삭제: 작업과 그 게이트 승인(`job` 칸 포함)이 장부만으로 돌아옴 | `test_jobs.ReindexRestoresJobsTest.test_reindex_restores_jobs_and_job_approvals` |
-| 작업이 도는 중에도 세션 자신의 턴은 여전히 답함; `job_done` 의 trust 는 `user` 라 하루 예산이 다 쓰였고 조용한 시간이어도 말함 | `test_daemon.JobDaemonIntegrationTest.test_daemon_answers_while_job_runs`, `test_daemon.JobSignalTest.test_job_done_speaks_without_budget` |
+| 작업이 도는 중에도 세션 자신의 턴은 여전히 답함; `job_done` 은 `exempt` 라 하루 예산이 다 쓰였고 조용한 시간이어도 말함 — trust 는 `self`, 결코 `user` 가 아님 | `test_daemon.JobDaemonIntegrationTest.test_daemon_answers_while_job_runs`, `test_daemon.JobSignalTest.test_job_done_speaks_without_budget` |
 | 소켓이 `signal jobs ...` 를 거부함; `jobs.py` 는 350줄 이하 | `test_daemon.PushDoorValidationTest.test_socket_refuses_signal_jobs`, `test_invariants.test_jobs_module_under_350_lines` |
 
 ## 11. 세는 법

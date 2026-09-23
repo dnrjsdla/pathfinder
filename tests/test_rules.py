@@ -85,6 +85,16 @@ class PrefiltersTest(unittest.TestCase):
             # a signal the user started (trust "user", e.g. schedule) is exempt from the budget
             self.assertEqual(rules.decide(_signal(trust="user"), parsed, {}, _today(spoken=99), 1000.0)[0], "speak")
 
+    def test_exempt_skips_budget_and_quiet_hours_without_user_trust(self):
+        """Partition 4 (owner: option b): a job's outcome is exempt like the user's own alarm,
+        but its text is the model's - trust stays `self`, the exemption is its own flag."""
+        parsed = rules.parse("---\ndaily_budget: 2\nquiet_hours: 23-8\n---\n## job_done\n\n| always | - | speak | |\n")
+        sig = Signal(sense="jobs", kind="job_done", key="j1", summary="Job done: x\nsummary", fields={},
+                     trust="self", exempt=True)
+        with mock.patch("pathfinder.rules.clock.hour", return_value=2):
+            self.assertEqual(rules.decide(sig, parsed, {}, _today(spoken=2), 1000.0)[0], "speak")
+        self.assertEqual(sig.trust, "self")
+
 
 class ResolveAndJudgeTest(unittest.TestCase):
     def test_resolve_user_lists(self):

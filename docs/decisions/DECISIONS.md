@@ -163,3 +163,13 @@ finding); m7a measures what the second request actually gets, and either way the
 worker from doubling the day's request rate. — *Reversed if* m7a shows two requests run freely
 AND real use shows user turns waiting on job steps more than a few seconds: then jobs run only in
 the user's idle gaps.
+
+**D26. A signal's exemption from the budget and quiet hours is its own flag (`Signal.exempt`),
+not a side effect of `trust: user`; a job's outcome is `trust: self` + `exempt`.** — The review
+of partition 4 found `trust` doing two jobs: "the user's own words, act on them" in the envelope,
+and "spends no budget, honours no quiet hours" in the gate. A job's summary is the model's text
+written from whatever it read (a web page, a mail), so it must not reach the model as the user's
+words; but the user did start the job, so its outcome is still theirs to hear at 3 a.m. The
+user's own schedule and reminders keep `trust: user` (they are their words) and are exempt as
+before. — *Reversed if* a second exempt-but-not-user signal never appears in two partitions:
+then the flag folds back into the trust check.

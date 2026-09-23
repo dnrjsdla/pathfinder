@@ -1183,7 +1183,7 @@ class JobSignalTest(DaemonHarness):
             daemon.push_signal(Signal(sense="jobs", kind="job_done", key="job-budget-test",
                                       summary="Job done: research\nfound it",
                                       fields={"goal": "research", "exhausted": False},
-                                      trust="user"))
+                                      trust="self", exempt=True))
             for _ in range(200):
                 if any(e["type"] == "decision" for e in Ledger(self.home).read()):
                     break

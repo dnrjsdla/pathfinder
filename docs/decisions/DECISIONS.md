@@ -173,3 +173,32 @@ words; but the user did start the job, so its outcome is still theirs to hear at
 user's own schedule and reminders keep `trust: user` (they are their words) and are exempt as
 before. — *Reversed if* a second exempt-but-not-user signal never appears in two partitions:
 then the flag folds back into the trust check.
+
+## 2026-09-24 — Partition 5 (owner's choices on the contract's three questions)
+
+**D27. Vectors live in `state.db` as float32 blobs and cosine is computed in Python; no vector
+extension.** One vector per wiki page, tagged with the model that made it; FTS5 (the default
+tokenizer, one prefix term per query token) and the vector list are merged by reciprocal rank
+fusion. — The standard library covers a personal wiki (tens to hundreds of pages) with no fourth
+dependency and no install failure point; the storage format is the one sqlite-vec reads, so the
+upgrade is one function. — *Reversed if* the wiki passes about 10,000 pages or a search takes
+over a second: then `sqlite-vec` as an optional dependency, same blobs.
+
+**D28. An edit to `USER.md` or `RULES.md` goes to the approval box whoever proposes it; the
+owner may switch their own turns to apply-at-once with the existing `grants`
+(`{"edit_memory": "allow"}`), never the consolidation pass.** Wiki edits apply at once for
+everyone (line-level, the inverse op is in the ledger). — One path by default: every line in the
+two files the rules and the resident context read has an approval behind it. The owner's
+manual/auto idea (Claude Code's permission modes) needs no new setting: `grants` already means
+"do not ask me about this tool, in my own turns only", which is exactly the line between what
+the user said and what the pass inferred. — *Reversed if* real use shows the owner approving
+every `edit_memory` row without reading it for two weeks: then apply-at-once becomes the default
+for user turns, the box stays for the pass.
+
+**D29. Resident every turn: `USER.md`'s body and the wiki map (title and date, newest first,
+about 1,000 characters), in the per-turn second system message after the local-time line.**
+The first system message stays byte-stable (cache). — D8: an assistant that knows who it is
+talking to and what it has written down can look one step ahead without a tool round trip the
+free models mostly skip; the cost is about 500–800 uncached tokens per turn, five to six percent
+of an m6 day. — *Reversed if* two weeks of real use put the resident context above 15% of the
+day's tokens: then the map only, `USER.md` through `read_memory`.

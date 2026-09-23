@@ -81,9 +81,10 @@ class DaemonHarness(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def run_with(self, factory, scenario, job_factory=None):
+    def run_with(self, factory, scenario, job_factory=None, pass_factory=None):
         async def main():
-            daemon = Daemon(self.home, step_factory=factory, job_step_factory=job_factory)
+            daemon = Daemon(self.home, step_factory=factory, job_step_factory=job_factory,
+                            pass_step_factory=pass_factory)
             await daemon.start()
             try:
                 return await scenario(daemon)
@@ -1123,6 +1124,152 @@ class SignalTurnControlTest(DaemonHarness):
 
         is_running = self.run_with(slow_model, scenario)
         self.assertTrue(is_running)
+
+
+class MemoryDaemonTest(DaemonHarness):
+    def test_memory_approval_routes_to_manager(self):
+        async def scenario(daemon):
+            proposal = {"target": "USER.md", "op": "add", "old": "", "new": "Likes tea.", "evidence": [1]}
+            daemon.record("approval_pending", session="s1", origin="memory", id="appr1",
+                          call_id="appr1", tool="edit_memory", args=proposal, messages=[])
+            c = await Client.open(self.home)
+            c.send({"type": "approve", "id": "appr1"})
+            reply = await c.recv()
+            c.close()
+            return reply, (self.home / "USER.md").read_text(encoding="utf-8"), "s1" in daemon.sessions
+
+        reply, after, has_session = self.run_with(fake_model("ok"), scenario)
+        self.assertEqual(reply, {"type": "turn.end", "turn": "", "kind": "resumed"})
+        self.assertIn("Likes tea.", after)
+        self.assertFalse(has_session)  # no lane resume - the memory box, not a session turn
+        applies = [e for e in self.events() if e["type"] == "memory_apply"]
+        self.assertEqual(len(applies), 1)
+        self.assertEqual(applies[0]["approval"], "appr1")
+
+    def test_rules_reload_on_approved_row(self):
+        old_row = ("| `minutes_over` | `5` | `speak` | a command that ran more than five minutes "
+                  "is worth a word when it's done |")
+        new_row = old_row.replace("`speak`", "`silence`")
+
+        async def scenario(daemon):
+            proposal = {"target": "RULES.md", "op": "replace", "old": old_row, "new": new_row, "evidence": [1]}
+            daemon.record("approval_pending", session="s1", origin="memory", id="appr2",
+                          call_id="appr2", tool="edit_memory", args=proposal, messages=[])
+            c = await Client.open(self.home)
+            c.send({"type": "approve", "id": "appr2"})
+            await c.recv()
+            c.close()
+            _never_quiet(daemon)  # after the reload: reload_rules() would otherwise wipe this override
+            daemon.push_signal(Signal(sense="shell", kind="command_finished", key="k-reload",
+                                      summary="s", fields={"seconds": 900}, trust="self"))
+            for _ in range(200):
+                if any(e["type"] == "decision" and e.get("signal_key") == "k-reload"
+                      for e in Ledger(self.home).read()):
+                    break
+                await asyncio.sleep(0.01)
+            return list(Ledger(self.home).read())
+
+        events = self.run_with(fake_model("ok"), scenario)
+        decision = next(e for e in events if e["type"] == "decision" and e.get("signal_key") == "k-reload")
+        self.assertEqual(decision["action"], "silence")  # the reloaded row, not the shipped "speak"
+
+    def test_rules_reload_on_hand_edit(self):
+        config.set(self.home, "senses", {"shell": {}})  # command_finished becomes a validated kind
+        old_row = ("| `minutes_over` | `5` | `speak` | a command that ran more than five minutes "
+                  "is worth a word when it's done |")
+        good_row = old_row.replace("`speak`", "`silence`")
+
+        async def scenario(daemon):
+            rules_path = self.home / "RULES.md"
+            # quiet_hours in the frontmatter itself (not `_never_quiet`, which `reload_rules`
+            # would wipe on every one of this test's own hand edits): 0-0 opens the whole day.
+            text = (rules_path.read_text(encoding="utf-8")
+                   .replace("quiet_hours: 23-8", "quiet_hours: 0-0").replace(old_row, good_row))
+            rules_path.write_text(text, encoding="utf-8")
+            os.utime(rules_path, (time.time() + 5, time.time() + 5))
+            daemon.push_signal(Signal(sense="shell", kind="command_finished", key="k-hand",
+                                      summary="s", fields={"seconds": 900}, trust="self"))
+            for _ in range(200):
+                if any(e["type"] == "decision" and e.get("signal_key") == "k-hand"
+                      for e in Ledger(self.home).read()):
+                    break
+                await asyncio.sleep(0.01)
+
+            broken = text.replace("`minutes_over`", "`gibberish_condition`")
+            rules_path.write_text(broken, encoding="utf-8")
+            os.utime(rules_path, (time.time() + 10, time.time() + 10))
+            daemon.push_signal(Signal(sense="shell", kind="command_finished", key="k-hand2",
+                                      summary="s", fields={"seconds": 900}, trust="self"))
+            for _ in range(200):
+                if any(e["type"] == "decision" and e.get("signal_key") == "k-hand2"
+                      for e in Ledger(self.home).read()):
+                    break
+                await asyncio.sleep(0.01)
+            return list(Ledger(self.home).read())
+
+        events = self.run_with(fake_model("ok"), scenario)
+        d1 = next(e for e in events if e["type"] == "decision" and e.get("signal_key") == "k-hand")
+        self.assertEqual(d1["action"], "silence")  # the hand edit took effect
+        d2 = next(e for e in events if e["type"] == "decision" and e.get("signal_key") == "k-hand2")
+        self.assertEqual(d2["action"], "silence")  # the broken edit was refused - old rules kept
+        self.assertTrue(any(e["type"] == "error" and "RULES.md" in e.get("message", "") for e in events))
+
+    def test_turn_context_carries_user_md_and_map(self):
+        async def scenario(daemon):
+            user_path = self.home / "USER.md"
+            user_path.write_text(user_path.read_text(encoding="utf-8") + "\nLikes tea.\n", encoding="utf-8")
+            wiki_dir = self.home / "wiki"
+            wiki_dir.mkdir(exist_ok=True)
+            (wiki_dir / "coffee.md").write_text("# Coffee\nGood in the morning.\n", encoding="utf-8")
+            daemon.memory_mgr.index("wiki/coffee.md")
+
+            daemon.step_factory = fake_model("ok")
+            c = await Client.open(self.home)
+            c.send({"type": "say", "text": "hi"})
+            await c.until("turn.end")
+            c.close()
+            return daemon.step_factory.seen[-1], daemon.system_prompt
+
+        messages, resident = self.run_with(fake_model("placeholder"), scenario)
+        self.assertEqual(messages[0], {"role": "system", "content": resident})
+        self.assertEqual(messages[1]["role"], "system")
+        self.assertIn("Likes tea.", messages[1]["content"])
+        self.assertIn("Coffee", messages[1]["content"])
+
+    def test_memory_run_forces_a_pass(self):
+        def pass_factory(cfg, control, tools):
+            def step(messages):
+                yield ("text", "nothing new")
+            return step
+
+        async def scenario(daemon):
+            c = await Client.open(self.home)
+            c.send({"type": "say", "text": "hello"})
+            await c.until("turn.end")
+            c.send({"type": "memory.run"})
+            reply = await c.recv()
+            for _ in range(200):
+                if any(e["type"] == "memory_pass" for e in Ledger(self.home).read()):
+                    break
+                await asyncio.sleep(0.01)
+            c.close()
+            return reply, list(Ledger(self.home).read())
+
+        reply, events = self.run_with(fake_model("ok"), scenario, pass_factory=pass_factory)
+        self.assertEqual(reply["type"], "memory.run")
+        self.assertIn("result", reply)
+        self.assertTrue(any(e["type"] == "memory_pass" for e in events))
+
+    def test_socket_refuses_signal_memory(self):
+        async def scenario(daemon):
+            c = await Client.open(self.home)
+            c.send({"type": "signal", "sense": "memory", "fields": {}})
+            reply = await c.recv()
+            c.close()
+            return reply
+
+        reply = self.run_with(fake_model(), scenario)
+        self.assertEqual(reply["type"], "error")
 
 
 class JobDaemonIntegrationTest(DaemonHarness):

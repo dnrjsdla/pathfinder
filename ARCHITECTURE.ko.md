@@ -4,13 +4,16 @@
 `docs/decisions/DECISIONS.md`, 실측이 바꾼 것은 `HISTORY.md`. 여기 적힌 이름은 전부 트리에
 실존한다. 정본은 영어 `ARCHITECTURE.md` 이고 이 파일은 같은 커밋에서 함께 고친다.
 
-지금까지 지은 것: **구획 4 — 작업자.** 비서가 말하고(1) 툴을 부르고(2) 세상이 말하고(3);
-이제 `start_job`(origin `user` 전용)이 워커 하나를 스레드에 띄워, 세션 자신의 턴과 별도로
-`prompts/job.txt` + 목표를 대상으로 제 `loop.run` 을 돈다 - 읽기는 자유롭고, write/network 호출은
-세션 턴과 똑같이 게이트에 걸리며(D24), `job_done`/`job_failed` 로 끝나 규칙과 전달 경로를 그대로
-타는 `Signal` 로 push 된다. 슬롯 하나(`llm/slot.py`)가 모든 모델 요청을 사용자 우선으로
-직렬화한다(D25): 작업자는 한 스텝만 슬롯을 쥐고 스텝 사이에 놓는다. 기억 볼트 · 규칙 제안 · TUI
-는 그 뒤 구획들이다.
+지금까지 지은 것: **구획 5 — 기억.** 비서가 말하고(1) 툴을 부르고(2) 세상이 말하고(3) 작업이
+제 턴과 별도로 돌고(4); 이제 `memory.Manager` 만 쓰는 기억 볼트 - `USER.md`, `RULES.md`,
+`wiki/*.md` - 를 지닌다. 모델 없는 문(`vet`)을 지나야 어떤 수정이든 들어간다. wiki 수정은 그
+자리에서 적용되고, `USER.md`/`RULES.md` 수정은 툴 게이트와 같은 승인 상자로 간다(D28: 사용자
+턴의 grant 가 그 자리 적용을 허락할 수도 있다). 통합 패스(`Manager.run_pass`)는 작업자처럼 사용자
+자신의 턴과 별도로 돌며 지난 패스 이후의 장부를 읽어 남길 만한 것을 적는다 - wiki 한 줄, 사용자가
+제 말로 한 사실, 또는(되풀이된 판정 뒤) `RULES.md` 줄 제안 - 그리고 오래된 세션을 요약 하나로
+접는다. `USER.md` 의 본문과 wiki 지도는 모든 턴의 두 번째 시스템 메시지에 실려 오고,
+`search_memory`/`read_memory` 가 모델이 나머지를 찾아보게 한다. `RULES.md` 는 이제 재시작 없이
+다시 읽힌다 - 승인된 수정에서도, 손으로 고쳤을 때도. 카탈로그와 TUI 는 그 뒤 구획들이다.
 
 ## 0. 한 문장
 
@@ -46,8 +49,9 @@ daemon.Daemon ── 세션마다 lane 하나 (큐 + 워커); 큐 항목: say | 
 | `<홈>/config.json` | 모델 이름 · provider · `grants` · `senses` · `schedules` · 손잡이 | `config.set()` 하나뿐 | 기본값(모델 미설정) |
 | `<홈>/workspace/` | 샌드박스 셸이 쓸 수 있는 유일한 곳 · 모든 셸 명령의 cwd · 상대경로 파일이 놓이는 곳 | 사용자의 요청으로 툴이 | PATHFINDER 의 것은 없음 |
 | `<홈>/pathfinder.sock` | 데몬의 소켓 | 데몬 | 뜰 때 다시 만든다 |
-| `<홈>/RULES.md` | speak/silence/defer/ask_model 규칙, 사람이 읽을 수 있는 한 장 | 첫 시작에 `pathfinder/prompts/RULES.md` 에서 만들어짐; 손으로 고침 | 다음 시작에 기본값으로 다시 씀 |
-| `<홈>/USER.md` | RULES.md 의 `USER.xxx` 조건이 읽는 목록; 지금은 비어 있음 | 첫 시작에 빈 채로 만들어짐; 구획 5 가 채움 | 빈 앞머리 |
+| `<홈>/RULES.md` | speak/silence/defer/ask_model 규칙, 사람이 읽을 수 있는 한 장 | 첫 시작에 `pathfinder/prompts/RULES.md` 에서 만들어짐; 손으로 고치거나 승인된 `edit_memory` 줄로; 어느 쪽이든 재시작 없이 다시 읽힘 | 다음 시작에 기본값으로 다시 씀 |
+| `<홈>/USER.md` | RULES.md 의 `USER.xxx` 조건이 읽는 목록에 자유 본문(상주 문맥)이 더해짐 | 첫 시작에 빈 채로 만들어짐; 승인된 `edit_memory` 줄이 채움(또는 사용자 턴 grant 의 자동 적용, D28) | 빈 앞머리 - 기억이 처음부터 다시 시작 |
+| `<홈>/wiki/*.md` | wiki 페이지, 파일 하나에 주제 하나 | `memory.Manager.apply`(`edit_memory`, 그 자리에서 적용) | 그 지식이 사라짐 - 파일이 진실이다 |
 
 `<홈>` 은 `$PATHFINDER_HOME` 또는 `~/.pathfinder` (권한 0700).
 
@@ -65,12 +69,17 @@ daemon.Daemon ── 세션마다 lane 하나 (큐 + 워커); 큐 항목: say | 
 
 지금의 사건 종류: `session_start, user, assistant, tool_call, tool_result, turn_start, turn_end,
 error, config_set, approval_pending, approval, interrupted, signal, decision, judgment, delivery,
-reaction, presence`. `config_set` 은 키만 적는다. 턴 도중의 steer 는 `steer: true` 가 붙은 `user`
-사건이다. `tool_call` 의 인자와 `tool_result` 의 결과는 2,000자로 자른다. `approval_pending` 은
-도는 중이던 메시지를 통째로 싣는다(재개에 필요). `signal` 사건의 `trust` 는 감각 자신의 선언
-(`ledger.TRUST`)이지 데이터가 주장하는 값이 아니다. `decision` 은 `signal_key, action, why` 를
-싣고, 알림까지 이어진 `speak` 에 한해 `notice_id, text, signal_keys` 도 싣는다(재시작 뒤
-`Outbox` 가 이것으로 복구한다).
+reaction, presence, memory_pass, memory_apply, session_summary`. `config_set` 은 키만 적는다. 턴
+도중의 steer 는 `steer: true` 가 붙은 `user` 사건이다. `tool_call` 의 인자와 `tool_result` 의
+결과는 2,000자로 자른다. `approval_pending` 은 도는 중이던 메시지를 통째로 싣는다(재개에 필요) -
+`edit_memory` 제안이면 빈 목록이다(게이트 걸린 턴이 아니라 상자다). `signal` 사건의 `trust` 는
+감각 자신의 선언(`ledger.TRUST`)이지 데이터가 주장하는 값이 아니다. `decision` 은 `signal_key,
+action, why` 를 싣고, 알림까지 이어진 `speak` 에 한해 `notice_id, text, signal_keys` 도 싣는다
+(재시작 뒤 `Outbox` 가 이것으로 복구한다). `memory_pass {from, upto, read, steps, usage, applied,
+proposed}` 는 통합 패스마다 한 번 적힌다(`upto` 가 `state.memory_cursor` 가 됨, 오류가 나도);
+`memory_apply {target, op, old, new, evidence, approval?}` 는 적용된 볼트 수정 하나의 되돌리기
+기록 전부다; `session_summary {upto, text}` 는 세션의 앞부분을 접는다. origin 에 `memory` 가
+더해진다(패스 자신의 턴과 툴 사건).
 
 ## 3. 파생 상태 (`pathfinder/state.py`)
 
@@ -97,6 +106,18 @@ idle_s)`, `signal_turns(ts)`(신호 기원 `turn_start` 한 번마다 한 줄 �
 `deliver.Outbox.rebuild()` 가 죽었다 살아날 때 복구하는 것. `rebuild(ledger)` 는 이 표들도
 같이 버리고 다시 흘린다.
 
+구획 5 가 더한 페이지 색인: `pages(path, title, mtime, text)` 와 외부-내용 FTS5 표 `pages_fts`,
+`vectors(path, model, vec)`(페이지마다 float32 blob 하나, `struct.pack`, numpy 없음 - 낡은
+모델의 벡터는 절대 맞지 않는다); `index_page`/`remove_page`/`pages()` 가 이를 `wiki/*.md` 와
+맞춰 둔다. `search(query, query_vector=None, model, top_k=3)` 는 FTS5 접두 토큰 매치와 벡터
+코사인을 reciprocal rank fusion(k=60)으로 합친다; `query_vector` 없으면 FTS 만 돈다(D10 의
+대체 경로는 인자 하나 뺀 같은 함수). `summaries(session, upto, text)` 가 `history(session)` 를
+뒷받침한다: 요약이 있으면 그것으로 지은 `system` 줄 뒤에 `upto` 넘는 메시지만 따른다 - 세션의
+앞부분은 접히지 다시 보내지지 않는다(`test_history_folds_after_summary`). `meta.memory_cursor`
+(마지막 패스의 `upto`, 처음엔 0)와 `memory_stats(now)`(최근 사흘 로컬 하루씩의 패스/읽은
+줄/적용 수, 대기 중인 `edit_memory` 제안, 최근 이레 하루씩의 판정 수)가 `pathfinder memory` 와
+막힌-기억 방아쇠를 뒷받침한다. `rebuild(ledger)` 는 이 표들도 같이 버리고 다시 흘린다.
+
 ## 4. 모델 층 (`pathfinder/llm/`)
 
 - `resolve(cfg, "provider:model")` 은 첫 콜론에서 갈라 `Endpoint` 를 돌려준다. 모델 이름은
@@ -106,6 +127,9 @@ idle_s)`, `signal_turns(ts)`(신호 기원 `turn_start` 한 번마다 한 줄 �
   무엇이든 되고 청크 사이에서 확인한다. 실패는 전부 `LLMError`, 402 · 429 는 `blocked`. 데몬의
   step factory 는 툴 스키마를 항상 넘긴다 — 모델이 자기 손을 봐야 한다(첫 라이브 실행에서
   안 넘기고 있던 것이 잡혔다 — `test_default_step_factory_sends_tool_schemas`).
+- `openai_compat.embed(endpoint, texts) -> list[list[float]]` 는 같은 `/embeddings` OpenAI 호환
+  경로로 묶어서 임베딩한다. 임베더는 `cfg["embed_model"]` 이고 `model`/`worker_model` 과 같은
+  방식으로 `resolve` 를 거친다; 비어 있으면 벡터 없음이지 오류가 아니다.
 
 ## 5. 툴 · 정책 · 샌드박스 · 브로커
 
@@ -123,7 +147,10 @@ escalate)`(write, sandboxed) · `read_file(path)` · `write_file(path, content)`
 을 같은 식으로 더한다(§9). `origins`(기본값: 넷 다 — `ledger.ORIGINS`)는 어느 origin 의 턴이
 그 툴의 스키마를 볼 수 있는지 이름 붙인다; `for_origin(origin)` 이 `TOOLS` 를 그것으로 거른다 -
 `start_job` 은 `origins={"user"}` 를 선언해서, 작업자 자신의 레지스트리와 신호 턴의 레지스트리에는
-아예 없다 — "작업자는 작업자를 못 만든다"는 정책이 아니라 구조다. `clip_for_ledger(value,
+아예 없다 — "작업자는 작업자를 못 만든다"는 정책이 아니라 구조다. `origins` 는 `memory` 에
+한해 옵트인이다: 넷이 기본값이라, 통합 패스는 스스로 `memory` 를 더한 툴만 본다
+(`search_memory`, `read_memory`, `read_ledger`, `edit_memory`) - `write_file`, `run_command`,
+schedule 의 툴은 절대 못 본다. `clip_for_ledger(value,
 limit=2000)` 은 장부에 적히는 `tool_call`/`tool_result`(작업자 자신의 것도)가 갖는 머리만 자르는
 경계다 — 모델이 보는 것을 자르는 `clip()`(머리+꼬리)보다 짧고 단순하다.
 
@@ -138,6 +165,7 @@ limit=2000)` 은 장부에 적히는 `tool_call`/`tool_result`(작업자 자신�
 | `signal` | allow | ask | ask | ask | ask |
 | `job` | allow | ask | ask | ask | ask |
 | `system` | allow | deny | deny | deny | deny |
+| `memory` | allow | deny | deny | deny | allow |
 
 `config.json` 의 `grants`(`{툴: allow|ask|deny}`) 는 `user` 턴에서만 표를 이기고, 상자를 벗어난
 샌드박스 툴(escalate, 샌드박스 없음)에는 절대 적용되지 않으며, 세 낱말 중 하나일 때만 먹는다 —
@@ -398,7 +426,71 @@ Daemon.run_signal_turn ── 신호마다 rules.decide 를 먼저(절대 안 �
   문서로 남기기 위해서일 뿐이다; `build` 를 안 내보내므로 `push_capable` 이 절대 안 되고,
   소켓에서 온 `signal jobs ...` 는 모르는 감각과 똑같이 거부된다.
 
-## 10. 불변조건과 그것을 붙드는 테스트
+## 10. 기억 (`pathfinder/memory.py`)
+
+볼트는 `<홈>` 아래 세 종류 파일이다 - `USER.md`, `RULES.md`(구획 3부터 이미 있었음)와 이제
+`wiki/*.md` - `vault/` 디렉터리는 없다: "볼트 안"은 이 셋에 대한 경로 검사(`vault_path`)이고
+`..`, 절대경로, 그 밖의 무엇이든 거부한다.
+
+- **툴**, `jobs.py` 처럼 임포트 시점에 등록됨: `search_memory(query)`(하이브리드
+  `state.search`, `embed_model` 이 비어 있거나 임베딩이 실패하면 FTS 만), `read_memory(path)`,
+  `read_ledger(after, limit=80)`(패스가 페이지로 넘겨 읽는 번호 매긴 조각, 읽을 수 있는 사건마다
+  `render_line` 한 줄, 툴 잡담은 건너뜀), `edit_memory(target, op, old, new, evidence)`
+  (`reversible=True`, D22). `search_memory`/`read_memory` 는 다섯 origin 모두에 열려 있고;
+  `read_ledger` 는 `memory` 전용; `edit_memory` 는 `{user, memory}` - 사용자 턴 자신의 호출은
+  그 자체로 돈다(정책: user/reversible = allow), 패스도 마찬가지, 그 밖엔 아무도 못 본다.
+- **게이트(`Manager.vet`, 모델 없음)**: 대상이 볼트 안; `op` 는 `add|replace|remove` 중 하나이고
+  `new`/`old` 는 필요에 따라 비어 있으면 안 됨; `old` 는 지금 파일의 정확히 한 줄과 맞아야 함;
+  수정 후 파일이 여전히 파싱됨(`RULES.md` 는 로드된 감각들의 어휘로 `rules.parse` 를 지남;
+  `USER.md` 의 앞머리는 세 목록을 유지해야 함); `evidence` 는 부르는 쪽이 실제로 읽은 seq
+  들이다(패스라면 `read_ledger` 가 쌓은 자기 `allowed` 집합, 사용자 턴이라면 - 인용할 것이 없어
+  - 그 세션의 최신 `user` 메시지가 자동으로 채워짐); 패스가 하는 `USER.md` 수정은 origin 이
+  `user` 인 근거가 있어야 함(`test_user_facts_need_user_origin`). 검사에 실패하면 그 이유가
+  툴 결과로 돌아간다; 아무것도 안 쓴다.
+- **경로와 적용**: `wiki/*.md` 수정은 그 자리에서 적용된다(원자적 쓰기, 그 뒤
+  `state.index_page` 가 다시 임베딩); `USER.md`/`RULES.md` 는 승인 상자로 간다
+  (`approval_pending {tool: "edit_memory", args: proposal, messages: []}`, 툴 게이트와 같은
+  표) - 호출이 **사용자 턴 자신의 것**이고 `grants["edit_memory"]` 가 `"allow"` 일 때만 예외다
+  (D28; 패스 자신의 제안은 늘 상자로 간다). `Manager.apply` 가 파일을 쓰고 `memory_apply
+  {target, op, old, new, evidence, approval?}`(되돌리기 기록 전부)를 적으며, `RULES.md` 라면
+  `on_rules_changed()`(아래 `reload_rules`)를 부른다. `Manager.decide(approval_id, decision)`
+  이 데몬의 세 번째 `approve`/`deny` 경로다: 승인되면 지금 파일 상태에 맞춰 다시 적용하고,
+  거부되면 아무것도 안 쓴다. `undo(n)`(CLI 전용)은 최근 `memory_apply` n개를 거꾸로 역연산으로
+  되돌린다(`add` -> `new` 를 remove, `replace` -> `new` 를 `old` 로 replace, `remove` ->
+  `old` 를 add), 각각 새 `memory_apply` 로 다시 적힌다 - 별도 볼트 이력은 없다, 장부가 이미
+  그 역을 갖고 있다.
+- **상주 문맥**: `context(home, state)` = `USER.md` 의 본문 + wiki 지도(`- 제목 (날짜)`, 최신
+  먼저, 1,000자에서 자름); 데몬이 이것을 매 턴의 *두 번째* 시스템 메시지에 `clock.now_line()`
+  뒤에 붙인다 - 상주하는 첫 메시지는 바이트 단위로 그대로고, 두 번째만 이미 턴마다 바뀐다.
+- **패스(`Manager.run_pass`)**: 작업자처럼 제 스레드에서, 사용자 자신의 턴과 별도로 도는
+  `loop.run` 턴 하나(우선순위 `"job"`). messages = `prompts/consolidate.txt`(바이트 고정) +
+  `now_line()` + 장부 범위와 닫힌 조건/행동/종류 어휘, 그리고 살아 있는 세션의 이전 요약(있으면)을
+  담은 목표 메시지. 툴 = `tools.for_origin("memory")`(정확히 `search_memory, read_memory,
+  read_ledger, edit_memory`); 예산 `consolidate_steps`. 마지막 답이 `session_summary {session,
+  upto, text}` 가 된다, `upto` = 그 세션의 다섯 번째로 최신인 메시지의 seq(최근 넷은 그대로
+  남는다). 그다음 `memory_pass {from, upto, read, steps, usage, applied, proposed}` -
+  **`LLMError` 가 나도 커서는 전진한다** - 파싱에 실패한 패스가 같은 줄을 영영 다시 읽지 않도록;
+  `proposed > 0` 이면 `memory_proposed` 를 push. 방아쇠(`Manager.tick`, 60초 스레드,
+  `Daemon.start`/`close`)는 도는 턴이 없고 작업도 슬롯을 안 쥐고(`is_busy`), 최신 user 메시지가
+  `consolidate_idle_min` 분보다 오래됐고, 안 읽은 줄이 `consolidate_min_events` 이상일 때 패스를
+  시작한다; `pathfinder memory run` 이 소켓으로(`memory.run`) 하나를 강제하고 `run_pass` 자신의
+  결과 줄을 돌려준다.
+- **`memory_proposed`/`memory_stalled`** 는 `Manager` 가 직접 push 한다(`senses/memory.py` 는
+  모양만 문서로 남기고 `build` 는 안 내보내, `signal memory ...` 는 `jobs` 처럼 거부된다).
+  `tick` 은 사흘 연속 로컬 하루가 각각 뭔가 읽고 아무것도 적용하지 않았을 때도
+  `memory_stalled` 를 올린다(청사진 §9: Mark.5 의 24일 침묵이 3일이 된다), 하루에 한 번으로
+  줄인다(`_stalled_key`) - 틱마다 그냥 push 하면 막힌 동안 60초마다 `signal` 줄이 쌓인다.
+- **`reload_rules`**(`Daemon`)는 `RULES.md` 를 다시 파싱해 `self.rules` 를 outbox, 작업 매니저,
+  기억 매니저에 다시 묶는다; `ValueError` 면 옛 규칙을 지키고 `error` 사건을 적는다. 승인된
+  `RULES.md` 수정 뒤, 그리고 신호 턴 심사마다 한 번(`stat` 하나) 손 수정이 mtime 을 옮겼을 때
+  불린다 - HISTORY 의 "데몬 시작 때 한 번만 읽음"을 닫는다.
+- **CLI**: `pathfinder memory`(커서; 오늘과 그 전 이틀의 passes/read/applied; 대기 중 제안;
+  이레치 판정 수; 최신 세션 요약의 `upto`); `pathfinder memory run`; `pathfinder memory undo
+  [N]`(데몬이 도는 중엔 `reindex` 처럼 거부; 독립된 `Ledger`/`State`/`Manager`). `pathfinder
+  approvals` 는 `edit_memory` 줄을 `target op: old -> new` 로 찍는다(양쪽 다 60자에서 자름);
+  `reindex` 도 `memory.reindex_pages` 를 불러 페이지 수를 알린다.
+
+## 11. 불변조건과 그것을 붙드는 테스트
 
 | 불변조건 | 테스트 |
 |---|---|
@@ -437,20 +529,28 @@ Daemon.run_signal_turn ── 신호마다 rules.decide 를 먼저(절대 안 �
 | `state.db` 삭제: 작업과 그 게이트 승인(`job` 칸 포함)이 장부만으로 돌아옴 | `test_jobs.ReindexRestoresJobsTest.test_reindex_restores_jobs_and_job_approvals` |
 | 작업이 도는 중에도 세션 자신의 턴은 여전히 답함; `job_done` 은 `exempt` 라 하루 예산이 다 쓰였고 조용한 시간이어도 말함 — trust 는 `self`, 결코 `user` 가 아님 | `test_daemon.JobDaemonIntegrationTest.test_daemon_answers_while_job_runs`, `test_daemon.JobSignalTest.test_job_done_speaks_without_budget` |
 | 소켓이 `signal jobs ...` 를 거부함; `jobs.py` 는 350줄 이하 | `test_daemon.PushDoorValidationTest.test_socket_refuses_signal_jobs`, `test_invariants.test_jobs_module_under_350_lines` |
+| 볼트는 정확히 `USER.md`, `RULES.md`, `wiki/*.md` 뿐; 게이트는 볼트 밖 · 모르는 RULES.md 단어 · 정확히 안 맞는 `old` 를 거부; 패스의 USER.md 수정은 `origin: user` 근거가 필요 | `test_memory.test_vault_path_refuses_outside`, `test_vet_refuses_unknown_rule_word`, `test_vet_replace_needs_exactly_one_line`, `test_user_facts_need_user_origin` |
+| wiki 수정은 그 자리에서 적용됨; USER.md/RULES.md 는 사용자 턴 grant 가 허락하지 않는 한 승인 상자로 감; RULES.md 수정을 승인하면 `reload_rules` 가 불림; undo 는 역연산 | `test_memory.test_wiki_applies_at_once`, `test_user_and_rules_go_to_the_box`, `test_grants_allow_applies_user_turn_at_once`, `test_rules_apply_calls_on_rules_changed`, `test_undo_is_the_inverse_op` |
+| 패스는 제 조각만 읽고, 근거는 그 조각에서만 나와야 하며, 모델이 오류를 내도 커서는 전진함; 방아쇠는 유휴와 충분한 안 읽은 줄을 기다림; 사흘 침묵이면 `memory_stalled` 를 한 번만 올림 | `test_memory.test_pass_reads_slice_and_advances_cursor`, `test_pass_llm_error_still_advances`, `test_pass_evidence_must_be_from_its_slice`, `test_due_waits_for_idle_and_enough_lines`, `test_stalled_after_three_silent_days` |
+| 옮겨온 말뭉치에서 하이브리드 검색이 D10 기준만큼 FTS 만보다 나음(아니면 벡터는 기본으로 꺼짐); 낡은 모델의 벡터는 절대 안 맞음; 세션 이력은 요약 뒤로 접힘; `state.db` 삭제는 페이지 · 요약 · 기억 커서를 복구함 | `bench/m4_retrieval.py`, `test_state.test_search_hybrid_rrf_order`, `test_search_ignores_vectors_of_another_model`, `test_history_folds_after_summary`, `test_reindex_restores_summaries_and_applies` |
+| `edit_memory` 승인은 세션 lane 이 아니라 기억 매니저로 감; RULES.md 는 승인된 수정이나 손 수정 뒤 재시작 없이 다시 읽히고, 파싱 오류면 옛 규칙을 지킴; 상주 문맥은 USER.md 본문과 wiki 지도를 턴의 두 번째 시스템 메시지에만 싣고 첫 메시지는 그대로임 | `test_daemon.MemoryDaemonTest.*` |
+| `memory_proposed`/`memory_stalled` 는 기본이 침묵이고 기본 RULES.md 는 둘 다 말함 | `test_senses.MemorySenseTest.test_memory_kinds_default_silence_and_shipped_rules_speak` |
+| `memory` 는 옵트인 툴 origin, 정확히 `search_memory, read_memory, read_ledger, edit_memory`; 소켓이 `signal memory ...` 를 거부함; `memory.py` 는 600줄 이하, `daemon.py` 는 780줄 이하 | `test_memory.test_tools_for_origin_memory`, `test_daemon.MemoryDaemonTest.test_socket_refuses_signal_memory`, `test_invariants.test_memory_module_under_600_lines`, `test_invariants.test_daemon_module_under_780_lines` |
 
-## 11. 세는 법
+## 12. 세는 법
 
 ```bash
-python3 -m unittest discover -s tests            # 전체 테스트, 네트워크 없음 (191)
+python3 -m unittest discover -s tests            # 전체 테스트, 네트워크 없음 (237)
 wc -l pathfinder/*.py pathfinder/llm/*.py pathfinder/senses/*.py   # 코어; 배분: ledger 400 ·
-                                                  # state 600 · daemon 600(오늘은 642, 구획 4가
-                                                  # 보고하는 초과분) · loop 400 · broker+policy 350 ·
+                                                  # state 600 · daemon 600(오늘은 692, 780 이 하드
+                                                  # 라인) · loop 400 · broker+policy 350 ·
                                                   # exec 300 · tools 300 · clock+signals+rules 450 ·
-                                                  # deliver 250 · jobs 350 · 감각 파일 150
+                                                  # deliver 250 · jobs 350 · memory 600(오늘 600) ·
+                                                  # 감각 파일 150
 python3 scripts/scan_personal.py --all           # 추적 파일 전체 개인정보 스캔
 ```
 
-## 12. 돌리는 법
+## 13. 돌리는 법
 
 ```bash
 python3 -m pathfinder config set model provider:model-name
@@ -471,4 +571,8 @@ python3 -m pathfinder reindex                     # 데몬이 도는 중에는 �
 python3 -m pathfinder jobs                        # id, state, started, goal - state.db 에서
 python3 -m pathfinder job stop ID                 # 그 작업의 control.interrupt 를 세움
 python3 -m pathfinder job steer ID "X 에 집중해"    # 작업의 다음 모델 호출 전에 닿음
+python3 -m pathfinder config set embed_model provider:embedding-model-name   # 비우면 벡터 없음
+python3 -m pathfinder memory                      # 커서, passes/read/applied, 대기, 판정
+python3 -m pathfinder memory run                   # 지금 통합 패스를 강제로 돌림
+python3 -m pathfinder memory undo                  # 최근 memory_apply 를 그 역으로 되돌림
 ```

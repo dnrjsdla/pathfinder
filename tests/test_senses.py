@@ -92,6 +92,22 @@ class ShellBuildTest(unittest.TestCase):
         self.assertLess(len(sig.summary), len(long_cmd))
 
 
+class MemorySenseTest(unittest.TestCase):
+    def test_memory_kinds_default_silence_and_shipped_rules_speak(self):
+        loaded = signals.load({"senses": {"memory": {}}})
+        mem = next(s for s in loaded if s.name == "memory")
+        self.assertEqual({k: row[2] for k, row in mem.kinds.items()},
+                         {"memory_proposed": "silence", "memory_stalled": "silence"})
+        parsed = rules.parse(rules.DEFAULT_RULES_PATH.read_text(encoding="utf-8"),
+                             conditions=rules.CORE_CONDITIONS, validated_kinds=set(mem.kinds))
+        today = Today(0, 0, None, 0, {})
+        for kind in ("memory_proposed", "memory_stalled"):
+            sig = signals.Signal(sense="memory", kind=kind, key=f"k-{kind}", summary="s",
+                                 fields={}, trust="self")
+            action, _why = rules.decide(sig, parsed, {}, today, 1000.0)
+            self.assertEqual(action, "speak")
+
+
 class ShellThreeFailuresTest(unittest.TestCase):
     def test_shell_three_failures_speak_one_silent(self):
         """The shipped RULES.md: fewer than 3 failures in the last 10 minutes stays silent; the

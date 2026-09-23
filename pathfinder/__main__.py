@@ -1,16 +1,18 @@
 """pathfinder daemon | reindex | say TEXT | config set KEY VALUE |
 approvals | approve ID | deny ID | interrupt |
 listen | signal SENSE JSON | react up|down [ID] | rules |
-jobs | job stop ID | job steer ID TEXT"""
+jobs | job stop ID | job steer ID TEXT |
+memory | memory run | memory undo [N]"""
 from __future__ import annotations
 
 import asyncio
 import json
 import socket
 import sys
+import time
 from pathlib import Path
 
-from . import config
+from . import config, memory
 from .clock import format_local
 from .daemon import SOCKET, Daemon, is_serving
 from .ledger import Ledger
@@ -67,11 +69,20 @@ def say(home, text):
         return _stream(sock, [{"type": "attach"}, {"type": "say", "text": text}])
 
 
+def _clip60(text):
+    return text if len(text) <= 60 else text[:60] + "..."
+
+
 def approvals(home):
     """List pending approvals directly from state.db - no daemon protocol needed to read them."""
     state = State(home / "state.db")
     try:
         for row in state.pending():
+            if row["tool"] == "edit_memory":
+                a = row["args"]
+                print(f"{row['id']}  edit_memory  {a['target']} {a['op']}: "
+                      f"{_clip60(a['old'])} -> {_clip60(a['new'])}")
+                continue
             job = f"  job: {row['job']}" if row.get("job") else ""
             print(f"{row['id']}  {row['tool']}  {json.dumps(row['args'], ensure_ascii=False)}{job}")
     finally:
@@ -204,6 +215,72 @@ def job_steer(home, id, text):
     return 0
 
 
+def memory_status(home):
+    """`pathfinder memory`: cursor, passes/lines-read/applied for today and the two days before,
+    pending proposals, judgments per day (seven days, today first), and the latest session's
+    summary - reads state.db directly, like `jobs_list`."""
+    state = State(home / "state.db")
+    try:
+        stats = state.memory_stats(time.time())
+        print(f"cursor {state.memory_cursor}")
+        labels = ("today", "1 day ago", "2 days ago")
+        for label, day in zip(labels, stats["days"]):
+            print(f"{label}: passes {day['passes']}, read {day['read']}, applied {day['applied']}")
+        print(f"pending proposals {stats['pending']}")
+        print(f"judgments/day (today first): {' '.join(str(n) for n in stats['judgments'])}")
+        sid = state.latest_session(config.load(home)["session_resume_s"])
+        summary = state.summary(sid) if sid else None
+        if summary:
+            print(f"latest session summary upto #{summary['upto']}")
+    finally:
+        state.close()
+    return 0
+
+
+def memory_run(home):
+    """`pathfinder memory run`: force a pass over the socket, print its result line."""
+    sock = _connect(home)
+    if sock is None:
+        return 1
+    with sock:
+        f = sock.makefile("rwb")
+        f.write((json.dumps({"type": "memory.run"}) + "\n").encode())
+        f.flush()
+        line = f.readline()
+        if not line:
+            print("pathfinder: no reply", file=sys.stderr)
+            return 1
+        msg = json.loads(line)
+        if msg["type"] == "error":
+            print(f"pathfinder: {msg['message']}", file=sys.stderr)
+            return 1
+        print(msg["result"])
+    return 0
+
+
+def memory_undo(home, n=1):
+    """`pathfinder memory undo [N]`: refuses while a daemon is serving (like `reindex`); builds
+    its own Ledger/State/Manager, the same pattern `reindex` uses for a standalone run."""
+    if is_serving(home):
+        print("pathfinder: stop the daemon first (or just restart it - it rebuilds what is missing)", file=sys.stderr)
+        return 1
+    ledger, state = Ledger(home), State(home / "state.db")
+
+    def record(type, **fields):
+        event = ledger.append(type, **fields)
+        state.apply(event)
+        return event
+
+    mgr = memory.Manager(home, record, lambda signal: None, None, None, [], is_busy=lambda: False)
+    try:
+        for line in mgr.undo(n):
+            print(line)
+    finally:
+        mgr.close()
+        state.close()
+    return 0
+
+
 def main(argv=None):
     args = sys.argv[1:] if argv is None else argv
     home = config.home()
@@ -222,7 +299,11 @@ def main(argv=None):
         state = State(home / "state.db")
         n = state.rebuild(Ledger(home))
         state.close()
-        print(f"rebuilt state up to event {n}")
+        memory.reindex_pages(home, config.load(home))
+        state = State(home / "state.db")
+        pages = len(state.pages())
+        state.close()
+        print(f"rebuilt state up to event {n}, {pages} wiki page(s) indexed")
         return 0
     if len(args) == 2 and args[0] == "say":
         return say(home, args[1])
@@ -246,6 +327,15 @@ def main(argv=None):
         return job_stop(home, args[2])
     if len(args) == 4 and args[0] == "job" and args[1] == "steer":
         return job_steer(home, args[2], args[3])
+    if args == ["memory"]:
+        return memory_status(home)
+    if args == ["memory", "run"]:
+        return memory_run(home)
+    if len(args) in (2, 3) and args[:2] == ["memory", "undo"]:
+        if len(args) == 3 and not args[2].isdigit():
+            print(USAGE, file=sys.stderr)
+            return 2
+        return memory_undo(home, int(args[2]) if len(args) == 3 else 1)
     if len(args) == 4 and args[:2] == ["config", "set"]:
         try:
             value = json.loads(args[3])

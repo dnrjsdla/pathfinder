@@ -250,6 +250,7 @@ class Manager:
         self._pass_lock = threading.Lock()
         self._stop = threading.Event()
         self._thread = None
+        self._stalled_key = None  # last pushed memory_stalled key - once per local day, not every tick
 
     def close(self) -> None:
         self.state.close()
@@ -577,10 +578,12 @@ class Manager:
         now = time.time()
         if self.stalled(now):
             days = self.state.memory_stats(now)["days"]
-            self.push(Signal(
-                sense="memory", kind="memory_stalled", key=f"memory:stalled:{int(days[0]['start'])}",
-                summary="Memory: nothing learned in 3 days although there was something to read",
-                fields={"days": 3}, trust="self"))
+            key = f"memory:stalled:{int(days[0]['start'])}"
+            if key != self._stalled_key:  # else: still stalled, already pushed today - don't repeat every 60s
+                self._stalled_key = key
+                self.push(Signal(sense="memory", kind="memory_stalled", key=key,
+                    summary="Memory: nothing learned in 3 days although there was something to read",
+                    fields={"days": 3}, trust="self"))
 
     def start(self) -> None:
         self._thread = threading.Thread(target=self._loop, daemon=True)

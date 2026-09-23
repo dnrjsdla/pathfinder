@@ -4,14 +4,17 @@
 `docs/decisions/DECISIONS.md`. What measurement changed: `HISTORY.md`. Every name here exists in
 the tree. Korean mirror: `ARCHITECTURE.ko.md` (updated in the same commit).
 
-Built so far: **partition 4 — jobs.** The assistant talks (1), calls tools (2), and the world
-speaks to it (3); now `start_job` (origin `user` only) launches a worker that drives its own
-`loop.run` on a thread, off the session's own turn, against `prompts/job.txt` + the goal - reading
-freely, gating on every write/network call exactly like a session turn (D24), and ending in
-`job_done`/`job_failed`, pushed as a `Signal` the same rules and delivery path already carry. One
-slot (`llm/slot.py`) serializes every model request, the user first (D25): a job holds it for one
-step and yields between steps. The memory vault, rule proposals and the TUI are later partitions
-still.
+Built so far: **partition 5 — memory.** The assistant talks (1), calls tools (2), the world speaks
+to it (3), and jobs run off its own turn (4); now it keeps a memory vault - `USER.md`, `RULES.md`
+and `wiki/*.md` - that only `memory.Manager` writes, past a no-model gate (`vet`) that checks
+every edit before it lands. A wiki edit applies at once; a `USER.md`/`RULES.md` edit goes to the
+same approval box a tool gate uses (D28: a user-turn grant can let it apply at once too). A
+consolidation pass (`Manager.run_pass`), off the user's own turn like a job, reads the ledger since
+the last pass and writes down what's worth keeping - a wiki line, a fact the user stated in their
+own words, or (after repeated judgments) a `RULES.md` row proposal - and folds an old session into
+one summary. `USER.md`'s body and the wiki map ride in every turn's second system message;
+`search_memory`/`read_memory` let the model look the rest up. `RULES.md` now reloads without a
+restart, on an approved edit or a hand edit. The catalog and the TUI are later partitions still.
 
 ## 0. One sentence
 
@@ -47,8 +50,9 @@ daemon.Daemon ── one lane (queue + worker) per session; lane items: say | re
 | `<home>/config.json` | model names, providers, `grants`, `senses`, `schedules`, knobs | `config.set()` only | defaults (no model configured) |
 | `<home>/workspace/` | the only place a sandboxed shell may write; cwd of every shell command; where a relative file path lands | tools, at the user's request | nothing of PATHFINDER's |
 | `<home>/pathfinder.sock` | the daemon's socket | daemon | recreated at start |
-| `<home>/RULES.md` | the speak/silence/defer/ask_model rules, one person can read | created from `pathfinder/prompts/RULES.md` on first start; edited by hand | rewritten from the shipped default on next start |
-| `<home>/USER.md` | `USER.xxx` lists RULES.md conditions read; empty for now | created empty on first start; partition 5 fills it | an empty frontmatter |
+| `<home>/RULES.md` | the speak/silence/defer/ask_model rules, one person can read | created from `pathfinder/prompts/RULES.md` on first start; edited by hand, or by an approved `edit_memory` row; either way reloads without a restart | rewritten from the shipped default on next start |
+| `<home>/USER.md` | `USER.xxx` lists RULES.md conditions read, plus a free body (resident context) | created empty on first start; filled by approved `edit_memory` rows (or a user-turn grant's auto-apply, D28) | an empty frontmatter - memory starts from zero |
+| `<home>/wiki/*.md` | wiki pages, one topic per file | `memory.Manager.apply` (`edit_memory`, applies at once) | the knowledge is gone - files are the truth |
 
 `<home>` is `$PATHFINDER_HOME` or `~/.pathfinder` (mode 0700).
 
@@ -69,12 +73,18 @@ daemon.Daemon ── one lane (queue + worker) per session; lane items: say | re
 
 Event types today: `session_start, user, assistant, tool_call, tool_result, turn_start, turn_end,
 error, config_set, approval_pending, approval, interrupted, signal, decision, judgment, delivery,
-reaction, presence`. `config_set` records the key, never the value. A mid-turn steer is a `user`
-event with `steer: true`. `tool_call` args and `tool_result` results are clipped to 2,000
-characters; `approval_pending` carries the in-flight messages whole (a resume needs them). A
-`signal` event's `trust` is the sense's own declaration (`ledger.TRUST`), never the data's own
-claim; `decision` carries `signal_key, action, why` and, only for a `speak` that made it into a
-notice, `notice_id, text, signal_keys` too (what `Outbox` rebuilds from after a restart).
+reaction, presence, memory_pass, memory_apply, session_summary`. `config_set` records the key,
+never the value. A mid-turn steer is a `user` event with `steer: true`. `tool_call` args and
+`tool_result` results are clipped to 2,000 characters; `approval_pending` carries the in-flight
+messages whole (a resume needs them) - for an `edit_memory` proposal that's an empty list (the
+box, not a gated turn). A `signal` event's `trust` is the sense's own declaration (`ledger.TRUST`),
+never the data's own claim; `decision` carries `signal_key, action, why` and, only for a `speak`
+that made it into a notice, `notice_id, text, signal_keys` too (what `Outbox` rebuilds from after
+a restart). `memory_pass {from, upto, read, steps, usage, applied, proposed}` is recorded once per
+consolidation pass (`upto` becomes `state.memory_cursor`, even on an error); `memory_apply {target,
+op, old, new, evidence, approval?}` is the whole undo record for one applied vault edit;
+`session_summary {upto, text}` folds a session's early messages. Origin gains `memory` (the pass's
+own turns and tool events).
 
 ## 3. Derived state (`pathfinder/state.py`)
 
@@ -102,6 +112,19 @@ signal-turn triage passes `session`/`idle_threshold_s` - a rule predicate never 
 `delivery` — what `deliver.Outbox.rebuild()` restores after a crash. `rebuild(ledger)` drops and
 replays these tables too.
 
+Partition 5 adds the page index: `pages(path, title, mtime, text)` with an external-content FTS5
+table `pages_fts`, and `vectors(path, model, vec)` (one float32 blob per page, `struct.pack`, no
+numpy - a vector tagged with a stale model is never a hit); `index_page`/`remove_page`/`pages()`
+keep them in step with `wiki/*.md`. `search(query, query_vector=None, model, top_k=3)` merges
+FTS5 prefix-token matches and vector cosine by reciprocal rank fusion (k=60); no `query_vector`
+runs FTS alone (D10's fallback is the same function with an argument missing). `summaries(session,
+upto, text)` backs `history(session)`: with a summary, a `system` line built from it is followed by
+only the messages after `upto` - a session's early turns are folded, not resent
+(`test_history_folds_after_summary`). `meta.memory_cursor` (the last pass's `upto`, 0 at first) and
+`memory_stats(now)` (passes/lines-read/applied per local day for the last three days, pending
+`edit_memory` proposals, judgments per day for the last seven) back `pathfinder memory` and the
+stalled-memory trigger. `rebuild(ledger)` drops and replays these tables too.
+
 ## 4. The model layer (`pathfinder/llm/`)
 
 - `resolve(cfg, "provider:model")` splits on the first colon and returns an `Endpoint`. Model
@@ -111,6 +134,9 @@ replays these tables too.
   `cancel` is anything with `is_set()`, checked between chunks. Every failure is an `LLMError`;
   `blocked` is true for 402/429. The daemon's step factory always passes the tool schemas: the
   model must see its hands (the first live run found it did not - `test_default_step_factory_sends_tool_schemas`).
+- `openai_compat.embed(endpoint, texts) -> list[list[float]]` embeds a batch through the same
+  `/embeddings` OpenAI-compatible route. The embedder is `cfg["embed_model"]`, resolved through
+  `resolve` the same way `model`/`worker_model` are; empty means no vectors, never an error.
 
 ## 5. Tools, policy, sandbox, broker
 
@@ -129,7 +155,10 @@ the model can act on. Core tools: `run_command(command, escalate)` (write, sandb
 `start_job` the same way, at import time (see §9). `origins` (default: all four - `ledger.ORIGINS`)
 names which turn origins may even see a tool's schema; `for_origin(origin)` filters `TOOLS` by it -
 `start_job` declares `origins={"user"}`, so a job's own registry and a signal turn's never contain
-it: "a worker cannot make a worker" is structure, not a policy check. `clip_for_ledger(value,
+it: "a worker cannot make a worker" is structure, not a policy check. `origins` is opt-in for
+`memory`: the four turn origins are the default, so the consolidation pass sees a tool only when
+it explicitly adds `memory` (`search_memory`, `read_memory`, `read_ledger`, `edit_memory`) - it
+never sees `write_file`, `run_command` or a schedule tool. `clip_for_ledger(value,
 limit=2000)` is the head-only bound a recorded `tool_call`/`tool_result` (a job's own copies too)
 keeps - shorter and simpler than `clip()`'s head+tail bound on what the model itself is shown.
 
@@ -144,6 +173,7 @@ declares `reversible=True` (D22) is judged as `reversible` instead of `write`.
 | `signal` | allow | ask | ask | ask | ask |
 | `job` | allow | ask | ask | ask | ask |
 | `system` | allow | deny | deny | deny | deny |
+| `memory` | allow | deny | deny | deny | allow |
 
 `config.json` `grants` (`{tool: allow|ask|deny}`) wins over the table for `user` turns only, never
 for a sandboxed tool that left its box (escalate, or no sandbox), and only with one of the three
@@ -409,7 +439,72 @@ Daemon.run_signal_turn ── rules.decide per signal FIRST (never held, never s
   objects already match; it exports no `build`, so it is never `push_capable` and `signal jobs ...`
   from the socket is refused like any unknown sense.
 
-## 10. Invariants and the tests that hold them
+## 10. Memory (`pathfinder/memory.py`)
+
+The vault is three kinds of file under `<home>` - `USER.md`, `RULES.md` (both already there since
+partition 3) and now `wiki/*.md` - no `vault/` directory: "inside the vault" is a path check
+(`vault_path`) against these three, refusing `..`, an absolute path, or anything else.
+
+- **Tools**, registered at import like `jobs.py`'s: `search_memory(query)` (hybrid `state.search`,
+  FTS-only when `embed_model` is unset or embedding fails), `read_memory(path)`, `read_ledger(after,
+  limit=80)` (the numbered slice a pass pages through, `render_line` per readable event, tool
+  chatter skipped) and `edit_memory(target, op, old, new, evidence)` (`reversible=True`, D22).
+  `search_memory`/`read_memory` are open to all five origins; `read_ledger` is `memory`-only;
+  `edit_memory` is `{user, memory}` - a user turn's own call runs by itself (policy:
+  user/reversible = allow), the pass's too, nothing else may even see it.
+- **The gate (`Manager.vet`, no model)**: target inside the vault; `op` one of `add|replace|remove`
+  with `new`/`old` non-empty as each needs; `old` must match exactly one line of the file as it
+  stands; the file after the edit still parses (`RULES.md` through `rules.parse` with the loaded
+  senses' vocabulary; `USER.md`'s frontmatter must keep its three lists); `evidence` is seqs the
+  caller actually read (a pass's own `allowed` set from `read_ledger`, or - for a user turn, which
+  has none to cite - the session's latest `user` message, filled in automatically); a `USER.md`
+  edit from the pass needs evidence whose origin is `user` (`test_user_facts_need_user_origin`). A
+  failed check returns the reason as the tool's own result; nothing is written.
+- **Routing and apply**: a `wiki/*.md` edit applies at once (atomic write, then `state.index_page`
+  re-embeds it); `USER.md`/`RULES.md` go to the approval box (`approval_pending {tool:
+  "edit_memory", args: proposal, messages: []}`, the same table a tool gate uses) - unless the call
+  is a **user turn's own** and `grants["edit_memory"]` is `"allow"` (D28; the pass's own proposals
+  always go to the box). `Manager.apply` writes the file, records `memory_apply {target, op, old,
+  new, evidence, approval?}` (the whole undo record), and for `RULES.md` calls `on_rules_changed()`
+  (`reload_rules`, below). `Manager.decide(approval_id, decision)` is the daemon's third
+  `approve`/`deny` route: approved re-applies against the file as it now stands; denied writes
+  nothing. `undo(n)` (CLI only) replays the last `n` `memory_apply` events as inverse ops (`add` ->
+  remove `new`, `replace` -> replace `new` with `old`, `remove` -> add `old`), each itself recorded
+  as a fresh `memory_apply` - no separate vault history, the ledger already holds the inverse.
+- **Resident context**: `context(home, state)` = `USER.md`'s body plus the wiki map (`- title
+  (date)`, newest first, capped at 1,000 characters); the daemon appends it to every turn's
+  *second* system message, after `clock.now_line()` - the resident first message stays byte-stable,
+  only the second one already changed turn to turn.
+- **The pass (`Manager.run_pass`)**: one `loop.run` turn on its own thread, off the user's own turn
+  like a job (priority `"job"`). Messages = `prompts/consolidate.txt` (byte-stable) + `now_line()` +
+  a goal message naming the ledger range, the closed condition/action/kind vocabulary, and the live
+  session's previous summary if any. Tools = `tools.for_origin("memory")` (exactly `search_memory,
+  read_memory, read_ledger, edit_memory`); budget `consolidate_steps`. A final answer becomes
+  `session_summary {session, upto, text}`, `upto` = the seq of the session's fifth-newest message
+  (the last four stay verbatim). Then `memory_pass {from, upto, read, steps, usage, applied,
+  proposed}` - **the cursor advances even on an `LLMError`**, so a pass that failed to parse never
+  re-reads the same lines forever; `proposed > 0` pushes `memory_proposed`. The trigger
+  (`Manager.tick`, a 60 s thread, `Daemon.start`/`close`) starts a pass when no turn is running and
+  no job holds the slot (`is_busy`), the last user message is `consolidate_idle_min` minutes old,
+  and `consolidate_min_events` readable lines sit unread; `pathfinder memory run` forces one over
+  the socket (`memory.run`), returning `run_pass`'s own result line.
+- **`memory_proposed`/`memory_stalled`** are pushed directly by the `Manager` (`senses/memory.py`
+  documents their shape only, exports no `build`, so `signal memory ...` is refused like `jobs`).
+  `tick` also raises `memory_stalled` when three local days in a row each read something and
+  applied nothing (blueprint §9: Mark.5's 24 silent days become 3), deduped to once a day
+  (`_stalled_key`) - a naive push every tick would write a `signal` line every 60 s while stalled.
+- **`reload_rules`** (`Daemon`) re-parses `RULES.md` and rebinds `self.rules` on the outbox, the
+  jobs manager and the memory manager; a `ValueError` keeps the old rules and records an `error`
+  event. Called after an approved `RULES.md` edit and, once per signal-turn triage (one `stat`),
+  whenever a hand edit moved the file's mtime - closing HISTORY's "read once at daemon start".
+- **CLI**: `pathfinder memory` (cursor; passes/read/applied for today and the two days before;
+  pending proposals; judgments per day for seven days; the latest session summary's `upto`);
+  `pathfinder memory run`; `pathfinder memory undo [N]` (refuses while a daemon is serving, like
+  `reindex`; standalone `Ledger`/`State`/`Manager`). `pathfinder approvals` prints an `edit_memory`
+  row as `target op: old -> new` (each side clipped to 60 characters); `reindex` also calls
+  `memory.reindex_pages` and reports the page count.
+
+## 11. Invariants and the tests that hold them
 
 | Invariant | Test |
 |---|---|
@@ -448,20 +543,27 @@ Daemon.run_signal_turn ── rules.decide per signal FIRST (never held, never s
 | `state.db` deleted: a job and its gated approval (with the `job` column) come back from the ledger alone | `test_jobs.ReindexRestoresJobsTest.test_reindex_restores_jobs_and_job_approvals` |
 | A session's own turn still answers while a job is running; `job_done` is `exempt`, so it speaks even with the daily budget spent and in quiet hours - with trust `self`, never `user` | `test_daemon.JobDaemonIntegrationTest.test_daemon_answers_while_job_runs`, `test_daemon.JobSignalTest.test_job_done_speaks_without_budget` |
 | The socket refuses `signal jobs ...`; `jobs.py` <= 350 lines | `test_daemon.PushDoorValidationTest.test_socket_refuses_signal_jobs`, `test_invariants.test_jobs_module_under_350_lines` |
+| The vault is exactly `USER.md`, `RULES.md`, `wiki/*.md`; the gate refuses outside it, an unknown RULES.md word, and a non-exact `old` match; a USER.md edit from the pass needs `origin: user` evidence | `test_memory.test_vault_path_refuses_outside`, `test_vet_refuses_unknown_rule_word`, `test_vet_replace_needs_exactly_one_line`, `test_user_facts_need_user_origin` |
+| A wiki edit applies at once; USER.md/RULES.md go to the approval box unless a user-turn grant allows it; approving a RULES.md edit calls `reload_rules`; undo is the inverse op | `test_memory.test_wiki_applies_at_once`, `test_user_and_rules_go_to_the_box`, `test_grants_allow_applies_user_turn_at_once`, `test_rules_apply_calls_on_rules_changed`, `test_undo_is_the_inverse_op` |
+| A pass reads its own slice, its evidence must come from that slice, and the cursor advances even when the model errors; the trigger waits for idle and enough unread lines; three silent days raise `memory_stalled` once | `test_memory.test_pass_reads_slice_and_advances_cursor`, `test_pass_llm_error_still_advances`, `test_pass_evidence_must_be_from_its_slice`, `test_due_waits_for_idle_and_enough_lines`, `test_stalled_after_three_silent_days` |
+| Hybrid search beats FTS-only by D10's margin on the transplanted corpus, or vectors ship off by default; a stale-model vector is never a hit; a session's history folds after its summary; `state.db` deleted restores pages, summaries and the memory cursor | `bench/m4_retrieval.py`, `test_state.test_search_hybrid_rrf_order`, `test_search_ignores_vectors_of_another_model`, `test_history_folds_after_summary`, `test_reindex_restores_summaries_and_applies` |
+| An `edit_memory` approval routes to the memory manager, not a session lane; RULES.md reloads without a restart on an approved edit or a hand edit, keeping the old rules on a parse error; the resident context carries USER.md's body and the wiki map in the turn's second system message only, the first unchanged | `test_daemon.MemoryDaemonTest.*` |
+| `memory_proposed`/`memory_stalled` default to silence and the shipped RULES.md speaks both | `test_senses.MemorySenseTest.test_memory_kinds_default_silence_and_shipped_rules_speak` |
+| `memory` is an opt-in tool origin, exactly `search_memory, read_memory, read_ledger, edit_memory`; the socket refuses `signal memory ...`; `memory.py` <= 600 lines, `daemon.py` <= 780 | `test_memory.test_tools_for_origin_memory`, `test_daemon.MemoryDaemonTest.test_socket_refuses_signal_memory`, `test_invariants.test_memory_module_under_600_lines`, `test_invariants.test_daemon_module_under_780_lines` |
 
-## 11. How to count
+## 12. How to count
 
 ```bash
-python3 -m unittest discover -s tests            # all tests, no network (191)
+python3 -m unittest discover -s tests            # all tests, no network (237)
 wc -l pathfinder/*.py pathfinder/llm/*.py pathfinder/senses/*.py   # core; budgets: ledger 400,
-                                                  # state 600, daemon 600 (642 today, partition 4's
-                                                  # reported overage), loop 400, broker+policy 350,
-                                                  # exec 300, tools 300, clock+signals+rules 450,
-                                                  # deliver 250, jobs 350, a sense file 150
+                                                  # state 600, daemon 600 (692 today, 780 hard line),
+                                                  # loop 400, broker+policy 350, exec 300, tools 300,
+                                                  # clock+signals+rules 450, deliver 250, jobs 350,
+                                                  # memory 600 (600 today), a sense file 150
 python3 scripts/scan_personal.py --all           # personal-data scan over tracked files
 ```
 
-## 12. Running it
+## 13. Running it
 
 ```bash
 python3 -m pathfinder config set model provider:model-name
@@ -482,4 +584,8 @@ python3 -m pathfinder reindex                     # refuses while a daemon is se
 python3 -m pathfinder jobs                        # id, state, started, goal - from state.db
 python3 -m pathfinder job stop ID                 # sets control.interrupt on that job
 python3 -m pathfinder job steer ID "focus on X"    # reaches the job before its next model call
+python3 -m pathfinder config set embed_model provider:embedding-model-name   # empty = no vectors
+python3 -m pathfinder memory                      # cursor, passes/read/applied, pending, judgments
+python3 -m pathfinder memory run                   # force a consolidation pass now
+python3 -m pathfinder memory undo                  # replay the last memory_apply as its inverse
 ```

@@ -118,3 +118,15 @@ one" - the third failure in ten minutes is itself the one that matches `count_ov
 | condition | value | action | note |
 | --- | --- | --- | --- |
 | `always` | `-` | `speak` | the outcome of a job the user started - always say it |
+
+## memory_proposed
+
+| condition | value | action | note |
+| --- | --- | --- | --- |
+| `always` | `-` | `speak` | something waits for your approval - say it once |
+
+## memory_stalled
+
+| condition | value | action | note |
+| --- | --- | --- | --- |
+| `always` | `-` | `speak` | nothing learned in three days although there was something to read (blueprint §9: Mark.5's 24 silent days become 3) |

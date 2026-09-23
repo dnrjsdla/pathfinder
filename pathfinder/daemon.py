@@ -14,7 +14,7 @@ import time
 import uuid
 from pathlib import Path
 
-from . import clock, config, jobs, loop, rules as rules_mod, signals, tools
+from . import clock, config, jobs, loop, memory, rules as rules_mod, signals, tools
 from .broker import Broker, Gate
 from .deliver import Notice, Outbox
 from .ledger import Ledger
@@ -80,13 +80,14 @@ class Session:
 
 
 class Daemon:
-    def __init__(self, home, step_factory=None, job_step_factory=None):
+    def __init__(self, home, step_factory=None, job_step_factory=None, pass_step_factory=None):
         self.home = Path(home)
         self.ledger = Ledger(self.home)
         self.state = State(self.home / "state.db")
         self.state.catch_up(self.ledger)  # a deleted or stale DB heals itself here
         self.step_factory = step_factory or default_step_factory
         self.job_step_factory = job_step_factory or jobs.default_job_step_factory
+        self.pass_step_factory = pass_step_factory or memory.default_pass_step_factory
         # Byte-stable across every turn, user and signal alike (cache): the Signal-turns clause
         # is part of the resident prompt itself, never appended per-turn. Only the local-time
         # line (added separately in turn()/_signal_model_turn) changes turn to turn.
@@ -97,6 +98,7 @@ class Daemon:
         cfg = config.load(self.home)
         self.senses = {s.name: s for s in signals.load(cfg, self.home)}
         self.rules = rules_mod.load(self.home, list(self.senses.values()))
+        self._rules_mtime = (self.home / "RULES.md").stat().st_mtime
         self.outbox = Outbox(self.state, self.rules, is_running=self._is_running,
                              attached=self._is_attached, send=self._send_to_session, record=self.record)
         self.outbox.rebuild()
@@ -104,6 +106,30 @@ class Daemon:
                                             on_error=self._sense_error)
         self.jobs_mgr = jobs.Manager(self.home, self._job_record, self.push_signal, self.job_step_factory, self.rules)
         jobs.bind(self.jobs_mgr)
+        self.memory_mgr = memory.Manager(self.home, self.record, self.push_signal, self.pass_step_factory,
+                                         self.rules, list(self.senses.values()), is_busy=self._is_busy)
+        self.memory_mgr.on_rules_changed = self.reload_rules
+        memory.bind(self.memory_mgr)
+
+    def _is_busy(self) -> bool:
+        """The memory trigger's own gate: no turn running in any session, no job holding the slot."""
+        return (any(s.control is not None for s in self.sessions.values())
+                or any(j.state in ("running", "gated") for j in self.jobs_mgr.jobs.values()))
+
+    def reload_rules(self) -> None:
+        """Re-parses RULES.md and rebinds it everywhere it's held. Called after an approved
+        RULES.md edit (`memory.Manager.apply`'s `on_rules_changed`) and from `run_signal_turn`
+        when a hand edit moved the file's mtime - a parse error keeps the old rules."""
+        try:
+            rules = rules_mod.load(self.home, list(self.senses.values()))
+        except ValueError as e:
+            self.record("error", origin="system", message=f"RULES.md: {e}"[:300])
+            return
+        self.rules = rules
+        self.outbox.rules = rules
+        self.jobs_mgr.rules = rules
+        self.memory_mgr.rules = rules
+        self._rules_mtime = (self.home / "RULES.md").stat().st_mtime
 
     # -- recording: ledger first, then the same event into the state. Loop thread only:
     #    the SQLite connection belongs to it, and turns run in worker threads.
@@ -139,6 +165,7 @@ class Daemon:
             except RuntimeError:
                 pass  # loop already closed: a job's late call has nothing left to report to
         self.jobs_mgr.dispatch = dispatch
+        self.memory_mgr.dispatch = dispatch
         self.jobs_mgr.sweep()  # a job the last daemon died under is closed and announced here
         path = self.home / SOCKET
         if path.exists():
@@ -156,12 +183,14 @@ class Daemon:
     async def serve(self):
         await self.start()
         self.sense_loop.start()
+        self.memory_mgr.start()
         self.outbox.release()  # flush anything a previous crash left pending, now that we can
         async with self.server:
             await self.server.serve_forever()
 
     async def close(self):
         self.jobs_mgr.dispatch = lambda fn: None  # drop a job's late calls, not race a closing state
+        self.memory_mgr.dispatch = lambda fn: None
         await self.sense_loop.stop()
         for s in self.sessions.values():
             if s.worker:
@@ -173,6 +202,8 @@ class Daemon:
             await self.server.wait_closed()
         (self.home / SOCKET).unlink(missing_ok=True)
         self.jobs_mgr.close()
+        self.memory_mgr.stop()
+        self.memory_mgr.close()
         self.state.close()
 
     def _sense_error(self, name, exc):
@@ -246,6 +277,12 @@ class Daemon:
                         self.jobs_mgr.resume(approval_id, decision)
                         _write(writer, {"type": "turn.end", "turn": "", "kind": "resumed"})
                         continue
+                    if row["tool"] == "edit_memory" and not row.get("job"):  # the memory box, not a lane
+                        self.record("approval", session=row["session"], turn=row["turn"], origin="user",
+                                    id=approval_id, decision=decision)
+                        self.memory_mgr.decide(approval_id, decision)
+                        _write(writer, {"type": "turn.end", "turn": "", "kind": "resumed"})
+                        continue
                     target = self._session(row["session"])
                     if session is not target:
                         if session:
@@ -267,6 +304,9 @@ class Daemon:
                         _write(writer, {"type": "error", "message": "job.steer needs an \"id\" and non-empty \"text\""})
                         continue
                     self.jobs_mgr.steer(id, text)
+                elif kind == "memory.run":
+                    result = await asyncio.to_thread(self.memory_mgr.run_pass, True)
+                    _write(writer, {"type": "memory.run", "result": result})
                 elif kind == "signal":
                     sense_name, fields = msg.get("sense"), msg.get("fields")
                     sense = self.senses.get(sense_name)
@@ -352,6 +392,13 @@ class Daemon:
         if not s.control.in_tool:  # the daemon does not cut a stream while a tool handler is running
             s.control.steer_cut.set()
 
+    def _second_system_message(self) -> str:
+        """`clock.now_line()` plus the resident memory context, when there is any - USER.md's
+        body and the wiki map (partition 5). Never part of `self.system_prompt`: that message
+        stays byte-stable across every turn (D20's cache), this one already changes turn to turn."""
+        ctx = memory.context(self.home, self.state)
+        return f"{clock.now_line()}\n\n{ctx}" if ctx else clock.now_line()
+
     # -- turns -------------------------------------------------------------------------
     async def lane(self, s):
         while True:
@@ -402,7 +449,7 @@ class Daemon:
             self.record("user", session=s.id, turn=turn, origin="user", trust="user", text=text)
         self.record("turn_start", session=s.id, turn=turn, origin="user")
         messages = [{"role": "system", "content": self.system_prompt},
-                   {"role": "system", "content": clock.now_line()}] + self.state.history(s.id)
+                   {"role": "system", "content": self._second_system_message()}] + self.state.history(s.id)
         if trailing:
             messages.append({"role": "user", "content": trailing})
         return await self._run_turn(s, turn, messages, resume=False)
@@ -437,6 +484,8 @@ class Daemon:
         `speak` set is subject to the rate-limit hold, and that hold never blocks the lane
         (`signal_ready` + `call_later`, not a sleep here) - the reviewer's blocker was a
         silenced signal freezing the next `say` for up to min_interval_s."""
+        if (self.home / "RULES.md").stat().st_mtime != self._rules_mtime:  # a hand edit since load
+            self.reload_rules()
         lists = rules_mod.user_lists(self.home)
         to_speak = []
         for sig in bundle:
@@ -493,7 +542,7 @@ class Daemon:
         try:
             messages = [
                 {"role": "system", "content": self.system_prompt},
-                {"role": "system", "content": clock.now_line()},
+                {"role": "system", "content": self._second_system_message()},
                 {"role": "user", "content": signals.render_envelope(sigs)},  # never recorded as `user`
             ]
             cfg = config.load(self.home)

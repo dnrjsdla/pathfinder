@@ -44,18 +44,13 @@ def vault_path(home, target: str) -> Path:
     raise ValueError(f"outside the vault: {target!r}")
 
 def _cut_at_line(text: str, limit: int) -> str:
-    if len(text) <= limit:
-        return text
     cut = text.rfind("\n", 0, limit)
-    return text[:cut] if cut != -1 else text[:limit]
+    return text if len(text) <= limit else text[:cut if cut != -1 else limit]
 
 def context(home, state) -> str:
     """USER.md's body plus the wiki map (newest first, cut at 1,000 chars at a line boundary)."""
-    body = ""
     user_path = Path(home) / "USER.md"
-    if user_path.exists():
-        _, body = rules_mod._parse_frontmatter(user_path.read_text(encoding="utf-8"))
-        body = body.strip()
+    body = rules_mod._parse_frontmatter(user_path.read_text(encoding="utf-8"))[1].strip() if user_path.exists() else ""
     pages = state.pages()
     if not body and not pages:
         return ""
@@ -117,15 +112,10 @@ def _apply_edit(text: str, op: str, old: str, new: str, idx: int | None) -> str:
 
 def _coerce_seq(item):
     """Accept `12`, `"12"` or `"#12"` - what the model actually sends for a cited seq."""
-    if isinstance(item, bool):
-        return None
-    if isinstance(item, int):
+    if isinstance(item, int) and not isinstance(item, bool):
         return item
-    if isinstance(item, str):
-        s = item.strip().lstrip("#")
-        if s.lstrip("-").isdigit():
-            return int(s)
-    return None
+    s = item.strip().lstrip("#") if isinstance(item, str) else ""
+    return int(s) if s.isdigit() else None
 
 
 # -- the tools (opt-in per origin, like jobs.py) -----------------------------------------------
@@ -161,7 +151,8 @@ TOOLS = {
     ),
     "read_memory": ToolSpec(
         name="read_memory",
-        description="Read one file of the memory vault: wiki/<name>.md, USER.md or RULES.md.",
+        description="Read one file of the memory vault: wiki/<name>.md (exactly as search_memory "
+                    "or the page list names it), USER.md or RULES.md.",
         params={"path": {"type": "string", "description": "wiki/<name>.md, USER.md or RULES.md"}},
         required=["path"], handler=_read_memory, origins=frozenset(ledger.ORIGINS),
     ),
@@ -178,10 +169,12 @@ TOOLS = {
     "edit_memory": ToolSpec(
         name="edit_memory",
         description=(
-            "Edit the memory vault one line at a time. target: wiki/<Title>.md, USER.md or RULES.md. "
-            "op: add (append a line; creates a wiki page whose text starts with '# Title'), replace "
-            "(old -> new, old must be exactly one existing line), remove. USER.md and RULES.md edits "
-            "are queued for the user's approval."),
+            "Edit the memory vault one line at a time. Call search_memory first and edit the page it "
+            "finds; create a new page only when none matches. target: wiki/<Title>.md (knowledge, a "
+            "how-to, a number worth keeping), USER.md (who the user is) or RULES.md. op: add (append a "
+            "line; creates a wiki page whose text starts with '# Title'), replace (old -> new, old must "
+            "be exactly one existing line), remove. USER.md and RULES.md edits are queued for the "
+            "user's approval - say so, do not say they are written."),
         params={
             "target": {"type": "string", "description": "wiki/<Title>.md, USER.md or RULES.md"},
             "op": {"type": "string", "description": "add, replace or remove"},
@@ -284,17 +277,15 @@ class Manager:
     def index(self, target: str) -> None:
         path = vault_path(self.home, target)
         text = path.read_text(encoding="utf-8")
-        first = text.split("\n", 1)[0] if text else ""
+        if not text.strip():  # an emptied page (an undone add) is gone, not a blank title on the map
+            path.unlink()
+            return self.state.remove_page(target)
+        first = text.split("\n", 1)[0]
         title = first[2:].strip() if first.startswith("# ") else Path(target).stem
         cfg = config.load(self.home)
-        model = cfg["embed_model"]
-        vector = None
-        if model:
-            vectors = self._embed(cfg, [text])
-            vector = vectors[0] if vectors else None
-            if vector is None:
-                model = ""
-        self.state.index_page(target, title, text, path.stat().st_mtime, vector, model)
+        vectors = self._embed(cfg, [text]) if cfg["embed_model"] else None
+        vector = vectors[0] if vectors else None
+        self.state.index_page(target, title, text, path.stat().st_mtime, vector, cfg["embed_model"] if vector else "")
 
     def reindex_pages(self) -> None:
         _reindex(self.home, config.load(self.home), self.state)
@@ -408,6 +399,9 @@ class Manager:
         if origin == "user" and cfg["grants"].get("edit_memory") == "allow":
             self.apply(proposal, origin="user")
             return "applied"
+        if any(r["args"].get("target") == target and r["args"].get("new") == proposal["new"]
+               for r in self.state.pending_memory()):  # live: one pass proposed the same fact three times
+            return "already queued for the user's approval - do not propose it again"
         id = uuid.uuid4().hex[:12]
         self.record("approval_pending", session=session, origin=origin, id=id, call_id=id,
                     tool="edit_memory", args=proposal, messages=[])
@@ -512,12 +506,13 @@ class Manager:
                 "use read_ledger, paging with `after` until it returns nothing).\n"
                 f"RULES.md vocabulary — conditions: {', '.join(sorted(conditions))}; "
                 f"actions: speak, silence, defer, ask_model; kinds: {', '.join(sorted(kinds))}.\n")
-        if sid and prev:
-            goal += f"Current session: {sid}. Previous summary of its earlier part:\n{prev['text']}"
-        elif sid:
-            goal += f"Current session: {sid}. No previous summary."
-        else:
-            goal += "No current session."
+        goal += (f"Current session: {sid}. " + (f"Previous summary of its earlier part:\n{prev['text']}"
+                 if prev else "No previous summary.")) if sid else "No current session."
+        goal += "\n" + self.context()  # USER.md and the page list: edit what exists (live: three pages, one topic)
+        pend = self.state.pending_memory()  # a proposal from an earlier pass is still in the box
+        if pend:
+            goal += "\nAlready waiting for the user's approval - never propose these again:\n" + "\n".join(
+                f"- {r['args']['target']} {r['args']['op']}: {r['args']['new'][:120]}" for r in pend)
         messages = [{"role": "system", "content": CONSOLIDATE_PROMPT},
                     {"role": "system", "content": clock.now_line()},
                     {"role": "user", "content": goal}]

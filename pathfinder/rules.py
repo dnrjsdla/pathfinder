@@ -50,7 +50,7 @@ class Rules:
     job_steps: int = 20
     consolidate_idle_min: int = 20
     consolidate_min_events: int = 20
-    consolidate_steps: int = 12
+    consolidate_steps: int = 16
     by_kind: dict = field(default_factory=dict)                       # kind -> [(cond, raw, action, note)]
     conditions: dict = field(default_factory=lambda: dict(CORE_CONDITIONS))
 
@@ -122,7 +122,7 @@ def parse(text: str, conditions: dict | None = None, validated_kinds: set | None
                  job_steps=_int(meta.get("job_steps"), 20),
                  consolidate_idle_min=_int(meta.get("consolidate_idle_min"), 20),
                  consolidate_min_events=_int(meta.get("consolidate_min_events"), 20),
-                 consolidate_steps=_int(meta.get("consolidate_steps"), 12),
+                 consolidate_steps=_int(meta.get("consolidate_steps"), 16),
                  by_kind=by_kind, conditions=dict(conditions))
 
 

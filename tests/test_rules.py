@@ -38,7 +38,7 @@ class ConsolidateFrontmatterTest(unittest.TestCase):
         parsed = rules.parse("---\n---\n")
         self.assertEqual(parsed.consolidate_idle_min, 20)
         self.assertEqual(parsed.consolidate_min_events, 20)
-        self.assertEqual(parsed.consolidate_steps, 12)
+        self.assertEqual(parsed.consolidate_steps, 16)
 
     def test_consolidate_fields_parse(self):
         text = "---\nconsolidate_idle_min: 30\nconsolidate_min_events: 15\nconsolidate_steps: 8\n---\n"

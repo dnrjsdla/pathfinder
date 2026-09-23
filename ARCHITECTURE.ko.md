@@ -535,17 +535,17 @@ Daemon.run_signal_turn ── 신호마다 rules.decide 를 먼저(절대 안 �
 | 옮겨온 말뭉치에서 하이브리드 검색이 D10 기준만큼 FTS 만보다 나음(아니면 벡터는 기본으로 꺼짐); 낡은 모델의 벡터는 절대 안 맞음; 세션 이력은 요약 뒤로 접힘; `state.db` 삭제는 페이지 · 요약 · 기억 커서를 복구함 | `bench/m4_retrieval.py`, `test_state.test_search_hybrid_rrf_order`, `test_search_ignores_vectors_of_another_model`, `test_history_folds_after_summary`, `test_reindex_restores_summaries_and_applies` |
 | `edit_memory` 승인은 세션 lane 이 아니라 기억 매니저로 감; RULES.md 는 승인된 수정이나 손 수정 뒤 재시작 없이 다시 읽히고, 파싱 오류면 옛 규칙을 지킴; 상주 문맥은 USER.md 본문과 wiki 지도를 턴의 두 번째 시스템 메시지에만 싣고 첫 메시지는 그대로임 | `test_daemon.MemoryDaemonTest.*` |
 | `memory_proposed`/`memory_stalled` 는 기본이 침묵이고 기본 RULES.md 는 둘 다 말함 | `test_senses.MemorySenseTest.test_memory_kinds_default_silence_and_shipped_rules_speak` |
-| `memory` 는 옵트인 툴 origin, 정확히 `search_memory, read_memory, read_ledger, edit_memory`; 소켓이 `signal memory ...` 를 거부함; `memory.py` 는 600줄 이하, `daemon.py` 는 780줄 이하 | `test_memory.test_tools_for_origin_memory`, `test_daemon.MemoryDaemonTest.test_socket_refuses_signal_memory`, `test_invariants.test_memory_module_under_600_lines`, `test_invariants.test_daemon_module_under_780_lines` |
+| `memory` 는 옵트인 툴 origin, 정확히 `search_memory, read_memory, read_ledger, edit_memory`; 소켓이 `signal memory ...` 를 거부함; `memory.py` 와 `daemon.py` 는 780줄 이하(배분 600 의 1.3배 선) | `test_memory.test_tools_for_origin_memory`, `test_daemon.MemoryDaemonTest.test_socket_refuses_signal_memory`, `test_invariants.test_memory_module_under_780_lines`, `test_invariants.test_daemon_module_under_780_lines` |
 
 ## 12. 세는 법
 
 ```bash
-python3 -m unittest discover -s tests            # 전체 테스트, 네트워크 없음 (237)
+python3 -m unittest discover -s tests            # 전체 테스트, 네트워크 없음 (250)
 wc -l pathfinder/*.py pathfinder/llm/*.py pathfinder/senses/*.py   # 코어; 배분: ledger 400 ·
-                                                  # state 600 · daemon 600(오늘은 692, 780 이 하드
+                                                  # state 600 · daemon 600(오늘은 701, 780 이 하드
                                                   # 라인) · loop 400 · broker+policy 350 ·
                                                   # exec 300 · tools 300 · clock+signals+rules 450 ·
-                                                  # deliver 250 · jobs 350 · memory 600(오늘 600) ·
+                                                  # deliver 250 · jobs 350 · memory 600(오늘 685, 780 이 하드 라인) ·
                                                   # 감각 파일 150
 python3 scripts/scan_personal.py --all           # 추적 파일 전체 개인정보 스캔
 ```

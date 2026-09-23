@@ -601,3 +601,96 @@ token (no Korean segmenter - a particle attaches at the end of a word, so `캘�
   ever returns junk for an off-topic question. FTS returns *something* for 3 of 4 negatives (a
   single shared token such as 설정 or 법) - RRF keeps those below any page both branches agree on.
 - Whole run: about 2 s, local embedder only.
+
+## 2026-09-24 — Partition 5: memory
+
+"It runs" was checked against the live default model (`gpt-oss:120b-cloud`, local `bge-m3` for
+vectors) through the socket in a fresh temp home, three compressed "days": a synthetic espresso
+conversation (six turns, one "remember my dog's name") -> the user turn's own `edit_memory` on
+`USER.md` landed in the approval box (D28), `approve` wrote it and the next turn's resident context
+carried it; `pathfinder memory run` read 15 lines, cited `#seq` evidence, queued five USER.md
+proposals, recorded a session summary and advanced the cursor to 37; day two's pass paged the
+ledger, applied a wiki page and refused a repeat proposal ("already queued"); "the wiki says 55,
+it is 60, fix it" became a `replace` of one line (through the fuzzy match, below), "grind 8 -> 9"
+a `replace` proposal on USER.md; three seeded `command_finished` judgments plus a 👍 made the pass
+propose a `RULES.md` row (`always -> silence` above the kind's `ask_model` row), `approve` applied
+it, the rules reloaded without a restart and the next `command_finished` was decided `silence`
+by the row (the judgment count stayed at 9); `memory_proposed` spoke twice; `state.db` deleted and
+`reindex` restored the cursor (310), five passes, ten applies, the summary and the one page, and
+a restarted daemon answered "60 °C" from `search_memory` -> `read_memory`. The three-day stall
+signal is covered offline (`test_stalled_after_three_silent_days`). Live cost: about 0.36M tokens
+over the whole day of checks, including nine judgments and eight passes.
+
+Core 5,053 lines against 5,500; 250 offline tests. **Over allocation, inside the 1.3x line, as
+§6 requires:** `memory.py` 685/600 (the review's fixes: paging by size, the summary's coverage
+block, the split vet, locks, the full rule vocabulary, undo as a stack), `daemon.py` 701/600
+(partition 4's 642 plus the memory hooks), `ARCHITECTURE.md` 591 against the blueprint's 500
+(a new §10 comparable to §9 Jobs; not trimmed - the reader needs it).
+
+### What changed against the plan
+
+- **The pass signal is `memory_proposed`, pushed only when something waits for the user; the
+  stall check lives in `Manager.tick`, not in a sense's `poll`.** A sense file that registers
+  condition words only works when that sense is turned on in config; kinds decided by `always`
+  rows (like `jobs`) work unconditionally. `senses/memory.py` is documentation-only.
+- **Vectors carry a floor (`VECTOR_FLOOR = 0.45`).** With one page in the wiki, every query
+  returned that page (RRF has no notion of "nothing matches") and the model kept searching for a
+  different answer until its step budget ran out. m4's off-topic queries topped out at 0.32-0.37.
+- **`old` matches fuzzily when exact fails** (one line, `difflib` ratio >= 0.8, unique). The
+  model read the exact line with `read_memory` and still retyped "스티밍을 멈추는" as "스팀을
+  말는". The edit is reversible, so a unique close match is the safer failure.
+- **The resident prompt gained a memory paragraph and the tool descriptions say "search first".**
+  A user turn created three pages on one topic in one conversation (one of them with a garbled
+  title) before that line existed.
+- **`consolidate_steps` 12 -> 16**; the pass goal carries the wiki map, USER.md's body and the
+  proposals already waiting (a pass proposed the same fact three times). `memory_pass` records
+  `since`, not `from`.
+- The user-turn route for `USER.md`/`RULES.md` (D28's manual mode) is the approval box; a lane
+  gate on `edit_memory` (only with `grants {"edit_memory": "ask"}`) resumes the turn like any
+  other gate and never takes the memory route (its row has messages; a proposal's has none).
+
+### Defects found, by whom
+
+- **Reviewer (opus), blockers 4, all reproduced and fixed:** `read_ledger` clipped a busy page's
+  middle while counting every line as read and allowing every seq as evidence (now pages by
+  size, 7,000 chars); a pass that made no summary (fewer than five messages, an `LLMError`) left
+  the messages before the cursor uncovered and the next summary folded them away (the goal now
+  renders the session's lines since the previous summary); a lane-gated `edit_memory` row took
+  the memory route and applied unvetted (`KeyError` on a raw row, or `frobnicate` into RULES.md);
+  the USER.md evidence gate checked `origin == user`, which an assistant final also carries (now
+  event type `user` or `reaction`). Should-fixes taken: locks around apply/index and a
+  transaction in `index_page`; an unexpected exception still advances the cursor; memory-origin
+  events no longer keep a session alive; a gated job no longer blocks the pass; the RULES.md
+  vocabulary is every sense module's, not the loaded ones'; frontmatter is not editable by a
+  pass; a pass reads at most 400 lines; a broken hand-edited RULES.md is retried only after the
+  next edit and the reload is marshalled onto the loop thread; undo replays the log as a stack.
+- **Live only (the lead):** the six items under "What changed" above - none visible to a test
+  with a fake step, all visible in one hour with the real model.
+- **A model finding, not a code one:** `gpt-oss:120b-cloud` emits corrupted hangul in tool
+  arguments (`라밊용 우유 스팀 뱁` for `라떼용 우유 스티밍 팁`, a non-breaking-space title, a
+  retyped line), and once such a name is in the ledger a later pass chased variants of it for
+  sixteen steps. `gemma4:31b-cloud` as `worker_model` ran the same pass in two steps with a clean
+  Korean summary and, after one prompt sharpening ("a judgment that keeps repeating must become
+  a rule"), proposed the RULES.md row that gpt-oss never reached. The pass and the judge both use
+  `worker_model`; setting it to the gemma family is the working configuration for Korean.
+
+### Left open on purpose
+
+A turn that exhausts its step budget ends with no answer, and the next turn then continues
+answering the previous question (the dangling `user` message has no `assistant` after it) - seen
+three times live once memory tools gave the model more to loop on. That is `loop.run`'s outcome
+(partition 2): a final tool-less step when the budget is spent, or an assistant placeholder in
+history, is a decision for the owner before partition 6. Summaries lose concrete names unless told
+not to (one clause added; not measured). A `new` line can carry the model's own typo into the
+wiki - the gate checks shape, not spelling. `undo` of a `remove` re-appends at the end. A pass on
+a home with a large ledger takes several 400-line passes to catch up. The wiki map is resident every
+turn and a signal turn's model step can search it - by design (D29), worth watching in the two
+weeks of real use. The judge's daily count is printed by `pathfinder memory` (D13's number that
+must fall); the first real week decides whether it does.
+
+### The owner's part
+
+`config set embed_model ollama:<local embedding model>` (the m4 one) and, for Korean passes,
+`config set worker_model ollama:<gemma family model>`. `pathfinder approvals` now holds memory
+proposals next to tool gates; `pathfinder memory` shows the cursor, the day's passes and applies,
+pending proposals and judgments per day.

@@ -477,8 +477,20 @@ them 👍/👎 against the mock world's ground truth without seeing the conditio
   estimate when the goal is this small. Whole bench about 63k tokens including the smoke run and
   one item re-run after an HTTP 500 from the server (excluded, then re-run so every goal has its
   pair).
-- Owner's five-pair spot check (D23's reversal condition): **pending** - the pairs are g1, g3,
-  g5, g6, g8, condition hidden as X/Y; recorded below when answered.
+- **Owner's five-pair spot check (g1, g3, g5, g6, g8; condition hidden as X/Y): 3 of 10
+  disagree with the grader, all three on condition-B summaries.** Owner's own tally on the ten:
+  A 5/5, B 3/5. Two of the three (g3-B, g6-B) the grader passed while itself noting "heavily
+  padded, adds speculation flagged as not in the sources"; the owner failed them - the grader's
+  bar was "the answer is in there", the owner's was "the user could trust this as it stands".
+  The third (g1-B) the grader failed on an arithmetic slip the owner did not catch (the ground
+  truth gives the discount rate, not the computed saving). **So the opus grader is accurate on
+  whether the goal's content is present and lenient on padding and speculation - and the
+  evaluator pass moved summaries exactly that way, longer and more speculative.** D23's reversal
+  clause ("two or more disagree → the owner grades all twenty") was triggered and **waived by the
+  owner**: the grader's leniency ran in B's favour, so regrading could only widen A's lead
+  (owner's rule of thumb from the ten: B would need every remaining A down and every remaining B
+  up to reach +3). D23's text stands for the next bench. Rule for the next blind grader: name
+  padding and unsourced speculation as 👎 in the brief, or have the owner grade that axis.
 
 ### What changed against the plan
 
@@ -545,7 +557,7 @@ run once, on one model family.
 
 ### The owner's part
 
-D23's five-pair spot check (sheet sent with the brief; pending, above). The review surfaced a
+D23's five-pair spot check (done; the finding is above). The review surfaced a
 decision - a job's summary is model-written from whatever it read, yet it entered the envelope as
 `trust: user`, the tier D8 §8 exempts from budget and quiet hours; `trust` was doing two jobs
 (exemption and authority) and partition 4 is the first place they differ. **The owner chose the

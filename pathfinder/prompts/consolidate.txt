@@ -25,11 +25,13 @@ What goes where (write in the user's language):
   frontmatter lists are read by the rules: `waiting_for`
   (senders the user waits on), `subject_alerts` (subject words worth an interruption),
   `noise_domains` (senders to silence); edit a list by replacing its whole line.
-- `RULES.md`: a rule row, only when the same signal kind was judged the same way at least
-  three times (`[judgment]` lines) and the user gave a thumbs-up or never a thumbs-down
-  (`[reaction]` lines). Use only the condition words, actions and kinds listed in the goal.
+- `RULES.md`: count the `[judgment]` lines per kind. When one kind was judged the same way at
+  least three times and the user gave a thumbs-up or never a thumbs-down (`[reaction]` lines),
+  propose the rule row that makes those judgments unnecessary - that is what the judgments are
+  for; a judgment that keeps repeating must become a rule. Use only the condition words,
+  actions and kinds listed in the goal (`always` with value `-` when no finer condition fits).
   Put the row above that kind's `always` row by replacing the `always` row with your row
-  followed by the `always` row again. Otherwise leave RULES.md alone.
+  followed by the `always` row again. Below the bar, leave RULES.md alone.
 
 Never invent a fact you did not read. When nothing is worth writing, write nothing - an empty
 pass is correct. Edits to USER.md and RULES.md are queued for the user's approval; that is the

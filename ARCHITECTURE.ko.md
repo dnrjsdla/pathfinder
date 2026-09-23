@@ -75,7 +75,7 @@ reaction, presence, memory_pass, memory_apply, session_summary`. `config_set` �
 `edit_memory` 제안이면 빈 목록이다(게이트 걸린 턴이 아니라 상자다). `signal` 사건의 `trust` 는
 감각 자신의 선언(`ledger.TRUST`)이지 데이터가 주장하는 값이 아니다. `decision` 은 `signal_key,
 action, why` 를 싣고, 알림까지 이어진 `speak` 에 한해 `notice_id, text, signal_keys` 도 싣는다
-(재시작 뒤 `Outbox` 가 이것으로 복구한다). `memory_pass {from, upto, read, steps, usage, applied,
+(재시작 뒤 `Outbox` 가 이것으로 복구한다). `memory_pass {since, upto, read, steps, usage, applied,
 proposed}` 는 통합 패스마다 한 번 적힌다(`upto` 가 `state.memory_cursor` 가 됨, 오류가 나도);
 `memory_apply {target, op, old, new, evidence, approval?}` 는 적용된 볼트 수정 하나의 되돌리기
 기록 전부다; `session_summary {upto, text}` 는 세션의 앞부분을 접는다. origin 에 `memory` 가
@@ -468,7 +468,7 @@ Daemon.run_signal_turn ── 신호마다 rules.decide 를 먼저(절대 안 �
   담은 목표 메시지. 툴 = `tools.for_origin("memory")`(정확히 `search_memory, read_memory,
   read_ledger, edit_memory`); 예산 `consolidate_steps`. 마지막 답이 `session_summary {session,
   upto, text}` 가 된다, `upto` = 그 세션의 다섯 번째로 최신인 메시지의 seq(최근 넷은 그대로
-  남는다). 그다음 `memory_pass {from, upto, read, steps, usage, applied, proposed}` -
+  남는다). 그다음 `memory_pass {since, upto, read, steps, usage, applied, proposed}` -
   **`LLMError` 가 나도 커서는 전진한다** - 파싱에 실패한 패스가 같은 줄을 영영 다시 읽지 않도록;
   `proposed > 0` 이면 `memory_proposed` 를 push. 방아쇠(`Manager.tick`, 60초 스레드,
   `Daemon.start`/`close`)는 도는 턴이 없고 작업도 슬롯을 안 쥐고(`is_busy`), 최신 user 메시지가

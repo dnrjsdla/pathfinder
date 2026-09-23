@@ -8,7 +8,10 @@ off the user's own turn, that reads the ledger since the last pass and writes do
 keeping. `Manager` is bound once (`memory.bind`), the same pattern as `jobs.bind`."""
 from __future__ import annotations
 
+import difflib
+import importlib
 import os
+import pkgutil
 import tempfile
 import threading
 import time
@@ -17,6 +20,7 @@ from pathlib import Path
 
 from . import clock, config, ledger, loop
 from . import rules as rules_mod
+from . import senses as senses_pkg
 from . import tools as tools_mod
 from .broker import Broker, Gate
 from .jobs import default_job_step_factory as default_pass_step_factory  # identical: worker_model/model, priority "job"
@@ -94,11 +98,19 @@ def reindex_pages(home, cfg) -> None:
 # -- the gate (no model) ----------------------------------------------------------------------
 
 def _find_block(lines: list, block: list) -> list:
-    """Every index where `block` occurs as consecutive lines of `lines`."""
+    """Every index where `block` occurs as consecutive lines of `lines` - exact match first. A
+    one-line block with no exact match falls back to the single line similar enough (ratio >=
+    0.8) that a model retyping a line it just read still finds it (live: a free-tier model
+    retyped a Korean line after reading it verbatim)."""
     n = len(block)
     if n == 0 or n > len(lines):
         return []
-    return [i for i in range(len(lines) - n + 1) if lines[i:i + n] == block]
+    exact = [i for i in range(len(lines) - n + 1) if lines[i:i + n] == block]
+    if exact or n != 1:
+        return exact
+    fuzzy = [i for i, line in enumerate(lines)
+             if difflib.SequenceMatcher(None, line, block[0]).ratio() >= 0.8]
+    return fuzzy if len(fuzzy) == 1 else []
 
 def _apply_edit(text: str, op: str, old: str, new: str, idx: int | None) -> str:
     if op == "add":
@@ -131,6 +143,10 @@ def _search_memory(query, control=None):
 
 def _read_memory(path, control=None):
     p = vault_path(_manager.home, path)  # ValueError propagates - the broker turns it into a tool error
+    if not p.exists():
+        pages = _manager.state.pages()
+        listing = ", ".join(pg["path"] for pg in pages) if pages else "(no pages yet)"
+        return f"no such page: {path}. Pages: {listing}"
     return tools_mod.clip(p.read_text(encoding="utf-8"))
 
 def _read_memory_ledger(after, limit=80, control=None):
@@ -184,7 +200,7 @@ TOOLS = {
                         "description": "the #seq numbers you read that support this edit"},
         },
         required=["target", "op"], handler=_edit_memory,
-        origins=frozenset({"user", "memory"}), reversible=True,
+        origins=frozenset({"user", "memory"}), write=True, reversible=True,
     ),
 }
 tools_mod.TOOLS.update(TOOLS)
@@ -241,9 +257,15 @@ class Manager:
         self.ledger = ledger.Ledger(self.home)        # read() only - never append()
         self.on_rules_changed = lambda: None           # the daemon sets this after an approved RULES.md edit
         self._pass_lock = threading.Lock()
+        self._edit_lock = threading.RLock()  # apply()/index() - the pass thread and a user turn's own thread
         self._stop = threading.Event()
         self._thread = None
         self._stalled_key = None  # last pushed memory_stalled key - once per local day, not every tick
+        # a deleted state.db loses the page index; a wiki with pages on disk and no index means
+        # it was never rebuilt on this start - the CLI's `memory undo` message promises this.
+        wiki_dir = self.home / "wiki"
+        if not self.state.pages() and wiki_dir.exists() and any(wiki_dir.glob("*.md")):
+            self.reindex_pages()
 
     def close(self) -> None:
         self.state.close()
@@ -275,17 +297,19 @@ class Manager:
         return "\n".join(f"{h['path']} — {h['title']}: {h['snippet']}" for h in hits)
 
     def index(self, target: str) -> None:
-        path = vault_path(self.home, target)
-        text = path.read_text(encoding="utf-8")
-        if not text.strip():  # an emptied page (an undone add) is gone, not a blank title on the map
-            path.unlink()
-            return self.state.remove_page(target)
-        first = text.split("\n", 1)[0]
-        title = first[2:].strip() if first.startswith("# ") else Path(target).stem
-        cfg = config.load(self.home)
-        vectors = self._embed(cfg, [text]) if cfg["embed_model"] else None
-        vector = vectors[0] if vectors else None
-        self.state.index_page(target, title, text, path.stat().st_mtime, vector, cfg["embed_model"] if vector else "")
+        with self._edit_lock:
+            path = vault_path(self.home, target)
+            text = path.read_text(encoding="utf-8")
+            if not text.strip():  # an emptied page (an undone add) is gone, not a blank title on the map
+                path.unlink()
+                return self.state.remove_page(target)
+            first = text.split("\n", 1)[0]
+            title = first[2:].strip() if first.startswith("# ") else Path(target).stem
+            cfg = config.load(self.home)
+            vectors = self._embed(cfg, [text]) if cfg["embed_model"] else None
+            vector = vectors[0] if vectors else None
+            self.state.index_page(target, title, text, path.stat().st_mtime, vector,
+                                  cfg["embed_model"] if vector else "")
 
     def reindex_pages(self) -> None:
         _reindex(self.home, config.load(self.home), self.state)
@@ -295,18 +319,26 @@ class Manager:
 
     # -- the gate --------------------------------------------------------------------------
     def _rule_vocab(self):
+        """CORE_CONDITIONS plus every sense module's own CONDITIONS/KINDS, scanned from
+        `pathfinder/senses/` directly - not `self.senses` (only the senses this home has turned
+        on): a RULES.md row for a sense not yet enabled must still parse."""
         conditions = dict(rules_mod.CORE_CONDITIONS)
         kinds = set()
-        for s in self.senses:
-            conditions.update(s.conditions)
-            kinds.update(s.kinds)
+        for _finder, name, _is_pkg in pkgutil.iter_modules(senses_pkg.__path__):
+            if name.startswith("_"):
+                continue
+            mod = importlib.import_module(f"pathfinder.senses.{name}")
+            conditions.update(getattr(mod, "CONDITIONS", {}) or {})
+            kinds.update((getattr(mod, "KINDS", {}) or {}).keys())
         return conditions, kinds
 
-    def _check_file(self, target, after, new):
+    def _check_file(self, target, before, after, new):
         if target == "RULES.md":
-            conditions, kinds = self._rule_vocab()
+            if rules_mod._parse_frontmatter(before)[0] != rules_mod._parse_frontmatter(after)[0]:
+                return "RULES.md frontmatter is not editable here"
+            conditions, _kinds = self._rule_vocab()
             try:
-                rules_mod.parse(after, conditions, kinds)
+                rules_mod.parse(after, conditions, validated_kinds=None)  # every section, full vocabulary
             except ValueError as e:
                 return str(e)
             for line in new.split("\n"):
@@ -342,12 +374,20 @@ class Manager:
                 if n not in allowed:
                     return None, f"evidence #{n} was not in the lines you read"
         if target == "USER.md" and origin == "memory":
+            # every event whose text is the user's own: a chat line (steer included - a steer
+            # is still the user's own words) or a reaction, never an assistant/approval line
+            # just because it happens to carry origin "user" (B4: those three carry it too).
             for n in seqs:
-                if allowed[n].get("origin") != "user":
+                if allowed[n].get("type") not in ("user", "reaction"):
                     return None, "USER.md takes only the user's own words (a user or reaction line)"
         return seqs, None
 
-    def vet(self, target, op, old, new, evidence, origin, allowed, session):
+    def _vet_file(self, target, op, old, new):
+        """The file-side half of `vet`: does the edit apply, and does the result still parse?
+        No evidence, no session - what `decide` re-checks before an approved proposal lands,
+        since the file may have moved under it since the proposal was made."""
+        if not isinstance(target, str):
+            return None, "target is required"
         try:
             path = vault_path(self.home, target)
         except ValueError as e:
@@ -372,13 +412,20 @@ class Manager:
                 return None, "old matches more than one place"
             idx = matches[0]
         after = _apply_edit(text, op, old, new, idx)
-        reason = self._check_file(target, after, new)
+        reason = self._check_file(target, text, after, new)
+        if reason:
+            return None, reason
+        return {"target": target, "op": op, "old": old, "new": new}, None
+
+    def vet(self, target, op, old, new, evidence, origin, allowed, session):
+        proposal, reason = self._vet_file(target, op, old, new)
         if reason:
             return None, reason
         evidence_seqs, reason = self._vet_evidence(evidence, origin, allowed, session, target)
         if reason:
             return None, reason
-        return {"target": target, "op": op, "old": old, "new": new, "evidence": evidence_seqs}, None
+        proposal["evidence"] = evidence_seqs
+        return proposal, None
 
     # -- routing and apply -------------------------------------------------------------------
     def edit(self, target, op, old, new, evidence, control):
@@ -410,44 +457,54 @@ class Manager:
         return f"queued for your approval as {id}"
 
     def apply(self, proposal, approval=None, origin="user"):
-        target, op = proposal["target"], proposal["op"]
-        old, new, evidence = proposal["old"], proposal["new"], proposal["evidence"]
-        path = vault_path(self.home, target)
-        text = path.read_text(encoding="utf-8") if path.exists() else ""
-        idx = None
-        if op in ("replace", "remove"):
-            lines = text.split("\n") if text else []
-            matches = _find_block(lines, old.split("\n"))
-            if len(matches) != 1:
-                return "old no longer matches exactly one place"
-            idx = matches[0]
-        after = _apply_edit(text, op, old, new, idx)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=".mem-", suffix=".tmp")
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(after)
-        os.replace(tmp_name, path)
-        self.record("memory_apply", origin=origin, target=target, op=op, old=old, new=new,
-                    evidence=evidence, approval=approval)
-        if target.startswith("wiki/"):
-            self.index(target)
-        if target == "RULES.md":
-            self.on_rules_changed()
-        return ""
+        with self._edit_lock:
+            target, op = proposal["target"], proposal["op"]
+            old, new, evidence = proposal["old"], proposal["new"], proposal["evidence"]
+            path = vault_path(self.home, target)
+            text = path.read_text(encoding="utf-8") if path.exists() else ""
+            idx = None
+            if op in ("replace", "remove"):
+                lines = text.split("\n") if text else []
+                matches = _find_block(lines, old.split("\n"))
+                if len(matches) != 1:
+                    return "old no longer matches exactly one place"
+                idx = matches[0]
+            after = _apply_edit(text, op, old, new, idx)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=".mem-", suffix=".tmp")
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(after)
+            os.replace(tmp_name, path)
+            self.record("memory_apply", origin=origin, target=target, op=op, old=old, new=new,
+                        evidence=evidence, approval=approval)
+            if target.startswith("wiki/"):
+                self.index(target)
+            if target == "RULES.md":
+                self.on_rules_changed()
+            return ""
 
     def decide(self, approval_id: str, decision: str) -> None:
         row = self.state.approval(approval_id)
         if row is None:
             return
         if decision == "approved":
-            reason = self.apply(row["args"], approval=approval_id)
+            args = row["args"]
+            # re-vet the file side: the proposal was vetted against the file as it stood when it
+            # was made, and the file may have moved since (another apply, a hand edit).
+            proposal, reason = self._vet_file(args.get("target"), args.get("op"),
+                                              args.get("old", ""), args.get("new", ""))
+            if reason:
+                self.record("error", origin="memory", message=reason)
+                return
+            proposal["evidence"] = args.get("evidence") or []
+            reason = self.apply(proposal, approval=approval_id)
             if reason:
                 self.record("error", origin="memory", message=reason)
         # denied: nothing to do - the daemon already recorded the `approval` event
 
     def undo(self, n: int = 1) -> list:
         results = []
-        for row in self.state.memory_applies_after(limit=n):
+        for row in self.state.memory_applies_after(limit=n, skip_undone=True):
             target, op, old, new = row["target"], row["op"], row["old"], row["new"]
             if op == "add":
                 inverse = {"target": target, "op": "remove", "old": new, "new": "", "evidence": []}
@@ -455,16 +512,27 @@ class Manager:
                 inverse = {"target": target, "op": "replace", "old": new, "new": old, "evidence": []}
             else:  # ponytail: an undone remove re-appends at the end, the original position is not kept
                 inverse = {"target": target, "op": "add", "old": "", "new": old, "evidence": []}
-            reason = self.apply(inverse, origin="user")
+            reason = self.apply(inverse, approval="undo", origin="user")
             results.append(f"#{row['seq']}: applied" if not reason else f"#{row['seq']}: {reason}")
         return results
 
     # -- the pass -----------------------------------------------------------------------------
+    READ_LEDGER_CHAR_LIMIT = 7000
+
     def read_ledger(self, p, after, limit):
-        lines = [(e, line) for e, line in p["lines"] if e["seq"] > after][:limit]
-        p["allowed"].update({e["seq"]: e for e, _line in lines})
-        p["read"] += len(lines)
-        return tools_mod.clip("\n".join(line for _e, line in lines)) if lines else "(end of range)"
+        """Pages by size, not `tools.clip`'s head+tail: a busy page must not lose its middle
+        while every line still counts as read. Always at least one line; only what is actually
+        returned enters `allowed`/`p["read"]`, so paging with the last returned seq is exact."""
+        candidates = [(e, line) for e, line in p["lines"] if e["seq"] > after][:limit]
+        picked, total = [], 0
+        for e, line in candidates:
+            if picked and total + len(line) > self.READ_LEDGER_CHAR_LIMIT:
+                break
+            picked.append((e, line))
+            total += len(line)
+        p["allowed"].update({e["seq"]: e for e, _line in picked})
+        p["read"] += len(picked)
+        return "\n".join(line for _e, line in picked) if picked else "(end of range)"
 
     def _emit(self):
         def emit(kind, payload):
@@ -475,10 +543,21 @@ class Manager:
             self.record(kind, origin="memory", **recorded)
         return emit
 
-    def _readable_events(self, since):
-        events = [e for e in self.ledger.read(since) if e["type"] != "memory_pass"]
-        readable = [(e, line) for e in events if (line := render_line(e, self.state)) is not None]
-        return events, readable
+    def _readable_events(self, since, limit=400):
+        """Stops once `limit` readable lines are found - `upto` (the last event examined) is
+        where the next pass continues from, so a long-idle home's first pass reads one bounded
+        slice instead of the whole ledger."""
+        examined, readable = [], []
+        for e in self.ledger.read(since):
+            if e["type"] == "memory_pass":
+                continue
+            examined.append(e)
+            line = render_line(e, self.state)
+            if line is not None:
+                readable.append((e, line))
+                if len(readable) >= limit:
+                    break
+        return examined, readable
 
     def run_pass(self, force: bool = False) -> str:
         if not self._pass_lock.acquire(blocking=False):
@@ -508,6 +587,14 @@ class Manager:
                 f"actions: speak, silence, defer, ask_model; kinds: {', '.join(sorted(kinds))}.\n")
         goal += (f"Current session: {sid}. " + (f"Previous summary of its earlier part:\n{prev['text']}"
                  if prev else "No previous summary.")) if sid else "No current session."
+        if sid:
+            # the lines this pass's own slice will not show: a summary skips ahead of `since`
+            # (D20's cache), so what sits between the last summary and `since` would otherwise
+            # never be read by anything (B2 - a pass with no summary must not lose them).
+            earlier = self.state.session_messages(sid, prev["upto"] if prev else 0, since)
+            earlier_lines = "\n".join(line for m in earlier if (line := render_line(m, self.state)) is not None)
+            if earlier_lines:
+                goal += "\nEarlier lines of this session not yet summarized:\n" + earlier_lines
         goal += "\n" + self.context()  # USER.md and the page list: edit what exists (live: three pages, one topic)
         pend = self.state.pending_memory()  # a proposal from an earlier pass is still in the box
         if pend:
@@ -531,6 +618,8 @@ class Manager:
             self.record("error", origin="memory", message=f"memory pass gated: {g.name}")
         except LLMError as e:
             error = e.message
+        except Exception as e:  # a bug in the step or a tool must not escape - the cursor still advances
+            error = f"internal: {type(e).__name__}"
         else:
             if out.kind == "answer" and out.text.strip() and sid:
                 upto_s = self.state.nth_newest_message_seq(sid, 5)
@@ -564,7 +653,8 @@ class Manager:
         last = self.state.last_user_ts()
         if last is None or time.time() - last < self.rules.consolidate_idle_min * 60:
             return False
-        _events, readable = self._readable_events(self.state.memory_cursor)
+        # only needs to know whether enough exist, not to read the whole ledger every 60 s
+        _events, readable = self._readable_events(self.state.memory_cursor, limit=self.rules.consolidate_min_events)
         return len(readable) >= self.rules.consolidate_min_events
 
     def tick(self) -> None:

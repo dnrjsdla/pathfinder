@@ -80,7 +80,7 @@ messages whole (a resume needs them) - for an `edit_memory` proposal that's an e
 box, not a gated turn). A `signal` event's `trust` is the sense's own declaration (`ledger.TRUST`),
 never the data's own claim; `decision` carries `signal_key, action, why` and, only for a `speak`
 that made it into a notice, `notice_id, text, signal_keys` too (what `Outbox` rebuilds from after
-a restart). `memory_pass {from, upto, read, steps, usage, applied, proposed}` is recorded once per
+a restart). `memory_pass {since, upto, read, steps, usage, applied, proposed}` is recorded once per
 consolidation pass (`upto` becomes `state.memory_cursor`, even on an error); `memory_apply {target,
 op, old, new, evidence, approval?}` is the whole undo record for one applied vault edit;
 `session_summary {upto, text}` folds a session's early messages. Origin gains `memory` (the pass's
@@ -481,7 +481,7 @@ partition 3) and now `wiki/*.md` - no `vault/` directory: "inside the vault" is 
   session's previous summary if any. Tools = `tools.for_origin("memory")` (exactly `search_memory,
   read_memory, read_ledger, edit_memory`); budget `consolidate_steps`. A final answer becomes
   `session_summary {session, upto, text}`, `upto` = the seq of the session's fifth-newest message
-  (the last four stay verbatim). Then `memory_pass {from, upto, read, steps, usage, applied,
+  (the last four stay verbatim). Then `memory_pass {since, upto, read, steps, usage, applied,
   proposed}` - **the cursor advances even on an `LLMError`**, so a pass that failed to parse never
   re-reads the same lines forever; `proposed > 0` pushes `memory_proposed`. The trigger
   (`Manager.tick`, a 60 s thread, `Daemon.start`/`close`) starts a pass when no turn is running and

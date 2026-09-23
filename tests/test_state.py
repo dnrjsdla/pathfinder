@@ -81,6 +81,14 @@ class StateTest(unittest.TestCase):
         self.assertIn("last_ts", info)
         self.assertIsNone(self.state.session("no-such-session"))
 
+    def test_memory_origin_events_do_not_move_last_ts(self):
+        self._record("session_start", session="s1")
+        self._record("user", session="s1", turn="t1", origin="user", trust="user", text="hi")
+        before = self.state.session("s1")["last_ts"]
+        self._record("session_summary", session="s1", origin="memory", upto=1, text="summary")
+        after = self.state.session("s1")["last_ts"]
+        self.assertEqual(before, after)  # a pass's own writing must not look like the user is still there
+
     def test_apply_is_idempotent_where_it_can_actually_break(self):
         """history() cannot double up (INSERT OR IGNORE); the turn counter can."""
         self._build_conversation()
@@ -148,6 +156,11 @@ class PageIndexTest(unittest.TestCase):
 
         fts_only = self.state.search("사과", query_vector=None, top_k=2)
         self.assertEqual([h["path"] for h in fts_only], ["wiki/a.md"])
+
+    def test_search_low_cosine_vector_is_not_a_hit(self):
+        self.state.index_page("wiki/a.md", "A", "unrelated text", 1.0, vector=[1.0, 0.0], model="m")
+        hits = self.state.search("nomatch", query_vector=[0.0, 1.0], model="m")  # cosine 0.0, below the floor
+        self.assertEqual(hits, [])
 
     def test_search_ignores_vectors_of_another_model(self):
         self.state.index_page("wiki/a.md", "A", "무관한 내용", 1.0, vector=[1.0, 0.0, 0.0], model="x")

@@ -62,7 +62,7 @@ since prefix matching replaces a dependency.
 
 ## ledger.py
 
-`TYPES` gains `memory_pass` (`{from, upto, read, steps, usage, applied, proposed}` - one per pass,
+`TYPES` gains `memory_pass` (`{since, upto, read, steps, usage, applied, proposed}` - one per pass,
 recorded when the pass ends; `upto` is the cursor), `memory_apply` (`{target, op, old, new,
 evidence, approval?}` - one per applied edit, the whole undo record: the inverse op is computable
 from it) and `session_summary` (`{upto, text}` under the session it summarizes). `ORIGINS` gains
@@ -162,7 +162,7 @@ previous `session_summary` of the live session if any, and the live session's id
 final answer is the session summary: recorded as `session_summary {session, upto, text}` for the
 live session (the latest one younger than `session_resume_s`) with `upto` = the seq of its
 fifth-newest message (the last four stay verbatim); no live session, or no answer -> no summary.
-Then `memory_pass {from, upto, read, steps, usage, applied, proposed}` and a `Signal(sense
+Then `memory_pass {since, upto, read, steps, usage, applied, proposed}` and a `Signal(sense
 "memory", kind "memory_pass", trust "self", fields {applied, proposed, pages})`. A `Gate` cannot
 happen (nothing in the pass's registry asks); if one does it is recorded as an `error` and the pass
 ends. `LLMError` ends the pass with `memory_pass {read: n, applied: 0, error}` - **the cursor still

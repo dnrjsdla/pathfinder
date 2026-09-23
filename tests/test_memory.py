@@ -2,6 +2,7 @@
 Same harness shape as `test_jobs.py`: `record`/`push` are the test's own, backed by a real
 Ledger+State on a temp home."""
 import tempfile
+import threading
 import time
 import types
 import unittest
@@ -119,15 +120,61 @@ class GateTest(MemoryHarness):
         self.assertIsNone(proposal)
         self.assertIn("more than one", error)
 
-    def test_user_facts_need_user_origin(self):
+    def test_user_facts_need_a_user_or_reaction_line(self):
         mgr = self.manager()
-        allowed = {10: {"seq": 10, "origin": "signal"}, 11: {"seq": 11, "origin": "user"}}
+        allowed = {
+            10: {"seq": 10, "type": "assistant", "origin": "user"},  # origin "user" but not the user's words
+            11: {"seq": 11, "type": "reaction", "origin": "user"},
+            12: {"seq": 12, "type": "user", "origin": "user"},
+        }
         proposal, error = mgr.vet("USER.md", "add", "", "- likes coffee", [10], "memory", allowed, "")
         self.assertIsNone(proposal)
         self.assertIn("user's own words", error)
         proposal, error = mgr.vet("USER.md", "add", "", "- likes coffee", [11], "memory", allowed, "")
         self.assertIsNone(error)
         self.assertEqual(proposal["evidence"], [11])
+        proposal, error = mgr.vet("USER.md", "add", "", "- likes coffee", [12], "memory", allowed, "")
+        self.assertIsNone(error)
+        self.assertEqual(proposal["evidence"], [12])
+
+    def test_vet_checks_every_section_with_the_full_vocabulary(self):
+        """RULES.md's vocabulary comes from every module under `pathfinder/senses/`, not from
+        which senses this home has turned on - a Manager built with none loaded still knows the
+        `mail` sense's `sender_in` word."""
+        mgr = self.manager(senses=[])
+        allowed = {1: {"seq": 1, "type": "signal", "origin": "signal"}}
+        proposal, error = mgr.vet("RULES.md", "add", "", "| sender_in | USER.waiting_for | speak | |",
+                                  [1], "memory", allowed, "")
+        self.assertIsNone(error)
+        proposal, error = mgr.vet("RULES.md", "add", "", "| frobnicate | 1 | speak | |",
+                                  [1], "memory", allowed, "")
+        self.assertIsNone(proposal)
+        self.assertIn("frobnicate", error)
+
+    def test_rules_frontmatter_is_not_editable(self):
+        mgr = self.manager()
+        allowed = {1: {"seq": 1, "type": "signal", "origin": "signal"}}
+        proposal, error = mgr.vet("RULES.md", "replace", "consolidate_min_events: 1",
+                                  "consolidate_min_events: 2", [1], "memory", allowed, "")
+        self.assertIsNone(proposal)
+        self.assertIn("frontmatter", error)
+        self.assertEqual((self.home / "RULES.md").read_text(encoding="utf-8"), RULES_MD)
+
+    def test_replace_tolerates_a_retyped_line(self):
+        mgr = self.manager()
+        (self.home / "wiki").mkdir()
+        (self.home / "wiki" / "Coffee.md").write_text(
+            "# Coffee\nDon't forget to stop the streaming.\n", encoding="utf-8")
+        allowed = {1: {"seq": 1, "type": "signal", "origin": "signal"}}
+        proposal, error = mgr.vet(
+            "wiki/Coffee.md", "replace", "Don't forget to stop the streming.",
+            "Don't forget to stop the recording.", [1], "memory", allowed, "")
+        self.assertIsNone(error)
+        reason = mgr.apply(proposal)
+        self.assertEqual(reason, "")
+        text = (self.home / "wiki" / "Coffee.md").read_text(encoding="utf-8")
+        self.assertIn("Don't forget to stop the recording.", text)
+        self.assertNotIn("streaming", text)
 
 
 class ApplyTest(MemoryHarness):
@@ -217,6 +264,80 @@ class ApplyTest(MemoryHarness):
         mgr.undo(1)
         self.assertNotIn("Subtitle", (self.home / "wiki" / "Coffee.md").read_text(encoding="utf-8"))
 
+    def test_undo_twice_walks_back_two_edits(self):
+        mgr = self.manager()
+        (self.home / "wiki").mkdir()
+        (self.home / "wiki" / "Coffee.md").write_text("# Coffee\n", encoding="utf-8")
+        mgr.apply({"target": "wiki/Coffee.md", "op": "add", "old": "", "new": "line one", "evidence": []})
+        mgr.apply({"target": "wiki/Coffee.md", "op": "add", "old": "", "new": "line two", "evidence": []})
+        text = (self.home / "wiki" / "Coffee.md").read_text(encoding="utf-8")
+        self.assertIn("line one", text)
+        self.assertIn("line two", text)
+
+        results1 = mgr.undo(1)
+        text = (self.home / "wiki" / "Coffee.md").read_text(encoding="utf-8")
+        self.assertTrue(all(r.endswith("applied") for r in results1), results1)
+        self.assertIn("line one", text)
+        self.assertNotIn("line two", text)  # the most recent edit went first
+
+        results2 = mgr.undo(1)  # a second call must reach the OLDER edit, not re-undo the same one
+        text = (self.home / "wiki" / "Coffee.md").read_text(encoding="utf-8")
+        self.assertTrue(all(r.endswith("applied") for r in results2), results2)
+        self.assertNotIn("line one", text)
+        self.assertNotIn("line two", text)
+
+        applies = self.events("memory_apply")
+        self.assertEqual([a["approval"] for a in applies], [None, None, "undo", "undo"])
+
+    def test_decide_revets_before_apply(self):
+        mgr = self.manager()
+        proposal = {"target": "RULES.md", "op": "replace", "old": "| always | - | silence | |",
+                   "new": "| frobnicate | 1 | speak | note |", "evidence": []}
+        self.record("approval_pending", session="s1", origin="memory", id="ap1", call_id="ap1",
+                    tool="edit_memory", args=proposal, messages=[])
+        mgr.decide("ap1", "approved")
+        self.assertEqual((self.home / "RULES.md").read_text(encoding="utf-8"), RULES_MD)
+        errors = self.events("error")
+        self.assertEqual(len(errors), 1)
+        self.assertEqual(errors[0]["origin"], "memory")
+        self.assertIn("frobnicate", errors[0]["message"])
+
+
+class ConcurrencyTest(MemoryHarness):
+    def test_concurrent_wiki_edits_do_not_corrupt(self):
+        mgr = self.manager()
+        (self.home / "wiki").mkdir()
+        (self.home / "wiki" / "A.md").write_text("# A\n", encoding="utf-8")
+        (self.home / "wiki" / "B.md").write_text("# B\n", encoding="utf-8")
+        self.record("session_start", session="sa")
+        self.record("user", session="sa", turn="t1", origin="user", trust="user", text="hi")
+        self.record("session_start", session="sb")
+        self.record("user", session="sb", turn="t1", origin="user", trust="user", text="hi")
+        errors = []
+
+        def worker(target, prefix, session):
+            control = TurnControl()
+            control.session = session
+            for i in range(50):
+                result = mgr.edit(target, "add", "", f"{prefix}{i}", [], control)
+                if result != "applied":
+                    errors.append(result)
+
+        t1 = threading.Thread(target=worker, args=("wiki/A.md", "a", "sa"))
+        t2 = threading.Thread(target=worker, args=("wiki/B.md", "b", "sb"))
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
+
+        self.assertEqual(errors, [])
+        text_a = (self.home / "wiki" / "A.md").read_text(encoding="utf-8")
+        text_b = (self.home / "wiki" / "B.md").read_text(encoding="utf-8")
+        for i in range(50):
+            self.assertIn(f"a{i}", text_a)
+            self.assertIn(f"b{i}", text_b)
+        self.assertEqual(sorted(p["path"] for p in mgr.state.pages()), ["wiki/A.md", "wiki/B.md"])
+
 
 class PassTest(MemoryHarness):
     def test_pass_reads_slice_and_advances_cursor(self):
@@ -264,6 +385,58 @@ class PassTest(MemoryHarness):
         self.assertIn("error", passes[0])
         self.assertGreater(self.state.memory_cursor, 0)
 
+    def test_pass_internal_error_still_advances(self):
+        self._seed_pass_events()
+
+        def factory(cfg, control, tools):
+            def step(messages):
+                raise RuntimeError("boom")
+                yield  # pragma: no cover
+            return step
+
+        mgr = self.manager(step_factory=factory, rules=rules_mod.Rules(consolidate_min_events=1))
+        report = mgr.run_pass()
+        self.assertIn("internal: RuntimeError", report)
+        passes = self.events("memory_pass")
+        self.assertEqual(len(passes), 1)
+        self.assertIn("internal: RuntimeError", passes[0]["error"])
+        self.assertGreater(self.state.memory_cursor, 0)
+
+    def test_summary_covers_messages_before_the_cursor(self):
+        self.record("session_start", session="s1")
+        self.record("user", session="s1", turn="t1", origin="user", trust="user", text="early one")
+        self.record("assistant", session="s1", turn="t1", origin="user", final=True, text="early two")
+        self.record("user", session="s1", turn="t2", origin="user", trust="user", text="early three")
+
+        def factory1(cfg, control, tools):
+            def step(messages):
+                raise LLMError(402, "no credit")
+                yield  # pragma: no cover
+            return step
+
+        mgr1 = self.manager(step_factory=factory1, rules=rules_mod.Rules(consolidate_min_events=1))
+        mgr1.run_pass()
+        self.assertEqual(len(self.events("session_summary")), 0)  # pass 1 produced no summary
+
+        for i in range(9):
+            self.record("user", session="s1", turn=f"t{i + 3}", origin="user", trust="user", text=f"later {i}")
+
+        captured = {}
+
+        def factory2(cfg, control, tools):
+            def step(messages):
+                captured["goal"] = messages[-1]["content"]
+                return iter([("text", "done")])
+            return step
+
+        mgr2 = self.manager(step_factory=factory2, rules=rules_mod.Rules(consolidate_min_events=1))
+        mgr2.run_pass()
+
+        self.assertIn("Earlier lines of this session not yet summarized:", captured["goal"])
+        self.assertIn("early one", captured["goal"])
+        self.assertIn("early two", captured["goal"])
+        self.assertIn("early three", captured["goal"])
+
     def test_pass_evidence_must_be_from_its_slice(self):
         self._seed_pass_events()
         steps = [
@@ -301,21 +474,49 @@ class PassTest(MemoryHarness):
         self.assertEqual(p["read"], 5)
         self.assertEqual(set(p["allowed"]), {1, 2, 3, 4, 5})
 
+    def test_read_ledger_pages_by_size(self):
+        mgr = self.manager()
+        lines = [({"seq": i}, "x" * 300) for i in range(1, 121)]
+        p = {"lines": lines, "allowed": {}, "read": 0}
+        mgr.read_ledger(p, 0, 120)
+        self.assertLess(len(p["allowed"]), 120)  # the 7,000-char budget, not the 120-line limit, capped it
+        self.assertTrue(p["allowed"])  # always at least one line
+        after = max(p["allowed"])
+        while after < 120:
+            mgr.read_ledger(p, after, 120)
+            after = max(p["allowed"])
+        self.assertEqual(set(p["allowed"]), set(range(1, 121)))
+        self.assertEqual(p["read"], 120)
+
     def test_due_waits_for_idle_and_enough_lines(self):
         mgr = self.manager(rules=rules_mod.Rules(consolidate_min_events=3, consolidate_idle_min=20))
         mgr.state.last_user_ts = lambda: None
         self.assertFalse(mgr._due())
 
         mgr.state.last_user_ts = lambda: time.time()
-        mgr._readable_events = lambda since: ([], [(None, "x")] * 10)
+        mgr._readable_events = lambda since, limit=None: ([], [(None, "x")] * 10)
         self.assertFalse(mgr._due())  # too recent
 
         mgr.state.last_user_ts = lambda: time.time() - 3600
-        mgr._readable_events = lambda since: ([], [(None, "x")] * 1)
+        mgr._readable_events = lambda since, limit=None: ([], [(None, "x")] * 1)
         self.assertFalse(mgr._due())  # not enough readable events
 
-        mgr._readable_events = lambda since: ([], [(None, "x")] * 5)
+        mgr._readable_events = lambda since, limit=None: ([], [(None, "x")] * 5)
         self.assertTrue(mgr._due())
+
+    def test_pass_takes_at_most_400_lines_and_the_next_continues(self):
+        r = self.record
+        r("session_start", session="s1")
+        for i in range(410):
+            r("user", session="s1", turn=f"t{i}", origin="user", trust="user", text=f"msg {i}")
+        mgr = self.manager(rules=rules_mod.Rules(consolidate_min_events=1))
+        examined, readable = mgr._readable_events(0)
+        self.assertEqual(len(readable), 400)
+        upto = examined[-1]["seq"]
+        self.assertLess(upto, self.ledger.last_seq)  # stopped short of the whole ledger
+
+        examined2, readable2 = mgr._readable_events(upto)
+        self.assertEqual(len(readable2), 10)  # the remaining 10 of the 410 seeded messages
 
     def test_stalled_after_three_silent_days(self):
         mgr = self.manager()

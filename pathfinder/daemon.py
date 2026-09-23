@@ -108,18 +108,25 @@ class Daemon:
         jobs.bind(self.jobs_mgr)
         self.memory_mgr = memory.Manager(self.home, self.record, self.push_signal, self.pass_step_factory,
                                          self.rules, list(self.senses.values()), is_busy=self._is_busy)
-        self.memory_mgr.on_rules_changed = self.reload_rules
+        # `Manager.apply` runs on a worker thread (the pass thread or a user turn's own thread);
+        # `record` is loop-thread-only, so marshal through `dispatch` like every other callback.
+        self.memory_mgr.on_rules_changed = lambda: self.memory_mgr.dispatch(self.reload_rules)
         memory.bind(self.memory_mgr)
 
     def _is_busy(self) -> bool:
-        """The memory trigger's own gate: no turn running in any session, no job holding the slot."""
-        return (any(s.control is not None for s in self.sessions.values())
-                or any(j.state in ("running", "gated") for j in self.jobs_mgr.jobs.values()))
+        """The memory trigger's own gate: no turn running in any session, no job holding the
+        slot. `running` only - a job waiting days at a gate holds nothing. Called from the
+        trigger's own thread: `list(...)` against a dict the loop thread may be mutating."""
+        return (any(s.control is not None for s in list(self.sessions.values()))
+                or any(j.state == "running" for j in self.jobs_mgr.jobs.values()))
 
     def reload_rules(self) -> None:
         """Re-parses RULES.md and rebinds it everywhere it's held. Called after an approved
         RULES.md edit (`memory.Manager.apply`'s `on_rules_changed`) and from `run_signal_turn`
-        when a hand edit moved the file's mtime - a parse error keeps the old rules."""
+        when a hand edit moved the file's mtime - a parse error keeps the old rules. The mtime
+        is recorded either way: a broken file is retried only after the next edit, not every
+        signal turn."""
+        self._rules_mtime = (self.home / "RULES.md").stat().st_mtime
         try:
             rules = rules_mod.load(self.home, list(self.senses.values()))
         except ValueError as e:
@@ -129,7 +136,6 @@ class Daemon:
         self.outbox.rules = rules
         self.jobs_mgr.rules = rules
         self.memory_mgr.rules = rules
-        self._rules_mtime = (self.home / "RULES.md").stat().st_mtime
 
     # -- recording: ledger first, then the same event into the state. Loop thread only:
     #    the SQLite connection belongs to it, and turns run in worker threads.
@@ -277,7 +283,10 @@ class Daemon:
                         self.jobs_mgr.resume(approval_id, decision)
                         _write(writer, {"type": "turn.end", "turn": "", "kind": "resumed"})
                         continue
-                    if row["tool"] == "edit_memory" and not row.get("job"):  # the memory box, not a lane
+                    # a Manager-queued proposal (Manager.edit records it with messages=[]) goes to
+                    # the memory box; a broker Gate on edit_memory (grants "ask") is a LANE row
+                    # (non-empty messages, the model's own call id) and must resume the turn.
+                    if row["tool"] == "edit_memory" and not row.get("job") and not row["messages"]:
                         self.record("approval", session=row["session"], turn=row["turn"], origin="user",
                                     id=approval_id, decision=decision)
                         self.memory_mgr.decide(approval_id, decision)

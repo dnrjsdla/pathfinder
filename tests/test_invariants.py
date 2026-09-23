@@ -57,9 +57,11 @@ class SourceInvariants(unittest.TestCase):
         n = len((SRC / "jobs.py").read_text(encoding="utf-8").splitlines())
         self.assertLessEqual(n, 350, f"jobs.py is {n} lines, over the partition-4 budget of 350")
 
-    def test_memory_module_under_600_lines(self):
+    def test_memory_module_under_780_lines(self):
+        # 780 = the blueprint's 1.3x line over the partition-5 budget of 600 - the overage is
+        # reported in HISTORY.md.
         n = len((SRC / "memory.py").read_text(encoding="utf-8").splitlines())
-        self.assertLessEqual(n, 600, f"memory.py is {n} lines, over the partition-5 budget of 600")
+        self.assertLessEqual(n, 780, f"memory.py is {n} lines, over the 1.3x line of 780")
 
     def test_daemon_module_under_780_lines(self):
         n = len((SRC / "daemon.py").read_text(encoding="utf-8").splitlines())

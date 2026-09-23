@@ -1127,6 +1127,56 @@ class SignalTurnControlTest(DaemonHarness):
 
 
 class MemoryDaemonTest(DaemonHarness):
+    def test_lane_gated_edit_memory_resumes_the_turn(self):
+        """grants {"edit_memory": "ask"} gates a user turn's own edit_memory call through the
+        broker (a LANE row: non-empty messages, the model's own call id) - approving it must
+        resume the turn and write through the handler, not go to memory_mgr.decide (B3)."""
+        config.set(self.home, "grants", {"edit_memory": "ask"})
+
+        def gate_model(cfg, control=None, tools=None):
+            def step(messages):
+                yield ("tool_calls", [{"id": "c1", "name": "edit_memory", "arguments": {
+                    "target": "wiki/Test.md", "op": "add", "old": "", "new": "# Test\nline one"}}])
+            return step
+
+        def answer_model(cfg, control=None, tools=None):
+            def step(messages):
+                yield ("text", "done")
+            return step
+
+        async def gate_scenario(daemon):
+            c = await Client.open(self.home)
+            c.send({"type": "say", "text": "please remember this"})
+            seen = await c.until("turn.end")
+            c.close()
+            return seen
+
+        seen = self.run_with(gate_model, gate_scenario)
+        self.assertEqual(seen[-1]["kind"], "gated")
+        gate_msgs = [m for m in seen if m["type"] == "gate"]
+        self.assertEqual(len(gate_msgs), 1)
+        self.assertEqual(gate_msgs[0]["tool"], "edit_memory")
+        approval_id = gate_msgs[0]["id"]
+
+        state = State(self.home / "state.db")
+        row = state.approval(approval_id)
+        state.close()
+        self.assertTrue(row["messages"])  # a LANE row, not a Manager proposal (messages=[])
+
+        async def approve_scenario(daemon):
+            c = await Client.open(self.home)
+            c.send({"type": "approve", "id": approval_id})
+            seen2 = await c.until("turn.end")
+            c.close()
+            return seen2
+
+        seen2 = self.run_with(answer_model, approve_scenario)
+        self.assertEqual(seen2[-1]["kind"], "answer")
+        self.assertIn("line one", (self.home / "wiki" / "Test.md").read_text(encoding="utf-8"))
+        applies = [e for e in self.events() if e["type"] == "memory_apply"]
+        self.assertEqual(len(applies), 1)
+        self.assertIsNone(applies[0].get("approval"))  # written through the handler, not the approval box
+
     def test_memory_approval_routes_to_manager(self):
         async def scenario(daemon):
             proposal = {"target": "USER.md", "op": "add", "old": "", "new": "Likes tea.", "evidence": [1]}

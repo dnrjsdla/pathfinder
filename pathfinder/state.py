@@ -13,6 +13,10 @@ from pathlib import Path
 
 from . import clock
 
+# m4: off-topic queries' cosine topped out at 0.32-0.37 on the transplanted corpus; live, a
+# one-page wiki answered every query with that page and the model kept searching anyway.
+VECTOR_FLOOR = 0.45
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, started_ts REAL, last_ts REAL, turns INTEGER DEFAULT 0);
@@ -194,7 +198,9 @@ class State:
             self.db.execute(
                 "UPDATE jobs SET ended_ts = ?, state = ?, reason = ? WHERE id = ?",
                 (event["ts"], state_val, event.get("reason", ""), event["id"]))
-        if session:
+        # a pass's own events (origin "memory") must not look like the user is still there -
+        # they would keep the session alive forever and the pass would never see it go idle.
+        if session and event.get("origin") != "memory":
             self.db.execute("UPDATE sessions SET last_ts = ? WHERE id = ?", (event["ts"], session))
         self.db.execute("UPDATE meta SET value = ? WHERE key = 'cursor'", (str(seq),))
 
@@ -231,6 +237,21 @@ class State:
             "SELECT role, content FROM messages WHERE session = ? ORDER BY seq", (session,)
         ).fetchall()
         return [{"role": role, "content": content} for role, content in rows]
+
+    def session_messages(self, session: str, after: int, upto: int) -> list:
+        """`session`'s own messages with seq in `(after, upto]`, as render_line-compatible event
+        dicts - every stored row already passed `_project`'s own filters (a real user turn, a
+        final assistant reply), so "user"/"assistant" and `final=True` are safe to fill back in."""
+        rows = self.db.execute(
+            "SELECT seq, role, content FROM messages WHERE session = ? AND seq > ? AND seq <= ? ORDER BY seq",
+            (session, after, upto)).fetchall()
+        out = []
+        for seq, role, content in rows:
+            if role == "user":
+                out.append({"seq": seq, "type": "user", "origin": "user", "text": content})
+            else:
+                out.append({"seq": seq, "type": "assistant", "origin": "user", "final": True, "text": content})
+        return out
 
     def last_user_ts(self) -> float | None:
         """The ts of the last `user`-role message - the trigger's 'hands idle' clock."""
@@ -392,30 +413,49 @@ class State:
 
     def index_page(self, path: str, title: str, text: str, mtime: float, vector=None, model: str = "") -> None:
         """Upsert a page (delete + insert) and keep the external-content FTS table in sync: the
-        'delete' command needs the OLD rowid and content, so it runs before the row is replaced."""
-        old = self.db.execute("SELECT rowid, title, text FROM pages WHERE path = ?", (path,)).fetchone()
-        if old is not None:
-            self.db.execute("INSERT INTO pages_fts (pages_fts, rowid, title, text) VALUES ('delete', ?, ?, ?)", old)
-            self.db.execute("DELETE FROM pages WHERE path = ?", (path,))
-        cur = self.db.execute("INSERT INTO pages (path, title, mtime, text) VALUES (?, ?, ?, ?)",
-                              (path, title, mtime, text))
-        self.db.execute("INSERT INTO pages_fts (rowid, title, text) VALUES (?, ?, ?)", (cur.lastrowid, title, text))
-        if vector is not None:
-            blob = struct.pack(f"<{len(vector)}f", *vector)
-            self.db.execute(
-                "INSERT INTO vectors (path, model, vec) VALUES (?, ?, ?) "
-                "ON CONFLICT(path) DO UPDATE SET model = excluded.model, vec = excluded.vec",
-                (path, model, blob))
-        else:
-            # a page re-indexed without an embedding must not keep a stale vector
-            self.db.execute("DELETE FROM vectors WHERE path = ?", (path,))
+        'delete' command needs the OLD rowid and content, so it runs before the row is replaced.
+        One explicit transaction, like `apply()`: the pass thread and a user turn's own thread
+        can both call this on the same connection."""
+        with self._lock:
+            self.db.execute("BEGIN IMMEDIATE")
+            try:
+                old = self.db.execute("SELECT rowid, title, text FROM pages WHERE path = ?", (path,)).fetchone()
+                if old is not None:
+                    self.db.execute(
+                        "INSERT INTO pages_fts (pages_fts, rowid, title, text) VALUES ('delete', ?, ?, ?)", old)
+                    self.db.execute("DELETE FROM pages WHERE path = ?", (path,))
+                cur = self.db.execute("INSERT INTO pages (path, title, mtime, text) VALUES (?, ?, ?, ?)",
+                                      (path, title, mtime, text))
+                self.db.execute("INSERT INTO pages_fts (rowid, title, text) VALUES (?, ?, ?)",
+                                (cur.lastrowid, title, text))
+                if vector is not None:
+                    blob = struct.pack(f"<{len(vector)}f", *vector)
+                    self.db.execute(
+                        "INSERT INTO vectors (path, model, vec) VALUES (?, ?, ?) "
+                        "ON CONFLICT(path) DO UPDATE SET model = excluded.model, vec = excluded.vec",
+                        (path, model, blob))
+                else:
+                    # a page re-indexed without an embedding must not keep a stale vector
+                    self.db.execute("DELETE FROM vectors WHERE path = ?", (path,))
+                self.db.execute("COMMIT")
+            except BaseException:
+                self.db.execute("ROLLBACK")
+                raise
 
     def remove_page(self, path: str) -> None:
-        old = self.db.execute("SELECT rowid, title, text FROM pages WHERE path = ?", (path,)).fetchone()
-        if old is not None:
-            self.db.execute("INSERT INTO pages_fts (pages_fts, rowid, title, text) VALUES ('delete', ?, ?, ?)", old)
-            self.db.execute("DELETE FROM pages WHERE path = ?", (path,))
-        self.db.execute("DELETE FROM vectors WHERE path = ?", (path,))
+        with self._lock:
+            self.db.execute("BEGIN IMMEDIATE")
+            try:
+                old = self.db.execute("SELECT rowid, title, text FROM pages WHERE path = ?", (path,)).fetchone()
+                if old is not None:
+                    self.db.execute(
+                        "INSERT INTO pages_fts (pages_fts, rowid, title, text) VALUES ('delete', ?, ?, ?)", old)
+                    self.db.execute("DELETE FROM pages WHERE path = ?", (path,))
+                self.db.execute("DELETE FROM vectors WHERE path = ?", (path,))
+                self.db.execute("COMMIT")
+            except BaseException:
+                self.db.execute("ROLLBACK")
+                raise
 
     def pages(self) -> list:
         rows = self.db.execute("SELECT path, title, mtime FROM pages ORDER BY mtime DESC").fetchall()
@@ -452,7 +492,8 @@ class State:
                     if vnorm == 0:
                         continue
                     cos = sum(a * b for a, b in zip(query_vector, vec)) / (qnorm * vnorm)
-                    scored.append((cos, path))
+                    if cos >= VECTOR_FLOOR:
+                        scored.append((cos, path))
                 scored.sort(key=lambda x: -x[0])
                 for i, (_, path) in enumerate(scored[:20], start=1):
                     ranks[path] = ranks.get(path, 0.0) + 1 / (60 + i)
@@ -463,11 +504,25 @@ class State:
         top = sorted(ranks.items(), key=lambda x: -x[1])[:top_k]
         return [{"path": p, "title": info[p][0], "score": s, "snippet": info[p][1][:200]} for p, s in top]
 
-    def memory_applies_after(self, seq: int = 0, limit: int = 20) -> list:
-        """Applies with seq > `seq`, newest first, capped at `limit` - undo's 'last n' view."""
+    def memory_applies_after(self, seq: int = 0, limit: int = 20, skip_undone: bool = False) -> list:
+        """Applies with seq > `seq`, newest first, capped at `limit` - undo's 'last n' view.
+        `skip_undone` (undo's own call) replays the log as a stack: a real edit pushes, an
+        undo's own `approval='undo'` row pops the edit it just reversed. What is left, newest
+        first, is exactly what has NOT yet been undone - however edits and undos interleave, so
+        a second `undo 1` walks further back instead of re-targeting what the first call undid."""
         rows = self.db.execute(
-            "SELECT seq, target, op, old, new FROM memory_applies WHERE seq > ? ORDER BY seq DESC LIMIT ?",
-            (seq, limit)).fetchall()
+            "SELECT seq, target, op, old, new, approval FROM memory_applies WHERE seq > ? ORDER BY seq",
+            (seq,)).fetchall()
+        if skip_undone:
+            active = []
+            for r in rows:
+                if r[5] == "undo":
+                    if active:
+                        active.pop()
+                else:
+                    active.append(r)
+            rows = active
+        rows = list(reversed(rows))[:limit]
         return [{"seq": r[0], "target": r[1], "op": r[2], "old": r[3], "new": r[4]} for r in rows]
 
     def memory_stats(self, now: float | None = None) -> dict:

@@ -17,8 +17,9 @@ TYPES = frozenset({
     "approval_pending", "approval", "interrupted",
     "signal", "decision", "judgment", "delivery", "reaction", "presence",
     "job_start", "job_done", "job_failed",
+    "memory_pass", "memory_apply", "session_summary",
 })
-ORIGINS = frozenset({"user", "signal", "job", "system"})
+ORIGINS = frozenset({"user", "signal", "job", "system", "memory"})
 TRUST = frozenset({"user", "self", "third_party"})
 RESERVED = frozenset({"seq", "ts", "type", "session", "turn", "origin", "trust"})
 

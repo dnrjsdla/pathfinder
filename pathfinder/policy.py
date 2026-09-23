@@ -16,6 +16,10 @@ _TABLE = {
     "signal": {"read": "allow", "sandboxed": "ask",    "network": "ask",   "write": "ask",  "reversible": "ask"},
     "job":    {"read": "allow", "sandboxed": "ask",    "network": "ask",   "write": "ask",  "reversible": "ask"},
     "system": {"read": "allow", "sandboxed": "deny",   "network": "deny",  "write": "deny", "reversible": "deny"},
+    # the consolidation pass reads the vault and the ledger and makes reversible line edits,
+    # nothing else; grants never apply to it (they are the user's, for user turns - the
+    # existing origin == "user" check above already ensures this)
+    "memory":  {"read": "allow", "sandboxed": "deny",   "network": "deny",  "write": "deny", "reversible": "allow"},
 }
 
 

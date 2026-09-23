@@ -78,6 +78,20 @@ class PolicyTableTest(unittest.TestCase):
             grants = {"reversible_thing": "deny"}
             self.assertEqual(policy.decide(REVERSIBLE, "user", {}, grants), "deny")  # grants still win
 
+    def test_memory_origin_row(self):
+        """The consolidation pass: read allowed, reversible edits allowed, everything else
+        denied - and grants (the user's, for user turns) never apply to origin `memory`."""
+        cases = [
+            ("memory", READ, "allow"), ("memory", SHELL, "deny"), ("memory", NET, "deny"),
+            ("memory", WRITE, "deny"), ("memory", REVERSIBLE, "allow"),
+        ]
+        with mock.patch("pathfinder.policy._exec.available", return_value=True):
+            for origin, spec, expected in cases:
+                self.assertEqual(policy.decide(spec, origin, {}, {}), expected, f"{origin} x {spec.name}")
+            grants = {"edit_memory": "allow"}
+            self.assertEqual(policy.decide(REVERSIBLE, "memory", {}, grants), "allow")
+            self.assertEqual(policy.decide(WRITE, "memory", {}, grants), "deny")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -38,10 +38,15 @@ CREATE TABLE IF NOT EXISTS jobs (
 CREATE TABLE IF NOT EXISTS pages (rowid INTEGER PRIMARY KEY, path TEXT UNIQUE, title TEXT, mtime REAL, text TEXT);
 CREATE VIRTUAL TABLE IF NOT EXISTS pages_fts USING fts5(title, text, content='pages', content_rowid='rowid');
 CREATE TABLE IF NOT EXISTS vectors (path TEXT PRIMARY KEY, model TEXT, vec BLOB);
+CREATE TABLE IF NOT EXISTS summaries (session TEXT PRIMARY KEY, upto INTEGER, text TEXT);
+CREATE TABLE IF NOT EXISTS memory_passes (ts REAL, since INTEGER, upto INTEGER, read INTEGER, applied INTEGER, proposed INTEGER);
+CREATE TABLE IF NOT EXISTS memory_applies (
+    seq INTEGER PRIMARY KEY, ts REAL, target TEXT, op TEXT, old TEXT, new TEXT, approval TEXT
+);
 """
 
 NEW_TABLES = ("signals", "decisions", "judgments", "deliveries", "reactions", "presence", "signal_turns", "jobs",
-              "pages_fts", "pages", "vectors")
+              "pages_fts", "pages", "vectors", "summaries", "memory_passes", "memory_applies")
 
 
 @dataclass
@@ -70,6 +75,7 @@ class State:
         if "job" not in {r[1] for r in self.db.execute("PRAGMA table_info(approvals)")}:
             self.db.execute("ALTER TABLE approvals ADD COLUMN job TEXT")
         self.db.execute("INSERT OR IGNORE INTO meta (key, value) VALUES ('cursor', '0')")
+        self.db.execute("INSERT OR IGNORE INTO meta (key, value) VALUES ('memory_cursor', '0')")
         self.db.commit()
 
     def close(self) -> None:
@@ -79,6 +85,11 @@ class State:
     def cursor(self) -> int:
         row = self.db.execute("SELECT value FROM meta WHERE key = 'cursor'").fetchone()
         return int(row[0])
+
+    @property
+    def memory_cursor(self) -> int:
+        row = self.db.execute("SELECT value FROM meta WHERE key = 'memory_cursor'").fetchone()
+        return int(row[0]) if row else 0
 
     def apply(self, event: dict) -> None:
         seq = event["seq"]
@@ -159,6 +170,23 @@ class State:
                 "UPDATE jobs SET ended_ts = ?, state = 'done', summary = ?, steps = ?, usage_json = ? WHERE id = ?",
                 (event["ts"], event.get("summary", ""), event.get("steps"),
                  json.dumps(usage) if usage is not None else None, event["id"]))
+        if event["type"] == "session_summary":
+            self.db.execute(
+                "INSERT INTO summaries (session, upto, text) VALUES (?, ?, ?) "
+                "ON CONFLICT(session) DO UPDATE SET upto = excluded.upto, text = excluded.text",
+                (session, event["upto"], event["text"]))
+        if event["type"] == "memory_pass":
+            self.db.execute(
+                "INSERT INTO memory_passes (ts, since, upto, read, applied, proposed) VALUES (?, ?, ?, ?, ?, ?)",
+                (event["ts"], event.get("since", 0), event.get("upto", 0), event.get("read", 0),
+                 event.get("applied", 0), event.get("proposed", 0)))
+            self.db.execute("UPDATE meta SET value = ? WHERE key = 'memory_cursor'",
+                            (str(event.get("upto", 0)),))
+        if event["type"] == "memory_apply":
+            self.db.execute(
+                "INSERT INTO memory_applies (seq, ts, target, op, old, new, approval) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (seq, event["ts"], event["target"], event["op"], event.get("old"), event.get("new"),
+                 event.get("approval")))
         if event["type"] == "job_failed":
             # "stopped" is the one reason the user themselves caused (interrupt) - the CLI shows
             # it as its own state rather than lumping a cancel in with a model/internal failure.
@@ -186,14 +214,32 @@ class State:
         self.db.executescript("".join(f"DROP TABLE {t};" for t in drops))
         self.db.executescript(SCHEMA)
         self.db.execute("INSERT OR IGNORE INTO meta (key, value) VALUES ('cursor', '0')")
+        self.db.execute("INSERT OR IGNORE INTO meta (key, value) VALUES ('memory_cursor', '0')")
         self.db.commit()
         return self.catch_up(ledger)
 
     def history(self, session: str) -> list:
+        summary = self.db.execute("SELECT upto, text FROM summaries WHERE session = ?", (session,)).fetchone()
+        if summary is not None:
+            upto, text = summary
+            rows = self.db.execute(
+                "SELECT role, content FROM messages WHERE session = ? AND seq > ? ORDER BY seq", (session, upto)
+            ).fetchall()
+            head = [{"role": "system", "content": "Earlier in this conversation, summarized: " + text}]
+            return head + [{"role": role, "content": content} for role, content in rows]
         rows = self.db.execute(
             "SELECT role, content FROM messages WHERE session = ? ORDER BY seq", (session,)
         ).fetchall()
         return [{"role": role, "content": content} for role, content in rows]
+
+    def last_user_ts(self) -> float | None:
+        """The ts of the last `user`-role message - the trigger's 'hands idle' clock."""
+        row = self.db.execute("SELECT MAX(ts) FROM messages WHERE role = 'user'").fetchone()
+        return row[0] if row and row[0] is not None else None
+
+    def summary(self, session: str):
+        row = self.db.execute("SELECT upto, text FROM summaries WHERE session = ?", (session,)).fetchone()
+        return None if row is None else {"upto": row[0], "text": row[1]}
 
     def session(self, sid: str):
         row = self.db.execute(
@@ -210,6 +256,10 @@ class State:
         ).fetchall()
         return [{"id": r[0], "session": r[1], "turn": r[2], "tool": r[3], "args": json.loads(r[4]), "ts": r[5],
                 "job": r[6]} for r in rows]
+
+    def pending_memory(self) -> list:
+        """The pending approvals whose tool is `edit_memory` - `pathfinder approvals`'s memory view."""
+        return [p for p in self.pending() if p["tool"] == "edit_memory"]
 
     def approval(self, id: str):
         row = self.db.execute(
@@ -379,3 +429,36 @@ class State:
                             info[path] = prow
         top = sorted(ranks.items(), key=lambda x: -x[1])[:top_k]
         return [{"path": p, "title": info[p][0], "score": s, "snippet": info[p][1][:200]} for p, s in top]
+
+    def memory_applies_after(self, seq: int = 0, limit: int = 20) -> list:
+        """Applies with seq > `seq`, newest first, capped at `limit` - undo's 'last n' view."""
+        rows = self.db.execute(
+            "SELECT seq, target, op, old, new FROM memory_applies WHERE seq > ? ORDER BY seq DESC LIMIT ?",
+            (seq, limit)).fetchall()
+        return [{"seq": r[0], "target": r[1], "op": r[2], "old": r[3], "new": r[4]} for r in rows]
+
+    def memory_stats(self, now: float | None = None) -> dict:
+        """Passes/lines-read/applied per local day for today and the two days before, pending
+        proposals, and judgments per local day for the last seven days - `pathfinder memory`'s
+        numbers and the stalled-memory trigger. Day boundaries come from `clock.day_starts`
+        only (no date maths here)."""
+        now = now if now is not None else time.time()
+        bounds = clock.day_starts(now, 4)  # today + 3 previous starts -> 3 bounded day windows
+        days = []
+        for i in range(3):
+            start = bounds[i]
+            next_start = bounds[i - 1] if i > 0 else now + 1
+            passes, read = self.db.execute(
+                "SELECT COUNT(*), COALESCE(SUM(read), 0) FROM memory_passes WHERE ts >= ? AND ts < ?",
+                (start, next_start)).fetchone()
+            applied = self.db.execute(
+                "SELECT COUNT(*) FROM memory_applies WHERE ts >= ? AND ts < ?", (start, next_start)).fetchone()[0]
+            days.append({"start": start, "passes": passes, "read": read, "applied": applied})
+        jbounds = clock.day_starts(now, 8)  # today + 7 previous starts -> 7 bounded day windows
+        judgments = []
+        for i in range(7):
+            start = jbounds[i]
+            next_start = jbounds[i - 1] if i > 0 else now + 1
+            judgments.append(self.db.execute(
+                "SELECT COUNT(*) FROM judgments WHERE ts >= ? AND ts < ?", (start, next_start)).fetchone()[0])
+        return {"days": days, "pending": len(self.pending_memory()), "judgments": judgments}

@@ -74,6 +74,18 @@ class OriginRegistryTest(unittest.TestCase):
             self.assertIn("read_file", names)
             self.assertIn("write_file", names)
 
+    def test_for_origin_memory_is_opt_in(self):
+        """`memory` (the consolidation pass) sees no shipped tool by default - only a spec that
+        explicitly opts in with `origins={"memory"}`."""
+        self.assertEqual(tools_mod.for_origin("memory"), {})
+        spec = ToolSpec(name="memory_only_thing", description="", params={}, required=[],
+                        handler=lambda **a: None, origins=frozenset({"memory"}))
+        tools_mod.TOOLS["memory_only_thing"] = spec
+        try:
+            self.assertEqual(set(tools_mod.for_origin("memory")), {"memory_only_thing"})
+        finally:
+            del tools_mod.TOOLS["memory_only_thing"]
+
 
 if __name__ == "__main__":
     unittest.main()

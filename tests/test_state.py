@@ -1,7 +1,9 @@
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
+from pathfinder import clock
 from pathfinder.ledger import Ledger
 from pathfinder.state import State
 
@@ -163,6 +165,100 @@ class PageIndexTest(unittest.TestCase):
         self.assertEqual(len(self.state.pages()), 1)
         self.state.rebuild(self.ledger)
         self.assertEqual(self.state.pages(), [])
+
+
+class MemoryStateTest(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.home = Path(self._tmp.name)
+        self.ledger = Ledger(self.home)
+        self.db_path = self.home / "state.db"
+        self.state = State(self.db_path)
+
+    def tearDown(self):
+        self.state.close()
+        self._tmp.cleanup()
+
+    def _record(self, type, **kw):
+        event = self.ledger.append(type, **kw)
+        self.state.apply(event)
+        return event
+
+    def _reopen(self):
+        """Delete the DB file and rebuild a fresh State from the ledger."""
+        self.state.close()
+        for suffix in ("", "-wal", "-shm"):
+            p = Path(str(self.db_path) + suffix)
+            if p.exists():
+                p.unlink()
+        fresh = State(self.db_path)
+        fresh.rebuild(self.ledger)
+        return fresh
+
+    def test_history_folds_after_summary(self):
+        self._record("session_start", session="s1")
+        seqs = [self._record("user", session="s1", turn="t1", origin="user", trust="user",
+                             text=f"u{i}")["seq"] for i in range(6)]
+        self.assertEqual(len(self.state.history("s1")), 6)
+
+        self._record("session_summary", session="s1", upto=seqs[2], text="summary text")
+        after = self.state.history("s1")
+        self.assertEqual(after[0], {"role": "system",
+                                    "content": "Earlier in this conversation, summarized: summary text"})
+        self.assertEqual([m["content"] for m in after[1:]], ["u3", "u4", "u5"])
+
+    def test_memory_cursor_follows_pass(self):
+        self.assertEqual(self.state.memory_cursor, 0)
+        self._record("memory_pass", origin="memory", since=0, upto=42, read=5, applied=1, proposed=0)
+        self.assertEqual(self.state.memory_cursor, 42)
+
+        rebuilt = self._reopen()
+        self.assertEqual(rebuilt.memory_cursor, 42)
+        rebuilt.close()
+
+    def test_memory_stats_counts_by_local_day(self):
+        today_start, yesterday_start = clock.day_starts(time.time(), 2)
+        seq = [0]
+
+        def apply(type, ts, **data):
+            seq[0] += 1
+            self.state.apply({"seq": seq[0], "ts": ts, "type": type, "session": "", "turn": "",
+                              "origin": "memory", "trust": "self", **data})
+
+        apply("memory_pass", today_start + 10, since=0, upto=5, read=5, applied=1, proposed=0)
+        apply("memory_apply", today_start + 20, target="wiki/a.md", op="add", old=None, new="x", approval=None)
+        apply("memory_pass", yesterday_start + 10, since=0, upto=3, read=2, applied=0, proposed=1)
+        apply("judgment", today_start + 5)
+        apply("judgment", yesterday_start + 5)
+
+        stats = self.state.memory_stats(time.time())
+        self.assertEqual(len(stats["days"]), 3)
+        self.assertEqual(stats["days"][0], {"start": today_start, "passes": 1, "read": 5, "applied": 1})
+        self.assertEqual(stats["days"][1]["passes"], 1)
+        self.assertEqual(stats["days"][1]["read"], 2)
+        self.assertEqual(stats["days"][1]["applied"], 0)
+        self.assertEqual(stats["days"][2], {"start": clock.day_starts(time.time(), 3)[2], "passes": 0,
+                                            "read": 0, "applied": 0})
+        self.assertEqual(stats["pending"], 0)
+        self.assertEqual(len(stats["judgments"]), 7)
+        self.assertEqual(stats["judgments"][0], 1)
+        self.assertEqual(stats["judgments"][1], 1)
+        self.assertEqual(stats["judgments"][2], 0)
+
+    def test_reindex_restores_summaries_and_applies(self):
+        self._record("session_start", session="s1")
+        self._record("user", session="s1", turn="t1", origin="user", trust="user", text="hi")
+        self._record("session_summary", session="s1", upto=1, text="summary")
+        self._record("memory_pass", origin="memory", since=0, upto=1, read=1, applied=1, proposed=0)
+        self._record("memory_apply", origin="memory", target="wiki/a.md", op="add", old=None, new="x")
+
+        rebuilt = self._reopen()
+        self.assertEqual(rebuilt.summary("s1"), {"upto": 1, "text": "summary"})
+        self.assertEqual(rebuilt.memory_cursor, 1)
+        applies = rebuilt.memory_applies_after(0)
+        self.assertEqual(len(applies), 1)
+        self.assertEqual(applies[0]["target"], "wiki/a.md")
+        rebuilt.close()
 
 
 if __name__ == "__main__":

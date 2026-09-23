@@ -48,6 +48,9 @@ class Rules:
     idle_threshold_s: int = 20
     jobs_per_day: int = 10
     job_steps: int = 20
+    consolidate_idle_min: int = 20
+    consolidate_min_events: int = 20
+    consolidate_steps: int = 12
     by_kind: dict = field(default_factory=dict)                       # kind -> [(cond, raw, action, note)]
     conditions: dict = field(default_factory=lambda: dict(CORE_CONDITIONS))
 
@@ -117,6 +120,9 @@ def parse(text: str, conditions: dict | None = None, validated_kinds: set | None
                  idle_threshold_s=_int(meta.get("idle_threshold_s"), 20),
                  jobs_per_day=_int(meta.get("jobs_per_day"), 10),
                  job_steps=_int(meta.get("job_steps"), 20),
+                 consolidate_idle_min=_int(meta.get("consolidate_idle_min"), 20),
+                 consolidate_min_events=_int(meta.get("consolidate_min_events"), 20),
+                 consolidate_steps=_int(meta.get("consolidate_steps"), 12),
                  by_kind=by_kind, conditions=dict(conditions))
 
 

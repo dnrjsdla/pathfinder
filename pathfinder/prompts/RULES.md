@@ -7,6 +7,9 @@ judgment_cap: 20
 idle_threshold_s: 20
 jobs_per_day: 10
 job_steps: 20
+consolidate_idle_min: 20
+consolidate_min_events: 20
+consolidate_steps: 12
 ---
 
 # RULES

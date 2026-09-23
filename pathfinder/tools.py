@@ -11,7 +11,6 @@ from typing import Any, Callable
 
 from . import clock
 from . import exec as _exec
-from .ledger import ORIGINS
 
 READ_CLIP = 8000
 LEDGER_CLIP = 2000  # what a recorded tool_call/tool_result (a job's own copies too) keeps
@@ -28,7 +27,9 @@ class ToolSpec:
     network: bool = False     # can send data out
     sandboxed: bool = False   # side effects are confined by exec.py
     reversible: bool = False  # a write the user can undo by deleting a row (D22) -> user: allow
-    origins: frozenset = ORIGINS  # who may even see this tool's schema (default: all four)
+    # who may even see this tool's schema (default: the four turn origins; `memory` - the
+    # consolidation pass - is opt-in)
+    origins: frozenset = frozenset({"user", "signal", "job", "system"})
     # Runs after coerce and before policy: what the gate shows is what will happen. A relative
     # path becomes absolute here; a local_datetime param is canonicalized by normalize_local_datetime.
     # May raise ValueError with a message the model can act on - the broker turns it into a tool error.

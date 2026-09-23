@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import re
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 
 _WEEKDAY = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 _OFFSET_RE = re.compile(r"[+-]\d{2}:?\d{2}$")
@@ -44,6 +44,14 @@ def day_start(ts: float | None = None) -> float:
     from."""
     dt = datetime.fromtimestamp(ts if ts is not None else time.time())
     return dt.replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+
+
+def day_starts(now: float | None = None, n: int = 1) -> list[float]:
+    """Start-of-day timestamps of today and the n-1 previous local days, newest first - the
+    only date maths for a multi-day window; callers outside clock/ledger must use this instead
+    of subtracting 86400 from day_start()."""
+    today = datetime.fromtimestamp(day_start(now))
+    return [(today - timedelta(days=i)).timestamp() for i in range(n)]
 
 
 def hour(ts: float | None = None) -> int:

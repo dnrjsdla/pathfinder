@@ -33,6 +33,21 @@ class ParseClosedVocabTest(unittest.TestCase):
             rules.parse("---\n---\n## anything\n\n| nope | 1 | speak | |\n")  # validated_kinds=None
 
 
+class ConsolidateFrontmatterTest(unittest.TestCase):
+    def test_consolidate_fields_default(self):
+        parsed = rules.parse("---\n---\n")
+        self.assertEqual(parsed.consolidate_idle_min, 20)
+        self.assertEqual(parsed.consolidate_min_events, 20)
+        self.assertEqual(parsed.consolidate_steps, 12)
+
+    def test_consolidate_fields_parse(self):
+        text = "---\nconsolidate_idle_min: 30\nconsolidate_min_events: 15\nconsolidate_steps: 8\n---\n"
+        parsed = rules.parse(text)
+        self.assertEqual(parsed.consolidate_idle_min, 30)
+        self.assertEqual(parsed.consolidate_min_events, 15)
+        self.assertEqual(parsed.consolidate_steps, 8)
+
+
 class FirstMatchTest(unittest.TestCase):
     def test_rules_first_match_wins(self):
         text = ("---\n---\n## command_failed\n\n"

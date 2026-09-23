@@ -406,3 +406,30 @@ pathfinder-mail -a <user> -w`), then `config set senses '{"mail": {"host": ..., 
 Calendar and reminders: `pip3 install pyobjc-framework-EventKit` and the macOS Calendar and
 Reminders permission prompts on first poll. Both are the first live checks of partition 7's
 onboarding as much as this partition's.
+
+## 2026-09-23 — Before partition 4: contract and three owner decisions
+
+The contract (`docs/plans/partition-4.md`) put three questions to the owner; the answers are
+D23 (the job evaluator is decided by m7, graded blind), D24 (a job's write pauses the job at the
+gate and `approve` resumes the job itself) and D25 (one model request at a time, the user first).
+
+### m7a — what the free plan does with two overlapping requests (`bench/m7a_concurrency.py`, 3 rounds, 9 requests)
+
+Each round: one solo request, then two identical streaming requests (about 240 completion tokens
+each) started 0.5 s apart on `gpt-oss:120b-cloud`. Trace in `docs/measurements/m7a-*.json`.
+
+| round | solo first token | first: first token / end | second: first token / end | verdict |
+|---|---|---|---|---|
+| 1 | 2.62 s | 0.46 s / 1.24 s | 1.79 s / 5.33 s | queued |
+| 2 | 0.43 s | 0.43 s / 1.68 s | 2.14 s / 3.16 s | queued |
+| 3 | 0.69 s | 0.49 s / 2.61 s | 3.26 s / 5.86 s | queued |
+
+- **The server queues the second request: 3/3, no 429, no 402.** Its first token arrives
+  0.45-0.65 s after the first stream ends - a normal first-token latency, so the second request
+  simply waits its turn server-side. Both responses are complete every time.
+- What this means for D25's slot: it is not error insurance (nothing fails) and it does not
+  shorten the wait (a user turn arriving mid-step waits for that step either way). It is an
+  **ordering device**: server-side the queue is FIFO, so without the slot a job's next step that
+  was requested a moment before the user's turn goes first. The slot makes the user go first and
+  keeps a job from requesting while a user is waiting. A job may hold the slot for a whole step;
+  no retry-on-429 path is needed. Cost: about 5k tokens.

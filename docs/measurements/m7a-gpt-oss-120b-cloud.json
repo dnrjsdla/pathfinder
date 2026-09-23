@@ -1,0 +1,163 @@
+{
+ "model": "gpt-oss:120b-cloud",
+ "gap_s": 0.5,
+ "prompt": "Write about 150 words describing the ocean at dawn. Plain prose, no headings.",
+ "rounds": [
+  {
+   "solo": {
+    "label": "solo",
+    "start": 4.169996827840805e-07,
+    "first_token": 2.6153192499186844,
+    "end": 3.7988637078087777,
+    "status": "ok",
+    "chars": 885,
+    "usage": {
+     "prompt_tokens": 84,
+     "completion_tokens": 241,
+     "total_tokens": 325,
+     "prompt_tokens_details": {
+      "cached_tokens": 48
+     }
+    }
+   },
+   "first": {
+    "label": "pair0",
+    "start": 0.00043462496250867844,
+    "first_token": 0.4629801670089364,
+    "end": 1.2384925419464707,
+    "status": "ok",
+    "chars": 868,
+    "usage": {
+     "prompt_tokens": 84,
+     "completion_tokens": 237,
+     "total_tokens": 321,
+     "prompt_tokens_details": {
+      "cached_tokens": 64
+     }
+    }
+   },
+   "second": {
+    "label": "pair1",
+    "start": 0.5012572919949889,
+    "first_token": 1.7945983340032399,
+    "end": 5.334391667041928,
+    "status": "ok",
+    "chars": 913,
+    "usage": {
+     "prompt_tokens": 84,
+     "completion_tokens": 904,
+     "total_tokens": 988,
+     "prompt_tokens_details": {
+      "cached_tokens": 64
+     }
+    }
+   },
+   "verdict": "queued"
+  },
+  {
+   "solo": {
+    "label": "solo",
+    "start": 7.078051567077637e-07,
+    "first_token": 0.43015245790593326,
+    "end": 1.4997395409736782,
+    "status": "ok",
+    "chars": 906,
+    "usage": {
+     "prompt_tokens": 84,
+     "completion_tokens": 269,
+     "total_tokens": 353,
+     "prompt_tokens_details": {
+      "cached_tokens": 64
+     }
+    }
+   },
+   "first": {
+    "label": "pair0",
+    "start": 0.00026158406399190426,
+    "first_token": 0.4325607919599861,
+    "end": 1.684498667018488,
+    "status": "ok",
+    "chars": 903,
+    "usage": {
+     "prompt_tokens": 84,
+     "completion_tokens": 253,
+     "total_tokens": 337,
+     "prompt_tokens_details": {
+      "cached_tokens": 64
+     }
+    }
+   },
+   "second": {
+    "label": "pair1",
+    "start": 0.504525792086497,
+    "first_token": 2.1395212090574205,
+    "end": 3.160471542039886,
+    "status": "ok",
+    "chars": 811,
+    "usage": {
+     "prompt_tokens": 84,
+     "completion_tokens": 228,
+     "total_tokens": 312,
+     "prompt_tokens_details": {
+      "cached_tokens": 64
+     }
+    }
+   },
+   "verdict": "queued"
+  },
+  {
+   "solo": {
+    "label": "solo",
+    "start": 1.2088567018508911e-06,
+    "first_token": 0.6940485420636833,
+    "end": 1.6087070000357926,
+    "status": "ok",
+    "chars": 827,
+    "usage": {
+     "prompt_tokens": 84,
+     "completion_tokens": 243,
+     "total_tokens": 327,
+     "prompt_tokens_details": {
+      "cached_tokens": 64
+     }
+    }
+   },
+   "first": {
+    "label": "pair0",
+    "start": 0.00025283382274210453,
+    "first_token": 0.4914922500029206,
+    "end": 2.610303958877921,
+    "status": "ok",
+    "chars": 872,
+    "usage": {
+     "prompt_tokens": 84,
+     "completion_tokens": 772,
+     "total_tokens": 856,
+     "prompt_tokens_details": {
+      "cached_tokens": 64
+     }
+    }
+   },
+   "second": {
+    "label": "pair1",
+    "start": 0.5018419588450342,
+    "first_token": 3.2598780419211835,
+    "end": 5.85774008394219,
+    "status": "ok",
+    "chars": 836,
+    "usage": {
+     "prompt_tokens": 84,
+     "completion_tokens": 837,
+     "total_tokens": 921,
+     "prompt_tokens_details": {
+      "cached_tokens": 64
+     }
+    }
+   },
+   "verdict": "queued"
+  }
+ ],
+ "summary": {
+  "queued": 3
+ }
+}

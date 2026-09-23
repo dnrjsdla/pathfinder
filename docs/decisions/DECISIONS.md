@@ -138,3 +138,28 @@ deny.** A tool that is a write the user can undo by deleting a row (`add_schedul
 invariant "only what can be undone runs by itself" becomes a cell of the table instead of a
 `grants` default; a mail-opened turn still asks. — *Reversed if* a reversible tool is ever found
 to have had an effect outside its own row: then it loses the flag.
+
+## 2026-09-23 — Partition 4 (owner's choices on the contract's three questions)
+
+**D23. m7 decides the job evaluator: ten goals, with and without one evaluator pass, graded
+blind by an opus subagent with the owner checking five pairs; the evaluator row lands only if it
+earns at least three more thumbs-up out of ten.** — The open path from the harness review
+(partition 2) said "measure at the entrance"; a subagent grader keeps the owner's cost to ten
+minutes while staying inside D7 (a subagent is a grader, not a runtime). — *Reversed if* the
+owner's five spot checks disagree with the grader on two or more: then the owner grades all
+twenty.
+
+**D24. A job's write pauses the job at the gate and `approve` resumes the job itself.** The
+mechanism is D16's: `approval_pending` keeps the job's messages, the row carries the job id, and
+the resume runs the job loop, not a session turn. — "Research it and put it in a file" is a job
+with a result; a dropped gate (the signal turn's rule) would make every worker read-only. —
+*Reversed if* real use shows jobs gating more than once per job on average: then the worker
+collects its writes and gates once at the end.
+
+**D25. One model request at a time, the user first.** A slot in `llm/` serializes every
+streaming request; a job takes the slot for one step and yields between steps; a user or signal
+turn waits at most one job step. — The free plan allows one concurrent request (partition 0's
+finding); m7a measures what the second request actually gets, and either way the slot keeps a
+worker from doubling the day's request rate. — *Reversed if* m7a shows two requests run freely
+AND real use shows user turns waiting on job steps more than a few seconds: then jobs run only in
+the user's idle gaps.

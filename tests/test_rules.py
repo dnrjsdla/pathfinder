@@ -56,6 +56,21 @@ class NoRowTest(unittest.TestCase):
         action2, _ = rules.decide(_signal(kind="unheard_of"), parsed, {}, _today(), 1000.0)
         self.assertEqual(action2, "ask_model")
 
+    def test_stale_home_rules_take_shipped_section_for_new_kinds(self):
+        """Review should-fix: a RULES.md written before a sense existed has no section for its
+        kinds, and "no section" is a model judgment - the shipped section stands in, and the
+        user's file is left alone."""
+        import tempfile
+        from pathlib import Path
+        from pathfinder.signals import load as load_senses
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            stale = "---\nquiet_hours: 23-8\n---\n\n# RULES\n\n## command_failed\n\n| condition | value | action | note |\n| --- | --- | --- | --- |\n| `always` | `-` | `speak` | |\n"
+            (home / "RULES.md").write_text(stale, encoding="utf-8")
+            loaded = rules.load(home, load_senses({"senses": {"jobs": {}}}, home))
+            self.assertEqual([(r[0], r[2]) for r in loaded.by_kind["job_done"]], [("always", "speak")])
+            self.assertEqual((home / "RULES.md").read_text(encoding="utf-8"), stale)
+
 
 class PrefiltersTest(unittest.TestCase):
     def test_rules_prefilters(self):

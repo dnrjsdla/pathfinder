@@ -4,14 +4,17 @@ ever checks policy or calls a handler - an uncast `escalate="false"` (a string,
 which Python treats as truthy) must not sail past the gate as an escalation."""
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
 from . import clock
 from . import exec as _exec
+from .ledger import ORIGINS
 
 READ_CLIP = 8000
+LEDGER_CLIP = 2000  # what a recorded tool_call/tool_result (a job's own copies too) keeps
 
 
 @dataclass(frozen=True)
@@ -25,6 +28,7 @@ class ToolSpec:
     network: bool = False     # can send data out
     sandboxed: bool = False   # side effects are confined by exec.py
     reversible: bool = False  # a write the user can undo by deleting a row (D22) -> user: allow
+    origins: frozenset = ORIGINS  # who may even see this tool's schema (default: all four)
     # Runs after coerce and before policy: what the gate shows is what will happen. A relative
     # path becomes absolute here; a local_datetime param is canonicalized by normalize_local_datetime.
     # May raise ValueError with a message the model can act on - the broker turns it into a tool error.
@@ -40,6 +44,13 @@ class ToolSpec:
                 "parameters": {"type": "object", "properties": self.params, "required": self.required},
             },
         }
+
+
+def for_origin(origin: str) -> dict:
+    """The registry a turn of this origin may call - `start_job` declares `origins={"user"}`, so
+    a job's own registry (origin "job") and a signal turn's (origin "signal") never contain it:
+    "a worker cannot make a worker" and "a mail cannot start a job" are structure, not policy."""
+    return {name: spec for name, spec in TOOLS.items() if origin in spec.origins}
 
 
 _BOOL = {"true": True, "false": False, "1": True, "0": False}
@@ -112,6 +123,15 @@ def clip(text: str, limit: int = READ_CLIP) -> str:
     head = tail = limit // 2
     dropped = len(text) - head - tail
     return f"{text[:head]}\n...({dropped} characters omitted)...\n{text[-tail:]}"
+
+
+def clip_for_ledger(value, limit: int = LEDGER_CLIP):
+    """Shorter and head-only, unlike `clip()` above - what the daemon and a job keep of a tool
+    call's args/result in the ledger, not what the model itself is shown."""
+    if isinstance(value, str):
+        return value if len(value) <= limit else value[:limit] + "...(truncated)"
+    text = json.dumps(value, ensure_ascii=False)
+    return value if len(text) <= limit else text[:limit] + "...(truncated)"
 
 
 def normalize_local_datetime(*keys):

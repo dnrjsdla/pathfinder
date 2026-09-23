@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, started_ts REAL, last_
 CREATE TABLE IF NOT EXISTS messages (seq INTEGER PRIMARY KEY, session TEXT, role TEXT, content TEXT, ts REAL);
 CREATE TABLE IF NOT EXISTS approvals (
     id TEXT PRIMARY KEY, call_id TEXT, session TEXT, turn TEXT, tool TEXT,
-    args_json TEXT, messages_json TEXT, ts REAL, decision TEXT
+    args_json TEXT, messages_json TEXT, ts REAL, decision TEXT, job TEXT
 );
 CREATE TABLE IF NOT EXISTS signals (key TEXT PRIMARY KEY, ts REAL, sense TEXT, kind TEXT);
 CREATE TABLE IF NOT EXISTS decisions (
@@ -28,9 +28,13 @@ CREATE TABLE IF NOT EXISTS deliveries (id TEXT PRIMARY KEY, ts REAL, session TEX
 CREATE TABLE IF NOT EXISTS reactions (ts REAL, delivery_id TEXT, vote TEXT);
 CREATE TABLE IF NOT EXISTS presence (session TEXT PRIMARY KEY, ts REAL, idle_s REAL);
 CREATE TABLE IF NOT EXISTS signal_turns (ts REAL);
+CREATE TABLE IF NOT EXISTS jobs (
+    id TEXT PRIMARY KEY, session TEXT, goal TEXT, started_ts REAL, ended_ts REAL,
+    state TEXT, summary TEXT, reason TEXT, steps INTEGER, usage_json TEXT
+);
 """
 
-NEW_TABLES = ("signals", "decisions", "judgments", "deliveries", "reactions", "presence", "signal_turns")
+NEW_TABLES = ("signals", "decisions", "judgments", "deliveries", "reactions", "presence", "signal_turns", "jobs")
 
 
 @dataclass
@@ -42,6 +46,7 @@ class Today:
     burst: int                # signal turns opened in the last 60 s
     recent_counts: dict       # kind -> signals of that kind in the last 600 s, incl. this one (count_over)
     away: bool = True         # target session's presence is stale/idle (claude_code's "away")
+    jobs: int = 0             # job_start events today - jobs.py's own daily budget
 
 
 class State:
@@ -53,6 +58,10 @@ class State:
         self._lock = threading.Lock()  # check_same_thread=False removes the guard, not the race
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.executescript(SCHEMA)
+        # CREATE TABLE IF NOT EXISTS leaves an older table alone: a column added after a partition
+        # shipped (partition 4: approvals.job) is added here, so an existing home keeps starting.
+        if "job" not in {r[1] for r in self.db.execute("PRAGMA table_info(approvals)")}:
+            self.db.execute("ALTER TABLE approvals ADD COLUMN job TEXT")
         self.db.execute("INSERT OR IGNORE INTO meta (key, value) VALUES ('cursor', '0')")
         self.db.commit()
 
@@ -88,7 +97,7 @@ class State:
             )
         # only what was said is remembered: a user event needs origin "user" (not a
         # signal envelope), an assistant event needs final=true (not tool chatter mid-turn)
-        if event["type"] == "user" and event.get("origin") == "user":
+        if event["type"] == "user" and event.get("origin") == "user" and not event.get("job"):  # a job steer is not chat
             self._insert_message(seq, session, "user", event.get("text", ""), event["ts"])
         if event["type"] == "assistant" and event.get("final"):
             self._insert_message(seq, session, "assistant", event.get("text", ""), event["ts"])
@@ -97,13 +106,17 @@ class State:
                 self.db.execute("UPDATE sessions SET turns = turns + 1 WHERE id = ?", (session,))
         if event["type"] == "approval_pending":
             self.db.execute(
-                "INSERT OR IGNORE INTO approvals (id, call_id, session, turn, tool, args_json, messages_json, ts, decision) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)",
+                "INSERT OR IGNORE INTO approvals (id, call_id, session, turn, tool, args_json, messages_json, ts, decision, job) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)",
                 (event["id"], event["call_id"], session, event.get("turn", ""), event["tool"],
-                 json.dumps(event["args"]), json.dumps(event["messages"]), event["ts"]),
+                 json.dumps(event["args"]), json.dumps(event["messages"]), event["ts"], event.get("job")),
             )
+            if event.get("job"):  # `pathfinder jobs` shows a paused job as gated, not running
+                self.db.execute("UPDATE jobs SET state = 'gated' WHERE id = ?", (event["job"],))
         if event["type"] == "approval":
             self.db.execute("UPDATE approvals SET decision = ? WHERE id = ?", (event["decision"], event["id"]))
+            self.db.execute("UPDATE jobs SET state = 'running' WHERE state = 'gated' AND id = "
+                            "(SELECT job FROM approvals WHERE id = ?)", (event["id"],))
         if event["type"] == "signal":
             self.db.execute("INSERT OR IGNORE INTO signals (key, ts, sense, kind) VALUES (?, ?, ?, ?)",
                             (event["key"], event["ts"], event["sense"], event["kind"]))
@@ -129,6 +142,23 @@ class State:
                 (session, event["ts"], event["idle_s"]))
         if event["type"] == "turn_start" and event.get("origin") == "signal":
             self.db.execute("INSERT INTO signal_turns (ts) VALUES (?)", (event["ts"],))
+        if event["type"] == "job_start":
+            self.db.execute(
+                "INSERT OR IGNORE INTO jobs (id, session, goal, started_ts, state) VALUES (?, ?, ?, ?, 'running')",
+                (event["id"], session, event["goal"], event["ts"]))
+        if event["type"] == "job_done":
+            usage = event.get("usage")
+            self.db.execute(
+                "UPDATE jobs SET ended_ts = ?, state = 'done', summary = ?, steps = ?, usage_json = ? WHERE id = ?",
+                (event["ts"], event.get("summary", ""), event.get("steps"),
+                 json.dumps(usage) if usage is not None else None, event["id"]))
+        if event["type"] == "job_failed":
+            # "stopped" is the one reason the user themselves caused (interrupt) - the CLI shows
+            # it as its own state rather than lumping a cancel in with a model/internal failure.
+            state_val = "cancelled" if event.get("reason") == "stopped" else "failed"
+            self.db.execute(
+                "UPDATE jobs SET ended_ts = ?, state = ?, reason = ? WHERE id = ?",
+                (event["ts"], state_val, event.get("reason", ""), event["id"]))
         if session:
             self.db.execute("UPDATE sessions SET last_ts = ? WHERE id = ?", (event["ts"], session))
         self.db.execute("UPDATE meta SET value = ? WHERE key = 'cursor'", (str(seq),))
@@ -169,21 +199,21 @@ class State:
     def pending(self) -> list:
         """Approvals with no decision yet, oldest first - what survives a restart."""
         rows = self.db.execute(
-            "SELECT id, session, turn, tool, args_json, ts FROM approvals WHERE decision IS NULL ORDER BY ts"
+            "SELECT id, session, turn, tool, args_json, ts, job FROM approvals WHERE decision IS NULL ORDER BY ts"
         ).fetchall()
-        return [{"id": r[0], "session": r[1], "turn": r[2], "tool": r[3], "args": json.loads(r[4]), "ts": r[5]}
-                for r in rows]
+        return [{"id": r[0], "session": r[1], "turn": r[2], "tool": r[3], "args": json.loads(r[4]), "ts": r[5],
+                "job": r[6]} for r in rows]
 
     def approval(self, id: str):
         row = self.db.execute(
-            "SELECT id, session, turn, tool, args_json, messages_json, ts, decision, call_id FROM approvals WHERE id = ?",
+            "SELECT id, session, turn, tool, args_json, messages_json, ts, decision, call_id, job FROM approvals WHERE id = ?",
             (id,),
         ).fetchone()
         if row is None:
             return None
         return {"id": row[0], "session": row[1], "turn": row[2], "tool": row[3],
                 "args": json.loads(row[4]), "messages": json.loads(row[5]), "ts": row[6], "decision": row[7],
-                "call_id": row[8]}
+                "call_id": row[8], "job": row[9]}
 
     def latest_session(self, max_age_s: float, now=None):
         now = time.time() if now is None else now
@@ -228,12 +258,13 @@ class State:
         # before its own decision is, so "including this one" falls out for free.
         recent_counts = dict(self.db.execute(
             "SELECT kind, COUNT(*) FROM signals WHERE ts >= ? GROUP BY kind", (now - 600,)).fetchall())
+        jobs_today = self.db.execute("SELECT COUNT(*) FROM jobs WHERE started_ts >= ?", (start,)).fetchone()[0]
         away = True
         if session is not None and idle_threshold_s is not None:
             row = self.presence(session)
             fresh = row is not None and now - row["ts"] < 60
             away = not fresh or row["idle_s"] >= idle_threshold_s
-        return Today(spoken, judgments, last_signal_ts, burst, recent_counts, away)
+        return Today(spoken, judgments, last_signal_ts, burst, recent_counts, away, jobs_today)
 
     def undelivered(self) -> list:
         """Notices from a `decision speak` never confirmed by a `delivery` - what a daemon
@@ -245,3 +276,26 @@ class State:
         ).fetchall()
         return [{"id": r[0], "session": r[1], "text": r[2], "why": r[3],
                 "signal_keys": json.loads(r[4]) if r[4] else []} for r in rows]
+
+    def _job_row(self, r):
+        return {"id": r[0], "session": r[1], "goal": r[2], "started_ts": r[3], "ended_ts": r[4],
+                "state": r[5], "summary": r[6], "reason": r[7], "steps": r[8],
+                "usage": json.loads(r[9]) if r[9] else None}
+
+    _JOB_COLUMNS = "id, session, goal, started_ts, ended_ts, state, summary, reason, steps, usage_json"
+
+    def jobs(self) -> list:
+        """Every job, newest first - `pathfinder jobs`."""
+        rows = self.db.execute(f"SELECT {self._JOB_COLUMNS} FROM jobs ORDER BY started_ts DESC").fetchall()
+        return [self._job_row(r) for r in rows]
+
+    def job(self, id: str):
+        row = self.db.execute(f"SELECT {self._JOB_COLUMNS} FROM jobs WHERE id = ?", (id,)).fetchone()
+        return None if row is None else self._job_row(row)
+
+    def running_jobs(self) -> list:
+        """Jobs with no end event - what a fresh `Manager` sweeps at daemon start. A job paused
+        at a gate is 'gated'; the sweep tells the two apart by its pending approval row."""
+        rows = self.db.execute(
+            f"SELECT {self._JOB_COLUMNS} FROM jobs WHERE state IN ('running', 'gated') ORDER BY started_ts").fetchall()
+        return [self._job_row(r) for r in rows]

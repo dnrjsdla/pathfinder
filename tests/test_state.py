@@ -101,6 +101,23 @@ class StateTest(unittest.TestCase):
         self.assertEqual(len(self.state.history("s1")), 1)
         other.close()
 
+    def test_old_approvals_table_gains_job_column(self):
+        """Review blocker: a home from before partition 4 has `approvals` without `job`;
+        CREATE TABLE IF NOT EXISTS leaves it that way, so the daemon must migrate or it dies
+        on its first `pending()`."""
+        self.state.close()
+        self.db_path.unlink()
+        import sqlite3
+        db = sqlite3.connect(self.db_path)
+        db.execute("CREATE TABLE approvals (id TEXT PRIMARY KEY, call_id TEXT, session TEXT, turn TEXT, "
+                   "tool TEXT, args_json TEXT, messages_json TEXT, ts REAL, decision TEXT)")
+        db.execute("INSERT INTO approvals VALUES ('a1', 'c1', 's1', 't1', 'write_file', '{}', '[]', 1.0, NULL)")
+        db.commit()
+        db.close()
+        self.state = State(self.db_path)
+        self.assertEqual([p["id"] for p in self.state.pending()], ["a1"])
+        self.assertIsNone(self.state.pending()[0]["job"])
+
 
 if __name__ == "__main__":
     unittest.main()

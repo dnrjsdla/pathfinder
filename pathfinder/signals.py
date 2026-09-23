@@ -47,8 +47,12 @@ class Signal:
 
 
 def render_block(signal: Signal) -> str:
+    # One line per field: a summary carrying newlines (a job's result, model-written from what it
+    # read) could otherwise forge a whole extra block with its own `trust:` line. Single-line
+    # summaries stay byte-identical to the m3-measured shape.
+    summary = signal.summary.replace("\n", "\\n")
     return (f"kind: {signal.kind}\ntrust: {signal.trust}\nkey: {signal.key}\n"
-            f"summary: {signal.summary}\nfields: {json.dumps(signal.fields, ensure_ascii=False)}")
+            f"summary: {summary}\nfields: {json.dumps(signal.fields, ensure_ascii=False)}")
 
 
 def render_envelope(signals: list) -> str:

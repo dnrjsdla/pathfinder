@@ -14,36 +14,28 @@ import time
 import uuid
 from pathlib import Path
 
-from . import clock, config, loop, rules as rules_mod, signals, tools
+from . import clock, config, jobs, loop, rules as rules_mod, signals, tools
 from .broker import Broker, Gate
 from .deliver import Notice, Outbox
 from .ledger import Ledger
-from .llm import LLMError, openai_compat, resolve
+from .llm import LLMError, resolve
+from .llm import slot as slot_mod
 from .loop import TurnControl
 from .state import State
 
 SOCKET = "pathfinder.sock"
 PROMPT = Path(__file__).parent / "prompts" / "system.txt"
 LINE_LIMIT = 1 << 20  # one NDJSON line; asyncio's 64 KiB default is too small for a pasted file
-LEDGER_CLIP = 2000  # a tool result recorded in the ledger is clipped shorter than the 8000-char read clip
 SIGNAL_TURN_BUDGET = 4  # D20: a signal turn is a few tool calls plus a sentence, not a conversation
 PUSH_FIELDS_LIMIT = 4096  # a pushed signal's `fields` text goes verbatim into the envelope
 
 
-def default_step_factory(cfg, control):
-    """Resolved per turn, so an unset or changed model surfaces as that turn's error
-    instead of a daemon that refuses to start. `control` reaches the HTTP stream itself
-    (its `is_set()` covers both interrupt and a mid-stream steer cut)."""
+def default_step_factory(cfg, control, tools_for_origin):
+    """Resolved per turn, so an unset model surfaces as that turn's error. `tools_for_origin`
+    is what the model is shown - D25 priority "user" (jobs.default_job_step_factory: "job")."""
     endpoint = resolve(cfg, cfg["model"])
-    schemas = [spec.schema() for spec in tools.TOOLS.values()]  # the model must see its hands
-    return lambda messages: openai_compat.stream(endpoint, messages, tools=schemas, cancel=control)
-
-
-def _clip_for_ledger(result, limit=LEDGER_CLIP):
-    if isinstance(result, str):
-        return result if len(result) <= limit else result[:limit] + "...(truncated)"
-    text = json.dumps(result, ensure_ascii=False)
-    return result if len(text) <= limit else text[:limit] + "...(truncated)"
+    schemas = [spec.schema() for spec in tools_for_origin.values()]
+    return slot_mod.stream_step(endpoint, schemas, control, "user")
 
 
 class _Lane:
@@ -88,12 +80,13 @@ class Session:
 
 
 class Daemon:
-    def __init__(self, home, step_factory=None):
+    def __init__(self, home, step_factory=None, job_step_factory=None):
         self.home = Path(home)
         self.ledger = Ledger(self.home)
         self.state = State(self.home / "state.db")
         self.state.catch_up(self.ledger)  # a deleted or stale DB heals itself here
         self.step_factory = step_factory or default_step_factory
+        self.job_step_factory = job_step_factory or jobs.default_job_step_factory
         # Byte-stable across every turn, user and signal alike (cache): the Signal-turns clause
         # is part of the resident prompt itself, never appended per-turn. Only the local-time
         # line (added separately in turn()/_signal_model_turn) changes turn to turn.
@@ -109,6 +102,8 @@ class Daemon:
         self.outbox.rebuild()
         self.sense_loop = signals.SenseLoop(list(self.senses.values()), push=self.push_signal,
                                             on_error=self._sense_error)
+        self.jobs_mgr = jobs.Manager(self.home, self._job_record, self.push_signal, self.job_step_factory, self.rules)
+        jobs.bind(self.jobs_mgr)
 
     # -- recording: ledger first, then the same event into the state. Loop thread only:
     #    the SQLite connection belongs to it, and turns run in worker threads.
@@ -117,8 +112,34 @@ class Daemon:
         self.state.apply(event)
         return event
 
+    def _job_record(self, type, **fields):
+        """`jobs.Manager`'s door: `record`, plus the `job.start`/`job.gate`/`job.end` lines its
+        session is owed (live: a job's gate was silent - only `approvals` knew)."""
+        event = self.record(type, **fields)
+        if type == "job_start":
+            line = {"type": "job.start", "id": fields["id"], "goal": fields["goal"]}
+        elif type == "approval_pending":
+            line = {"type": "job.gate", "id": fields["job"], "approval": fields["id"], "tool": fields["tool"], "args": fields["args"]}
+        elif type in ("job_done", "job_failed"):  # the row exists: job_start came through this door
+            line = {"type": "job.end", "id": fields["id"], "state": self.state.job(fields["id"])["state"]}
+        else:
+            return event  # a job's tool_call/tool_result/steer: ledger only
+        self._send_to_session(fields.get("session"), line)
+        return event
+
     # -- socket ------------------------------------------------------------------------
     async def start(self):
+        # From here, jobs.Manager marshals record()/push() onto this loop thread - state.apply
+        # and a socket write are this thread's alone, and a job calls from a worker thread.
+        aio = asyncio.get_running_loop()
+
+        def dispatch(fn):
+            try:
+                aio.call_soon_threadsafe(fn)
+            except RuntimeError:
+                pass  # loop already closed: a job's late call has nothing left to report to
+        self.jobs_mgr.dispatch = dispatch
+        self.jobs_mgr.sweep()  # a job the last daemon died under is closed and announced here
         path = self.home / SOCKET
         if path.exists():
             if _answers(path):
@@ -140,6 +161,7 @@ class Daemon:
             await self.server.serve_forever()
 
     async def close(self):
+        self.jobs_mgr.dispatch = lambda fn: None  # drop a job's late calls, not race a closing state
         await self.sense_loop.stop()
         for s in self.sessions.values():
             if s.worker:
@@ -150,6 +172,7 @@ class Daemon:
             self.server.close()
             await self.server.wait_closed()
         (self.home / SOCKET).unlink(missing_ok=True)
+        self.jobs_mgr.close()
         self.state.close()
 
     def _sense_error(self, name, exc):
@@ -216,6 +239,13 @@ class Daemon:
                     if row is None or row["decision"] is not None:
                         _write(writer, {"type": "error", "message": f"no pending approval: {approval_id}"})
                         continue
+                    decision = "approved" if kind == "approve" else "denied"
+                    if row.get("job"):  # a job's own thread (D24), not a session turn
+                        self.record("approval", session=row["session"], turn=row["turn"], origin="user",
+                                    id=approval_id, decision=decision)
+                        self.jobs_mgr.resume(approval_id, decision)
+                        _write(writer, {"type": "turn.end", "turn": "", "kind": "resumed"})
+                        continue
                     target = self._session(row["session"])
                     if session is not target:
                         if session:
@@ -223,8 +253,20 @@ class Daemon:
                         target.conns.add(writer)
                         session = target
                     self.record("approval", session=row["session"], turn=row["turn"], origin="user",
-                                id=approval_id, decision="approved" if kind == "approve" else "denied")
+                                id=approval_id, decision=decision)
                     session.queue.put_nowait(("resume", approval_id))
+                elif kind == "job.stop":
+                    id = msg.get("id")
+                    if not isinstance(id, str) or not id:
+                        _write(writer, {"type": "error", "message": "job.stop needs an \"id\""})
+                        continue
+                    self.jobs_mgr.stop(id)
+                elif kind == "job.steer":
+                    id, text = msg.get("id"), msg.get("text")
+                    if not isinstance(id, str) or not id or not isinstance(text, str) or not text.strip():
+                        _write(writer, {"type": "error", "message": "job.steer needs an \"id\" and non-empty \"text\""})
+                        continue
+                    self.jobs_mgr.steer(id, text)
                 elif kind == "signal":
                     sense_name, fields = msg.get("sense"), msg.get("fields")
                     sense = self.senses.get(sense_name)
@@ -367,10 +409,9 @@ class Daemon:
 
     # -- signals (D20) -------------------------------------------------------------------
     def push_signal(self, signal) -> None:
-        """The push door, for a hook client's `signal` message and a poll sense's SenseLoop
-        alike. Every occurrence is recorded, even a duplicate - `state.seen` is checked
-        against what was on disk *before* this call, so the first occurrence of a key always
-        goes through and only a later repeat of the same key within 24 h is silenced."""
+        """The push door: a hook client's `signal`, a poll sense's SenseLoop, and `jobs.Manager`
+        (direct, never the socket) all land here. `state.seen` is checked against disk *before*
+        this call, so only a repeat of the same key within 24 h is silenced."""
         now = time.time()
         dup = signals.seen_recently(self.state, signal.key, now)
         self.record("signal", origin="signal", trust=signal.trust, sense=signal.sense,
@@ -461,8 +502,9 @@ class Daemon:
             def emit(kind, payload):
                 aio.call_soon_threadsafe(out_q.put_nowait, (kind, payload))
 
-            broker = Broker(tools.TOOLS, "signal", cfg["grants"], control=control, emit=emit)
-            step = self.step_factory(cfg, control)
+            signal_tools = tools.for_origin("signal")
+            broker = Broker(signal_tools, "signal", cfg["grants"], control=control, emit=emit)
+            step = self.step_factory(cfg, control, signal_tools)
 
             def work():
                 try:
@@ -478,10 +520,10 @@ class Daemon:
                     if kind is None:
                         break
                     if kind == "tool_call":
-                        recorded = {**payload, "args": _clip_for_ledger(payload["args"])}
+                        recorded = {**payload, "args": tools.clip_for_ledger(payload["args"])}
                         self.record("tool_call", session=s.id, turn=turn, origin="signal", **recorded)
                     elif kind == "tool_result":
-                        recorded = {**payload, "result": _clip_for_ledger(payload["result"])}
+                        recorded = {**payload, "result": tools.clip_for_ledger(payload["result"])}
                         self.record("tool_result", session=s.id, turn=turn, origin="signal", **recorded)
                 out = await running
                 answer = out.text
@@ -514,6 +556,7 @@ class Daemon:
     async def _run_turn(self, s, turn, messages, *, resume, approved=None, denied=frozenset()):
         self.send(s, {"type": "turn.start", "turn": turn})
         control = TurnControl()
+        control.session = s.id  # the one way start_job's handler learns which session to report to
         s.control, s.turn = control, turn
 
         aio = asyncio.get_running_loop()
@@ -523,7 +566,8 @@ class Daemon:
             aio.call_soon_threadsafe(out_q.put_nowait, (kind, payload))
 
         cfg = config.load(self.home)
-        broker = Broker(tools.TOOLS, "user", cfg["grants"], control=control, emit=emit,
+        user_tools = tools.for_origin("user")
+        broker = Broker(user_tools, "user", cfg["grants"], control=control, emit=emit,
                         approved=approved, denied=denied)
 
         def work(step, budget):
@@ -535,7 +579,7 @@ class Daemon:
 
         try:
             running = asyncio.create_task(
-                asyncio.to_thread(work, self.step_factory(cfg, control), cfg["max_steps"]))
+                asyncio.to_thread(work, self.step_factory(cfg, control, user_tools), cfg["max_steps"]))
             while True:
                 kind, payload = await out_q.get()
                 if kind is None:
@@ -543,10 +587,10 @@ class Daemon:
                 if kind == "delta":
                     self.send(s, {"type": "delta", "text": payload})
                 elif kind == "tool_call":
-                    recorded = {**payload, "args": _clip_for_ledger(payload["args"])}
+                    recorded = {**payload, "args": tools.clip_for_ledger(payload["args"])}
                     self.record("tool_call", session=s.id, turn=turn, origin="user", **recorded)
                 elif kind == "tool_result":
-                    recorded = {**payload, "result": _clip_for_ledger(payload["result"])}
+                    recorded = {**payload, "result": tools.clip_for_ledger(payload["result"])}
                     self.record("tool_result", session=s.id, turn=turn, origin="user", **recorded)
                     self.send(s, {"type": "tool", "name": payload["name"], "ok": payload["ok"]})
             out = await running

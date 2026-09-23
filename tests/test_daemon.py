@@ -24,7 +24,7 @@ from pathfinder.tools import ToolSpec
 
 
 def fake_model(reply="Hello there."):
-    def factory(cfg, cancel=None):
+    def factory(cfg, cancel=None, tools=None):
         factory.cancels.append(cancel)
         def step(messages):
             step.seen.append([dict(m) for m in messages])
@@ -38,7 +38,7 @@ def fake_model(reply="Hello there."):
     return factory
 
 
-def blocked_model(cfg, cancel=None):
+def blocked_model(cfg, cancel=None, tools=None):
     def step(messages):
         raise LLMError(402, "this model is not included in your free usage")
         yield  # pragma: no cover - makes this a generator like the real adapter
@@ -81,9 +81,9 @@ class DaemonHarness(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def run_with(self, factory, scenario):
+    def run_with(self, factory, scenario, job_factory=None):
         async def main():
-            daemon = Daemon(self.home, step_factory=factory)
+            daemon = Daemon(self.home, step_factory=factory, job_step_factory=job_factory)
             await daemon.start()
             try:
                 return await scenario(daemon)
@@ -181,7 +181,7 @@ class DaemonTest(DaemonHarness):
         self.assertIsInstance(factory.cancels[-1], TurnControl)
 
     def test_exhausted_turn_still_records_what_was_said(self):
-        def talkative(cfg, cancel=None):
+        def talkative(cfg, cancel=None, tools=None):
             def step(messages):
                 yield ("text", "working ")
                 yield ("tool_calls", [{"id": "c1", "name": "anything", "arguments": {}}])
@@ -270,13 +270,13 @@ class DaemonTest(DaemonHarness):
     def test_daemon_gate_survives_restart(self):
         note_path = str(self.home / "note.txt")
 
-        def gate_model(cfg, control=None):
+        def gate_model(cfg, control=None, tools=None):
             def step(messages):
                 yield ("tool_calls", [{"id": "c1", "name": "write_file",
                                         "arguments": {"path": note_path, "content": "hi"}}])
             return step
 
-        def answer_model(cfg, control=None):
+        def answer_model(cfg, control=None, tools=None):
             def step(messages):
                 yield ("text", "done")
             return step
@@ -320,13 +320,13 @@ class DaemonTest(DaemonHarness):
     def test_daemon_deny_resumes_with_denial(self):
         note_path = str(self.home / "note-denied.txt")
 
-        def gate_model(cfg, control=None):
+        def gate_model(cfg, control=None, tools=None):
             def step(messages):
                 yield ("tool_calls", [{"id": "c1", "name": "write_file",
                                         "arguments": {"path": note_path, "content": "hi"}}])
             return step
 
-        def ack_model(cfg, control=None):
+        def ack_model(cfg, control=None, tools=None):
             def step(messages):
                 yield ("text", "ok, not writing it")
             return step
@@ -369,7 +369,7 @@ class DaemonTest(DaemonHarness):
 
         seen_messages = []
 
-        def factory(cfg, control=None):
+        def factory(cfg, control=None, tools=None):
             calls = {"n": 0}
 
             def step(messages):
@@ -425,7 +425,7 @@ class DaemonTest(DaemonHarness):
             name="blocking_tool", description="", params={}, required=[], handler=blocking_handler)
         self.addCleanup(tools_mod.TOOLS.pop, "blocking_tool", None)
 
-        def factory(cfg, control=None):
+        def factory(cfg, control=None, tools=None):
             def step(messages):
                 if control is not None and control.interrupt.is_set():
                     yield ("cancelled", None)
@@ -463,7 +463,7 @@ class DaemonTest(DaemonHarness):
     def test_reindex_restores_pending_approval(self):
         note_path = str(self.home / "note-reindex.txt")
 
-        def gate_model(cfg, control=None):
+        def gate_model(cfg, control=None, tools=None):
             def step(messages):
                 yield ("tool_calls", [{"id": "c1", "name": "write_file",
                                         "arguments": {"path": note_path, "content": "hi"}}])
@@ -495,7 +495,7 @@ class ReviewRegressionsTest(DaemonHarness):
     def test_two_gates_with_the_same_call_id_are_both_resolvable(self):
         paths = [str(self.home / "a.txt"), str(self.home / "b.txt")]
 
-        def gate_model(cfg, control=None):
+        def gate_model(cfg, control=None, tools=None):
             def step(messages):
                 if any(m.get("role") == "tool" for m in messages):
                     yield ("text", "done")
@@ -531,7 +531,7 @@ class ReviewRegressionsTest(DaemonHarness):
         self.assertEqual(sum(1 for e in self.events() if e["type"] == "tool_call"), 2)  # one write per approval
 
     def test_steer_after_the_last_chunk_gets_its_own_turn(self):
-        def late_steer_model(cfg, control=None):
+        def late_steer_model(cfg, control=None, tools=None):
             def step(messages):
                 late_steer_model.calls += 1
                 late_steer_model.last = messages[-1]
@@ -574,9 +574,32 @@ class RealStepFactoryTest(unittest.TestCase):
         self.addCleanup(setattr, openai_compat, "stream", original)
         cfg = {"model": "p:m", "providers": {"p": {"base_url": "http://x", "api_key_env": ""}}}
         control = TurnControl()
-        list(daemon.default_step_factory(cfg, control)([]))
-        self.assertEqual({t["function"]["name"] for t in seen["tools"]}, set(tools_mod.TOOLS))
+        user_tools = tools_mod.for_origin("user")
+        list(daemon.default_step_factory(cfg, control, user_tools)([]))
+        self.assertEqual({t["function"]["name"] for t in seen["tools"]}, set(user_tools))
         self.assertIs(seen["cancel"], control)
+
+    def test_job_step_factory_uses_worker_model_and_job_tools(self):
+        """The job step resolves `worker_model` over `model`, and shows the model only the
+        job registry (no `start_job` - a worker cannot make a worker)."""
+        from pathfinder import jobs
+        from pathfinder.llm import openai_compat
+        seen = {}
+
+        def fake_stream(endpoint, messages, tools=None, cancel=None, timeout=120):
+            seen["model"], seen["tools"] = endpoint.model, tools
+            return iter([("text", "ok")])
+
+        original = openai_compat.stream
+        openai_compat.stream = fake_stream
+        self.addCleanup(setattr, openai_compat, "stream", original)
+        cfg = {"model": "p:big", "worker_model": "p:small",
+              "providers": {"p": {"base_url": "http://x", "api_key_env": ""}}}
+        job_tools = tools_mod.for_origin("job")
+        list(jobs.default_job_step_factory(cfg, None, job_tools)([]))
+        self.assertEqual(seen["model"], "small")
+        self.assertEqual({t["function"]["name"] for t in seen["tools"]}, set(job_tools))
+        self.assertNotIn("start_job", {t["function"]["name"] for t in seen["tools"]})
 
 
 def _never_quiet(daemon):
@@ -619,7 +642,7 @@ class SignalTurnTest(DaemonHarness):
         state.history, but the delivered text does."""
         note_path = str(self.home / "signal-note.txt")
 
-        def gate_model(cfg, control=None):
+        def gate_model(cfg, control=None, tools=None):
             def step(messages):
                 yield ("tool_calls", [{"id": "c1", "name": "write_file",
                                         "arguments": {"path": note_path, "content": "y"}}])
@@ -677,7 +700,7 @@ class DeliverTest(DaemonHarness):
             name="slow_tool", description="", params={}, required=[], handler=slow_handler)
         self.addCleanup(tools_mod.TOOLS.pop, "slow_tool", None)
 
-        def factory(cfg, control=None):
+        def factory(cfg, control=None, tools=None):
             calls = {"n": 0}
 
             def step(messages):
@@ -1024,6 +1047,19 @@ class PushDoorValidationTest(DaemonHarness):
         self.assertEqual(reply["type"], "error")
         self.assertEqual([e for e in self.events() if e["type"] == "signal"], [])
 
+    def test_socket_refuses_signal_jobs(self):
+        """Not a push sense: `jobs.Manager` pushes `job_done`/`job_failed` directly, so a
+        `signal jobs ...` line from outside is refused like any unknown or non-push sense."""
+        async def scenario(daemon):
+            c = await Client.open(self.home)
+            c.send({"type": "signal", "sense": "jobs", "fields": {"goal": "x", "summary": "y"}})
+            reply = await c.recv()
+            c.close()
+            return reply
+
+        reply = self.run_with(fake_model(), scenario)
+        self.assertEqual(reply["type"], "error")
+
 
 class ProtocolValidationTest(DaemonHarness):
     def test_presence_rejects_out_of_range_idle_s(self):
@@ -1061,7 +1097,7 @@ class SignalTurnControlTest(DaemonHarness):
         mid-turn."""
         proceed = threading.Event()
 
-        def slow_model(cfg, control=None):
+        def slow_model(cfg, control=None, tools=None):
             def step(messages):
                 proceed.wait(2)
                 yield ("text", "ok")
@@ -1087,6 +1123,76 @@ class SignalTurnControlTest(DaemonHarness):
 
         is_running = self.run_with(slow_model, scenario)
         self.assertTrue(is_running)
+
+
+class JobDaemonIntegrationTest(DaemonHarness):
+    def test_daemon_answers_while_job_runs(self):
+        """A job's own step sleeps (holding the job's own thread, not the lane): a `say` on the
+        session still gets its answer while the job is still running (D25's slot is about
+        request ordering, not about blocking the daemon's own async lane)."""
+        proceed = threading.Event()
+
+        def slow_job_factory(cfg, control, tools):
+            def step(messages):
+                proceed.wait(2)
+                yield ("text", "job done")
+            return step
+
+        def user_factory(cfg, control=None, tools=None):
+            calls = {"n": 0}
+
+            def step(messages):
+                n = calls["n"]
+                calls["n"] += 1
+                if n == 0:
+                    yield ("tool_calls", [{"id": "c1", "name": "start_job", "arguments": {"goal": "research"}}])
+                else:
+                    yield ("text", "hi back")
+            return step
+
+        async def scenario(daemon):
+            c = await Client.open(self.home)
+            c.send({"type": "say", "text": "start a job"})
+            first = await c.until("turn.end")
+            for _ in range(200):
+                if daemon.jobs_mgr.jobs:
+                    break
+                await asyncio.sleep(0.01)
+            c.send({"type": "say", "text": "hi"})
+            second = await c.until("turn.end")  # this must not wait on the job's own sleep
+            proceed.set()
+            job = next(iter(daemon.jobs_mgr.jobs.values()))
+            for _ in range(200):  # let the job finish before close() tears down the state under it
+                if job.state != "running":
+                    break
+                await asyncio.sleep(0.01)
+            c.close()
+            return first, second
+
+        first, second = self.run_with(user_factory, scenario, job_factory=slow_job_factory)
+        self.assertEqual(first[-1]["kind"], "answer")
+        self.assertEqual(second[-1]["kind"], "answer")
+
+
+class JobSignalTest(DaemonHarness):
+    def test_job_done_speaks_without_budget(self):
+        """job_done's trust is "user" (D8 sec 8): the outcome of what the user started spends
+        no budget and honours no quiet hours, exactly like the user's own schedule_due."""
+        async def scenario(daemon):
+            daemon.rules = dataclasses.replace(daemon.rules, quiet_hours="0-24", daily_budget=0)
+            daemon.push_signal(Signal(sense="jobs", kind="job_done", key="job-budget-test",
+                                      summary="Job done: research\nfound it",
+                                      fields={"goal": "research", "exhausted": False},
+                                      trust="user"))
+            for _ in range(200):
+                if any(e["type"] == "decision" for e in Ledger(self.home).read()):
+                    break
+                await asyncio.sleep(0.01)
+            return list(Ledger(self.home).read())
+
+        events = self.run_with(fake_model("ok"), scenario)
+        decisions = [e for e in events if e["type"] == "decision"]
+        self.assertTrue(any(d["action"] == "speak" for d in decisions))
 
 
 if __name__ == "__main__":

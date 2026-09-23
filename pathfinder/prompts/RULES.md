@@ -5,6 +5,8 @@ min_interval_s: 30
 burst_limit: 5
 judgment_cap: 20
 idle_threshold_s: 20
+jobs_per_day: 10
+job_steps: 20
 ---
 
 # RULES
@@ -101,3 +103,15 @@ one" - the third failure in ten minutes is itself the one that matches `count_ov
 | --- | --- | --- | --- |
 | `away` | `-` | `speak` | worth a word only if the user isn't already watching PATHFINDER |
 | `always` | `-` | `silence` | |
+
+## job_done
+
+| condition | value | action | note |
+| --- | --- | --- | --- |
+| `always` | `-` | `speak` | the outcome of a job the user started - always say it |
+
+## job_failed
+
+| condition | value | action | note |
+| --- | --- | --- | --- |
+| `always` | `-` | `speak` | the outcome of a job the user started - always say it |

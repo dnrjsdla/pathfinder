@@ -433,3 +433,119 @@ each) started 0.5 s apart on `gpt-oss:120b-cloud`. Trace in `docs/measurements/m
   was requested a moment before the user's turn goes first. The slot makes the user go first and
   keeps a job from requesting while a user is waiting. A job may hold the slot for a whole step;
   no retry-on-429 path is needed. Cost: about 5k tokens.
+
+## 2026-09-23 — Partition 4: jobs
+
+"It runs" was checked against the live default model through the socket in a fresh temp home:
+"start a background job for this" made the model call `start_job` and the answer "started job
+<id>" streamed at once; a second `say` while the job ran was answered in 0.7 s while the job's
+`tool_call` events kept landing (two flows interleaved); the job's `run_command` gated,
+`pathfinder approvals` showed the row with `job: <id>`, `approve` resumed **the job** (run_command,
+then three `read_file`s) and `job_done` spoke with the summary (the trip total, correct); `job stop`
+on a job running `sleep 120` killed both the shell and its child within 1.5 s and the job ended
+`cancelled`; the daemon SIGKILLed with a job at its gate came back with the job reconstructed as
+`gated` and `approve` still resumed it; SIGKILLed with the shell running, the restart closed it as
+`job_failed {reason: daemon restarted}` and the notice went out as a banner (no client attached
+yet); `job steer "write the summary in Korean"` while the job waited at its gate shaped the final
+summary. Core 3,901 lines against 5,500; `jobs.py` 265/350, `senses/jobs.py` 13/150, `llm/slot.py`
+49. **`daemon.py` is 642 against its 600 allocation** (the protocol lines, the job hooks and the
+loop-thread dispatch wrapper), inside the 1.3x line of 780; reported here as §6 requires. 195
+offline tests.
+
+### m7 — does an evaluator pass earn its cost? (`bench/m7_evaluator.py`, 10 goals x 2 conditions, graded blind)
+
+Ten research-shaped goals over a mock world of eight canned pages (read-only tools, nothing
+gates), each run twice through the real `loop.run` + `Broker` with the worker prompt: **A** a
+plain run, **B** the run plus one evaluator request (`{"adequate", "missing"}`, closed JSON, no
+tools; when not adequate, one more round with `missing` as the steer, never two). Twenty
+summaries saved blind (`docs/measurements/m7-gpt-oss-120b-cloud.json`); an opus subagent graded
+them 👍/👎 against the mock world's ground truth without seeing the condition; then `--score`.
+
+| condition | 👍 / 10 | tokens | seconds | evaluator asked for a 2nd round |
+|---|---|---|---|---|
+| A — no evaluator | **9** | 28,442 | 56.4 | - |
+| B — one evaluator pass | **8** | 33,015 | 65.5 | 2 / 10 |
+
+- **B − A = −1; D23 needs +3. The evaluator row stays out of `jobs.py` and the open path from
+  partition 2 is closed.** One evaluator pass cost 16% more tokens and bought nothing: the two
+  goals it sent back for a second round were g4 (both conditions failed - the goal named a
+  directory URL and the model gave up on "no such page" rather than trying the two pages under
+  it; the evaluator correctly named what was missing and the second round still did not recover)
+  and g7 (recovered, but A had already got g7 right in one pass). The one B-only miss (g1) was an
+  arithmetic slip in the annual-discount line, which an adequacy evaluator does not check.
+- A per-item cost on this world: 1.3k-5.9k tokens, 3-14 s - a job is about a tenth of m6's 29k
+  estimate when the goal is this small. Whole bench about 63k tokens including the smoke run and
+  one item re-run after an HTTP 500 from the server (excluded, then re-run so every goal has its
+  pair).
+- Owner's five-pair spot check (D23's reversal condition): **pending** - the pairs are g1, g3,
+  g5, g6, g8, condition hidden as X/Y; recorded below when answered.
+
+### What changed against the plan
+
+- **The slot is an ordering device, not error insurance** (m7a, above): the code is as
+  contracted, the reason is different, and there is no retry path.
+- **A job waiting at a gate survives a daemon crash as `gated`**, not as `job_failed`: the sweep
+  finds its messages on the pending approval row and `approve` resumes it after the restart. The
+  contract said "its messages are not kept"; keeping them cost nothing because the approval row
+  already held them.
+- **`job.gate` protocol line** (not in the contract): a job's gate was silent - only
+  `pathfinder approvals` knew. The job's session now gets `job.gate {id, approval, tool, args}`,
+  `listen` prints it with the approve/deny commands, and the jobs table shows `gated`.
+- **The `job_done` notice text carries the job's summary** (in `Signal.summary`, not `fields` -
+  the envelope would carry it twice). The contract said so; the first build put it in `fields`
+  only, so a blocked model would have left "Job done: <goal>" and nothing else.
+- **The restart sweep runs from `Daemon.start()`**, not `Manager.__init__`: a pushed signal opens
+  a session lane, which needs the running loop.
+- **`render_block` escapes newlines in `summary`** (`\n` literal): a job's summary is the first
+  deliberately multi-line summary, and a raw newline could forge a whole extra block with its own
+  `trust:` line. Single-line summaries are byte-identical to the m3-measured shape.
+- **A stale `RULES.md` takes the shipped section for a kind it does not mention** (no rewrite of
+  the user's file): a home from partition 3 has no `job_done`/`job_failed` section, and "no
+  section" means a model judgment - the opposite of the shipped `always → speak`.
+- **`approvals.job` is added by `ALTER TABLE` on an existing `state.db`**: the first column ever
+  added to a shipped table; `CREATE TABLE IF NOT EXISTS` would have left the old shape and the
+  daemon would not have started on the owner's home.
+- Not done here, on purpose: `pathfinder jobs` is a flat list (no filter, no detail view);
+  approving a job's gate from another session's connection gets only the `turn.end` line, not the
+  later `job.end`; a stopped job still speaks as `Job failed: ... — stopped` (the user did it, but
+  the confirmation is cheap and honest).
+
+### Defects found, by whom
+
+- **Lead, live (tests green, product wrong - three times again):** a job's gate reached nobody;
+  the `job_done` notice had no summary; the restart sweep's `job_failed` push died before the
+  loop existed and `except RuntimeError: pass` hid it (`coroutine 'Daemon.lane' was never
+  awaited` in the daemon log was the only trace).
+- **Reviewer (opus), two blockers reproduced:** an existing `state.db` has no `approvals.job`
+  column and the daemon died on its first `pending()`; `job stop` on a gated job did nothing,
+  and a later `approve` ran the write the user had stopped. Should-fix: a job's summary enters
+  the envelope as `trust: user` with raw newlines (forgery half fixed above; the trust half is the
+  owner's question, below); a stale RULES.md sent every job outcome to a paid judgment; a job
+  steer was projected into the session's chat history as a dangling user message; `resume` with
+  no job in memory swallowed the approval and left a `running` row that blocked every later
+  `start_job`. Nits taken: finished jobs drop their messages from memory; the `RuntimeError`
+  guard moved from `Manager` into the daemon's dispatch so a real error in the synchronous path
+  is not swallowed; the daemon test fixture matched the code.
+- **Verified sound by the reviewer, by running:** the slot cannot be held by a suspended
+  generator (a `break` on "cancelled" and an exception mid-stream both release it) and its
+  user-first handoff has no window; two `start_job` calls in one assistant message start one
+  job; every `record`/`push` path from `Manager` goes through the loop-thread dispatch;
+  `for_origin` keeps `start_job` out of the job's and the signal turn's schemas as sent to the
+  adapter; `reindex` restores `jobs` and `approvals.job` from the ledger.
+- **Process:** the implementer hit its 80-turn limit twice on the first build (about 920k
+  tokens, no report either time - the work was nearly complete, the report was not); from here an
+  implementer call is one to three files and their tests, with a turn budget in the brief.
+
+### Left open on purpose
+
+A daemon killed with SIGKILL leaves a job's shell child running (a session turn's child too - the
+process group dies only on `interrupt`). `job.messages` for a gated job stay in memory until it
+resumes or is stopped. The evaluator prompt and the mock world are the bench's constants; m7 was
+run once, on one model family.
+
+### The owner's part
+
+D23's five-pair spot check (sheet sent with the brief). And a decision the review surfaced: a
+job's summary is model-written from whatever it read, yet it enters the signal envelope as
+`trust: user` because that is the tier D8 §8 exempts from budget and quiet hours - `trust` is
+doing two jobs (exemption and authority) and partition 4 is the first place they must differ.

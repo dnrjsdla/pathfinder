@@ -1,6 +1,7 @@
 """pathfinder daemon | reindex | say TEXT | config set KEY VALUE |
 approvals | approve ID | deny ID | interrupt |
-listen | signal SENSE JSON | react up|down [ID] | rules"""
+listen | signal SENSE JSON | react up|down [ID] | rules |
+jobs | job stop ID | job steer ID TEXT"""
 from __future__ import annotations
 
 import asyncio
@@ -10,6 +11,7 @@ import sys
 from pathlib import Path
 
 from . import config
+from .clock import format_local
 from .daemon import SOCKET, Daemon, is_serving
 from .ledger import Ledger
 from .state import State
@@ -70,7 +72,8 @@ def approvals(home):
     state = State(home / "state.db")
     try:
         for row in state.pending():
-            print(f"{row['id']}  {row['tool']}  {json.dumps(row['args'], ensure_ascii=False)}")
+            job = f"  job: {row['job']}" if row.get("job") else ""
+            print(f"{row['id']}  {row['tool']}  {json.dumps(row['args'], ensure_ascii=False)}{job}")
     finally:
         state.close()
     return 0
@@ -112,6 +115,13 @@ def listen(home):
                     print(f"\n[signal] {msg['text']}  ({msg['why']})", flush=True)  # a pipe is block-buffered
                 elif msg["type"] == "turn.end":
                     print(flush=True)
+                elif msg["type"] == "job.start":
+                    print(f"\n[job] started {msg['id']}: {msg['goal']}", flush=True)
+                elif msg["type"] == "job.gate":
+                    print(f"\n[job] {msg['id']} waiting for approval on {msg['tool']} {json.dumps(msg['args'], ensure_ascii=False)} "
+                          f"(run `pathfinder approve {msg['approval']}` or `pathfinder deny {msg['approval']}`)", flush=True)
+                elif msg["type"] == "job.end":
+                    print(f"\n[job] {msg['id']} {msg['state']}", flush=True)
                 elif msg["type"] == "error":
                     print(f"\npathfinder: {msg['message']}", file=sys.stderr)
         except KeyboardInterrupt:
@@ -164,6 +174,36 @@ def rules_path(home):
     return 0
 
 
+def jobs_list(home):
+    """List every job, newest first - reads state.db directly, like `approvals`."""
+    state = State(home / "state.db")
+    try:
+        for row in state.jobs():
+            started = format_local(row["started_ts"])
+            print(f"{row['id']}  {row['state']}  {started}  {row['goal']}")
+    finally:
+        state.close()
+    return 0
+
+
+def job_stop(home, id):
+    sock = _connect(home)
+    if sock is None:
+        return 1
+    with sock:
+        sock.sendall((json.dumps({"type": "job.stop", "id": id}) + "\n").encode())
+    return 0
+
+
+def job_steer(home, id, text):
+    sock = _connect(home)
+    if sock is None:
+        return 1
+    with sock:
+        sock.sendall((json.dumps({"type": "job.steer", "id": id, "text": text}) + "\n").encode())
+    return 0
+
+
 def main(argv=None):
     args = sys.argv[1:] if argv is None else argv
     home = config.home()
@@ -200,6 +240,12 @@ def main(argv=None):
         return react(home, args[1], args[2] if len(args) == 3 else None)
     if args == ["rules"]:
         return rules_path(home)
+    if args == ["jobs"]:
+        return jobs_list(home)
+    if len(args) == 3 and args[0] == "job" and args[1] == "stop":
+        return job_stop(home, args[2])
+    if len(args) == 4 and args[0] == "job" and args[1] == "steer":
+        return job_steer(home, args[2], args[3])
     if len(args) == 4 and args[:2] == ["config", "set"]:
         try:
             value = json.loads(args[3])

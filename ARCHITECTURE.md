@@ -4,13 +4,14 @@
 `docs/decisions/DECISIONS.md`. What measurement changed: `HISTORY.md`. Every name here exists in
 the tree. Korean mirror: `ARCHITECTURE.ko.md` (updated in the same commit).
 
-Built so far: **partition 3 — the world speaks.** The assistant talks (1) and calls tools (2);
-now a schedule, a shell command, a calendar event or reminder, new mail, the working directory a
-client attaches with, and Claude Code's own hooks all become a `Signal`; cheap rules
-(`RULES.md`) decide speak/silence/defer/ask_model for free, `ask_model` gets one small fenced
-judgment call (D13), and only a `speak` opens a short model turn whose notice waits for the
-session to be free before it goes out. Jobs, the memory vault, rule proposals and the TUI are
-later partitions still.
+Built so far: **partition 4 — jobs.** The assistant talks (1), calls tools (2), and the world
+speaks to it (3); now `start_job` (origin `user` only) launches a worker that drives its own
+`loop.run` on a thread, off the session's own turn, against `prompts/job.txt` + the goal - reading
+freely, gating on every write/network call exactly like a session turn (D24), and ending in
+`job_done`/`job_failed`, pushed as a `Signal` the same rules and delivery path already carry. One
+slot (`llm/slot.py`) serializes every model request, the user first (D25): a job holds it for one
+step and yields between steps. The memory vault, rule proposals and the TUI are later partitions
+still.
 
 ## 0. One sentence
 
@@ -114,17 +115,23 @@ replays these tables too.
 ## 5. Tools, policy, sandbox, broker
 
 **`tools.py`** — `ToolSpec(name, description, params, required, handler, write, network,
-sandboxed, reversible, normalize)`; `schema()` is the OpenAI tool dict; `coerce(spec, args)` casts
-each declared argument to its JSON-schema type (the string `"false"` must not sail through as a
-truthy escalation), drops undeclared keys, reports a missing required one. `normalize` runs after
-coerce and before policy, so **the gate shows what will actually happen**: for `read_file` and
-`write_file` a relative path becomes `<workspace>/path` and `~` expands; a param declaring
-`"format": "local_datetime"` is canonicalized by `normalize_local_datetime(*keys)`, which parses
-with `clock.parse_local` and lets its `ValueError` (a `Z` or an offset) become a tool error the
-model can act on. Core tools: `run_command(command, escalate)` (write, sandboxed),
+sandboxed, reversible, origins, normalize)`; `schema()` is the OpenAI tool dict; `coerce(spec,
+args)` casts each declared argument to its JSON-schema type (the string `"false"` must not sail
+through as a truthy escalation), drops undeclared keys, reports a missing required one. `normalize`
+runs after coerce and before policy, so **the gate shows what will actually happen**: for
+`read_file` and `write_file` a relative path becomes `<workspace>/path` and `~` expands; a param
+declaring `"format": "local_datetime"` is canonicalized by `normalize_local_datetime(*keys)`, which
+parses with `clock.parse_local` and lets its `ValueError` (a `Z` or an offset) become a tool error
+the model can act on. Core tools: `run_command(command, escalate)` (write, sandboxed),
 `read_file(path)`, `write_file(path, content)` (write) — both file tools refuse
 `exec.SECRET_PATHS`. A sense may add more (schedule's `add_schedule`/`list_schedules`/
-`remove_schedule` — see §8), merged into this same registry by `signals.load`.
+`remove_schedule` — see §8), merged into this same registry by `signals.load`; `jobs.py` adds
+`start_job` the same way, at import time (see §9). `origins` (default: all four - `ledger.ORIGINS`)
+names which turn origins may even see a tool's schema; `for_origin(origin)` filters `TOOLS` by it -
+`start_job` declares `origins={"user"}`, so a job's own registry and a signal turn's never contain
+it: "a worker cannot make a worker" is structure, not a policy check. `clip_for_ledger(value,
+limit=2000)` is the head-only bound a recorded `tool_call`/`tool_result` (a job's own copies too)
+keeps - shorter and simpler than `clip()`'s head+tail bound on what the model itself is shown.
 
 **`policy.py`** — `decide(spec, origin, args, grants) -> allow | ask | deny`, no model, no shell
 parsing; the only argument it reads is `escalate`. A sandboxed tool is judged as `sandboxed`
@@ -186,11 +193,14 @@ ask → `raise Gate(id, name, arguments)`, allow → `emit("tool_call")`, run th
 
 - Protocol, one JSON object per line. In: `attach {session?, cwd?}` (a string `cwd` pushes the
   `attach` sense's `context` signal, when that sense is on), `say {text}`, `interrupt`,
-  `approve {id}`, `deny {id}`, `signal {sense, fields}` (a push door — the sense must be loaded
-  and push-capable, i.e. export `build(fields)`), `presence {idle_s}`, `react {vote, id?}`. Out:
-  `attached`, `turn.start`, `delta`, `tool {name, ok}`, `gate {id, tool, args}`, `turn.end {kind}`,
-  `notice {id, text, why}`, `error`. A malformed or unknown line, an unknown or already decided
-  approval id, an interrupt with no running turn: an `error` line, the connection stays open.
+  `approve {id}`, `deny {id}` (a job's own approval routes to `jobs.Manager.resume` instead of a
+  session lane - see §9), `signal {sense, fields}` (a push door — the sense must be loaded and
+  push-capable, i.e. export `build(fields)`; `jobs` never is), `presence {idle_s}`,
+  `react {vote, id?}`, `job.stop {id}`, `job.steer {id, text}`. Out: `attached`, `turn.start`,
+  `delta`, `tool {name, ok}`, `gate {id, tool, args}`, `turn.end {kind}`, `notice {id, text, why}`,
+  `job.start {id, goal}`, `job.gate {id, approval, tool, args}`, `job.end {id, state}`, `error`. A malformed or unknown line, an unknown
+  or already decided approval id, an interrupt with no running turn: an `error` line, the
+  connection stays open.
 - A session is a queue plus one worker (`_Lane`, a deque-backed queue — plain `asyncio.Queue` has
   no peek). Lane items: `("say", text)`, `("resume", approval_id)`, `("continue", steer_text)`,
   `("signal", Signal)`. `attach` resumes the latest session younger than `session_resume_s`.
@@ -214,9 +224,18 @@ ask → `raise Gate(id, name, arguments)`, allow → `emit("tool_call")`, run th
   the resumed turn replays the stored messages with `Broker(approved={call_id: (tool, args)})`
   or `denied={call_id}` and `loop.run(resume=True)`. A resumed turn can gate again.
 - `emit` kinds from the worker thread: `delta`, `tool_call`, `tool_result`; the event-loop thread
-  records the last two and sends `tool`. All ledger and state writes happen on that thread.
+  records the last two and sends `tool`. All ledger and state writes happen on that thread. A
+  user turn's own `TurnControl` also carries `.session` - the one way `start_job`'s handler (which
+  gets only `control`, like every tool handler) learns which session to report a job's outcome to.
 - The daemon survives a blocked model: `LLMError` becomes an `error` event, an `error` line and
   `turn.end {kind: "error"}`. The socket is born 0600; a live one is refused.
+- `jobs.Manager` is built in `__init__` (`self.jobs_mgr`, bound via `jobs.bind`) and given
+  `self._job_record` (records, then sends `job.start`/`job.gate`/`job.end` to the job's session), `push_signal`
+  and a step factory - `self.rules`, already loaded, is passed straight in rather than loaded
+  twice. Since a job runs on its own thread, `Manager.dispatch` marshals its `record`/`push` calls
+  onto the event-loop thread (`call_soon_threadsafe`, set once `start()` runs) instead of letting
+  a worker thread call `state.apply` or write a socket directly; `close()` swaps it to a no-op
+  first, so a job finishing during shutdown never races a closing `state.db`.
 
 ## 8. Signals, rules, delivery, senses (partition 3)
 
@@ -330,7 +349,66 @@ Daemon.run_signal_turn ── rules.decide per signal FIRST (never held, never s
   Keychain entry (`docs/senses.md`) and network access to an IMAP server. Both optional -
   everything else runs without them.
 
-## 9. Invariants and the tests that hold them
+## 9. Jobs (`pathfinder/jobs.py`, `pathfinder/llm/slot.py`)
+
+- **`start_job(goal)`** is a `ToolSpec` with `origins={"user"}` (§5), registered into `tools.TOOLS`
+  the moment `jobs.py` is imported. Its handler reads `control.session` (stamped by the daemon,
+  see §7) and calls `jobs.Manager.start(goal, session)`, bound once via `jobs.bind(manager)` - the
+  same pattern `signals.load` uses to bind `HOME` onto a sense module.
+- **`Manager(home, record, push, step_factory, rules)`** owns every job: a `dict[id, Job]` (`Job`:
+  `id, goal, session, control, messages, started_ts, state, steps, usage`; `state` is
+  `running|gated|done|failed|cancelled`), its own read-only `State(home/"state.db")` (for
+  `today().jobs` and the restart sweep - `record()` still writes through the daemon's own State),
+  and the daemon's already-loaded `Rules` (`jobs_per_day`, `job_steps` - RULES.md frontmatter).
+- **`start(goal, session)`** refuses with a plain string (not an error) when a job is already
+  `running`/`gated` (one at a time - the free plan has one slot, D25 already serializes calls) or
+  `today.jobs >= jobs_per_day`; otherwise it records `job_start {id, goal}`, builds messages =
+  `prompts/job.txt` + `clock.now_line()` + `Goal: ...`, and runs `_drive` in a new thread.
+- **`_drive`** builds `Broker(tools.for_origin("job"), "job", ...)` and a step from
+  `step_factory(cfg, control, job_tools)` (production: `default_job_step_factory` - `worker_model`
+  or `model`, `llm.slot.stream_step(..., "job")`), then `loop.run(..., budget=rules.job_steps)`.
+  Outcome `answer`/`exhausted` → `job_done {id, summary (clipped 2000), steps, usage, exhausted?}`;
+  `cancelled` → `job_failed {reason: "stopped"}`; `LLMError` → `job_failed {reason: "model: ..."}`;
+  any other exception → `job_failed {reason: "internal: <type>"}`. Both terminal events push a
+  `Signal(sense="jobs", kind="job_done"|"job_failed", trust="user", ...)` - `record`/`push` are set
+  on the `Job` object *after* the ledger write, so anything polling `job.state` never observes a
+  state change before the fact it describes is on disk.
+- **Gate (D24)**: a `Gate` out of `loop.run` records `approval_pending {..., job: id}` and sets the
+  job `gated`; the thread ends, the lane stays free. `approve`/`deny` on a row with `job` set skips
+  the session lane entirely and calls `Manager.resume(approval_id, decision)`, which re-enters
+  `loop.run(resume=True)` in a new thread with `approved`/`denied` built from the stored row - a
+  resumed job can gate again.
+- **Restart sweep** (`Manager.sweep()`, called from `Daemon.start()` once the loop runs - a push
+  from `__init__` has no lane to land on): every `job_start` with no end event is either reconstructed
+  as `gated` (its id is on a pending approval row - the messages come back from that row) or closed
+  as `job_failed {reason: "daemon restarted"}` - a crash never silently loses a waiting gate.
+- **`stop(id)`** sets `control.interrupt` (kills a running shell the same way an interrupted turn
+  does); a job waiting at a gate has no thread to notice, so `stop` closes its pending approval
+  as denied and ends the job as `cancelled` itself. **`steer(id, text)`** records `user {steer:
+  true, job: id, origin: "user"}` (the user said it, not the job - and `state` keeps it out of the
+  session's chat history) and queues it exactly like `daemon.steer`.
+- **`llm/slot.py`**: `slot(priority)` is a context manager around one streaming request. A `user`
+  caller waits only for the current holder; a `job` caller also waits while any user is waiting or
+  holding, so a user's turn never queues behind a job that asked first (m7a, HISTORY: the free plan
+  queues a second overlapping request server-side - the slot is an ordering device, not error
+  insurance). `stream_step(endpoint, schemas, control, priority)` wraps `openai_compat.stream` in
+  it; `daemon.default_step_factory` uses priority `"user"` for both user and signal turns,
+  `jobs.default_job_step_factory` uses `"job"`.
+- **CLI**: `pathfinder jobs` (id, state, started, goal - from `state.jobs()`), `pathfinder job stop
+  ID`, `pathfinder job steer ID TEXT`; `pathfinder approvals` prints `job: <id>` when set;
+  `pathfinder listen` prints `job.start`/`job.gate`/`job.end` lines too.
+- **`state.py` additions**: table `jobs(id, session, goal, started_ts, ended_ts, state, summary,
+  reason, steps, usage_json)`, projected only from the three job events (`gated` is never written
+  here - it is `Manager`'s own in-memory state, found instead via a pending approval's `job`
+  column); `approvals` gains a `job` column; `jobs()`, `job(id)`, `running_jobs()`. `Today` gains
+  `jobs` (count of `job_start` today, `clock.day_start`-scoped).
+- **`senses/jobs.py`** declares `TRUST = "user"` and `KINDS = {job_done, job_failed}` (both
+  `always -> speak` in the shipped RULES.md - D8 §8: the outcome of what the user started spends no
+  budget and honours no quiet hours) purely as documentation for the shape `Manager`'s own `Signal`
+  objects already match; it exports no `build`, so it is never `push_capable` and `signal jobs ...`
+  from the socket is refused like any unknown sense.
+
+## 10. Invariants and the tests that hold them
 
 | Invariant | Test |
 |---|---|
@@ -363,18 +441,26 @@ Daemon.run_signal_turn ── rules.decide per signal FIRST (never held, never s
 | `attach {cwd}` pushes exactly one `context` signal when the sense is on, none otherwise | `test_daemon.AttachSenseTest.*` |
 | `claude_code`'s `task_done`/`needs_input` speak only when `today.away` is true | `test_claude_code.ClaudeCodeAwayTest.test_claude_code_speaks_only_when_away` |
 | A `local_datetime` gate shows the canonical string, not what the model wrote | `test_calendar.AddEventGateTest.test_add_event_gate_shows_canonical_datetime` |
+| A job waiting is not FIFO-first: the user goes ahead of an already-waiting job; the slot is released between steps | `test_slot.SlotTest.*` |
+| `start_job` is user-only; a job's and a signal turn's own tool registry never contains it | `test_tools.OriginRegistryTest.test_tools_for_origin` |
+| A job runs to a summary with its tool events tagged `origin: job`; refuses over budget and when one is already running; `stop` kills a blocking tool within a second; a steer reaches the next step; a gate pauses and both `approve`/`deny` resume it correctly; a gate survives a restart, an ungated crash is closed as `job_failed`; an `LLMError` fails the job, not the daemon; an exhausted budget is `done` with `exhausted: true` | `test_jobs.*` |
+| `state.db` deleted: a job and its gated approval (with the `job` column) come back from the ledger alone | `test_jobs.ReindexRestoresJobsTest.test_reindex_restores_jobs_and_job_approvals` |
+| A session's own turn still answers while a job is running; `job_done`'s trust is `user`, so it speaks even with the daily budget spent and in quiet hours | `test_daemon.JobDaemonIntegrationTest.test_daemon_answers_while_job_runs`, `test_daemon.JobSignalTest.test_job_done_speaks_without_budget` |
+| The socket refuses `signal jobs ...`; `jobs.py` <= 350 lines | `test_daemon.PushDoorValidationTest.test_socket_refuses_signal_jobs`, `test_invariants.test_jobs_module_under_350_lines` |
 
-## 10. How to count
+## 11. How to count
 
 ```bash
-python3 -m unittest discover -s tests            # all tests, no network (171)
-wc -l pathfinder/*.py pathfinder/senses/*.py     # core; budgets: ledger 400, state 600, daemon 600,
-                                                  # loop 400, broker+policy 350, exec 300, tools 300,
-                                                  # clock+signals+rules 450, deliver 250, a sense file 150
+python3 -m unittest discover -s tests            # all tests, no network (191)
+wc -l pathfinder/*.py pathfinder/llm/*.py pathfinder/senses/*.py   # core; budgets: ledger 400,
+                                                  # state 600, daemon 600 (642 today, partition 4's
+                                                  # reported overage), loop 400, broker+policy 350,
+                                                  # exec 300, tools 300, clock+signals+rules 450,
+                                                  # deliver 250, jobs 350, a sense file 150
 python3 scripts/scan_personal.py --all           # personal-data scan over tracked files
 ```
 
-## 11. Running it
+## 12. Running it
 
 ```bash
 python3 -m pathfinder config set model provider:model-name
@@ -392,4 +478,7 @@ security add-generic-password -s pathfinder-mail -a you@example.com -w   # once,
 python3 -m pathfinder react up                    # thumbs-up the latest delivery
 python3 -m pathfinder rules                       # print the path of RULES.md
 python3 -m pathfinder reindex                     # refuses while a daemon is serving
+python3 -m pathfinder jobs                        # id, state, started, goal - from state.db
+python3 -m pathfinder job stop ID                 # sets control.interrupt on that job
+python3 -m pathfinder job steer ID "focus on X"    # reaches the job before its next model call
 ```

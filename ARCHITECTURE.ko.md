@@ -4,12 +4,13 @@
 `docs/decisions/DECISIONS.md`, 실측이 바꾼 것은 `HISTORY.md`. 여기 적힌 이름은 전부 트리에
 실존한다. 정본은 영어 `ARCHITECTURE.md` 이고 이 파일은 같은 커밋에서 함께 고친다.
 
-지금까지 지은 것: **구획 3 — 세상이 말한다.** 비서가 말하고(1) 툴을 부르고(2); 이제 일정,
-셸 명령, 캘린더 일정과 미리 알림, 새 메일, 클라이언트가 붙을 때의 작업 디렉터리, Claude Code
-자신의 훅까지 모두 `Signal` 이 된다. 값싼 규칙(`RULES.md`) 이 speak · silence · defer ·
-ask_model 을 공짜로 정하고, `ask_model` 은 울타리 친 판정 호출 하나를 받으며(D13), `speak` 만
-짧은 모델 턴을 열어 그 알림이 세션이 비기를 기다렸다가 나간다. 작업자 · 기억 볼트 · 규칙
-제안 · TUI 는 그 뒤 구획들이다.
+지금까지 지은 것: **구획 4 — 작업자.** 비서가 말하고(1) 툴을 부르고(2) 세상이 말하고(3);
+이제 `start_job`(origin `user` 전용)이 워커 하나를 스레드에 띄워, 세션 자신의 턴과 별도로
+`prompts/job.txt` + 목표를 대상으로 제 `loop.run` 을 돈다 - 읽기는 자유롭고, write/network 호출은
+세션 턴과 똑같이 게이트에 걸리며(D24), `job_done`/`job_failed` 로 끝나 규칙과 전달 경로를 그대로
+타는 `Signal` 로 push 된다. 슬롯 하나(`llm/slot.py`)가 모든 모델 요청을 사용자 우선으로
+직렬화한다(D25): 작업자는 한 스텝만 슬롯을 쥐고 스텝 사이에 놓는다. 기억 볼트 · 규칙 제안 · TUI
+는 그 뒤 구획들이다.
 
 ## 0. 한 문장
 
@@ -109,17 +110,22 @@ idle_s)`, `signal_turns(ts)`(신호 기원 `turn_start` 한 번마다 한 줄 �
 ## 5. 툴 · 정책 · 샌드박스 · 브로커
 
 **`tools.py`** — `ToolSpec(name, description, params, required, handler, write, network,
-sandboxed, reversible, normalize)`; `schema()` 는 OpenAI 툴 dict; `coerce(spec, args)` 는 선언된
-인자를 JSON 스키마 타입으로 캐스팅하고(문자열 `"false"` 가 참으로 통과해 escalate 가 되면 안
-된다), 선언 안 된 키를 버리고, 빠진 필수 키를 오류로 낸다. `normalize` 는 coerce 뒤 · policy 앞에
-돌아 **게이트에 보이는 것이 실제로 일어날 일**이 되게 한다: `read_file` · `write_file` 의
+sandboxed, reversible, origins, normalize)`; `schema()` 는 OpenAI 툴 dict; `coerce(spec, args)` 는
+선언된 인자를 JSON 스키마 타입으로 캐스팅하고(문자열 `"false"` 가 참으로 통과해 escalate 가 되면
+안 된다), 선언 안 된 키를 버리고, 빠진 필수 키를 오류로 낸다. `normalize` 는 coerce 뒤 · policy
+앞에 돌아 **게이트에 보이는 것이 실제로 일어날 일**이 되게 한다: `read_file` · `write_file` 의
 상대경로는 `<workspace>/경로` 가 되고 `~` 는 펼쳐진다; `"format": "local_datetime"` 을 선언한
 인자는 `normalize_local_datetime(*keys)` 가 `clock.parse_local` 로 정규화하고, 그 `ValueError`
 (`Z` 나 오프셋)는 모델이 손볼 수 있는 툴 오류가 된다. 핵심 툴: `run_command(command,
 escalate)`(write, sandboxed) · `read_file(path)` · `write_file(path, content)`(write) — 파일 툴
-둘은 `exec.SECRET_PATHS` 를 거부한다. 감각이 툴을 더 얹을 수 있다(schedule 의
-`add_schedule`/`list_schedules`/`remove_schedule` — §8), `signals.load` 가 이 같은 레지스트리에
-합친다.
+둘은 `exec.SECRET_PATHS` 를 거부한다. 감각이 툴을 더 얹을 수 있고(schedule 의
+`add_schedule`/`list_schedules`/`remove_schedule` — §8), `jobs.py` 도 임포트되는 순간 `start_job`
+을 같은 식으로 더한다(§9). `origins`(기본값: 넷 다 — `ledger.ORIGINS`)는 어느 origin 의 턴이
+그 툴의 스키마를 볼 수 있는지 이름 붙인다; `for_origin(origin)` 이 `TOOLS` 를 그것으로 거른다 -
+`start_job` 은 `origins={"user"}` 를 선언해서, 작업자 자신의 레지스트리와 신호 턴의 레지스트리에는
+아예 없다 — "작업자는 작업자를 못 만든다"는 정책이 아니라 구조다. `clip_for_ledger(value,
+limit=2000)` 은 장부에 적히는 `tool_call`/`tool_result`(작업자 자신의 것도)가 갖는 머리만 자르는
+경계다 — 모델이 보는 것을 자르는 `clip()`(머리+꼬리)보다 짧고 단순하다.
 
 **`policy.py`** — `decide(spec, origin, args, grants) -> allow | ask | deny`. 모델 없음, 셸 문법
 해석 없음, 읽는 인자는 `escalate` 하나. 샌드박스 툴은 `sandboxed` 로 판정하되 escalate 하거나
@@ -179,10 +185,12 @@ dict 를 키 튜플로 바꿔 버린다.
 
 - 규약, 한 줄에 JSON 하나. 들어오는 것 `attach {session?, cwd?}`(문자열 `cwd` 는 - 그 감각이
   켜져 있으면 - `attach` 감각의 `context` 신호를 push 한다) · `say {text}` · `interrupt` ·
-  `approve {id}` · `deny {id}` · `signal {sense, fields}`(push 문 — 감각이 로드되어 있고
-  push 가능해야 한다, 즉 `build(fields)` 를 내보내야 한다) · `presence {idle_s}` ·
-  `react {vote, id?}`. 나가는 것 `attached` · `turn.start` · `delta` · `tool {name, ok}` ·
-  `gate {id, tool, args}` · `turn.end {kind}` · `notice {id, text, why}` · `error`. 깨진 줄 ·
+  `approve {id}` · `deny {id}`(작업자 자신의 승인은 세션 lane 대신 `jobs.Manager.resume` 으로
+  간다 — §9) · `signal {sense, fields}`(push 문 — 감각이 로드되어 있고 push 가능해야 한다, 즉
+  `build(fields)` 를 내보내야 한다; `jobs` 는 절대 아니다) · `presence {idle_s}` ·
+  `react {vote, id?}` · `job.stop {id}` · `job.steer {id, text}`. 나가는 것 `attached` ·
+  `turn.start` · `delta` · `tool {name, ok}` · `gate {id, tool, args}` · `turn.end {kind}` ·
+  `notice {id, text, why}` · `job.start {id, goal}` · `job.gate {id, approval, tool, args}` · `job.end {id, state}` · `error`. 깨진 줄 ·
   모르는 종류 · 없거나 이미 결정된 승인 id · 도는 턴이 없는 interrupt 는 `error` 한 줄이고
   연결은 안 끊는다.
 - 세션 = 큐 + 워커 하나(`_Lane`, deque 로 만든 큐 — 보통 `asyncio.Queue` 에는 미리보기가 없다).
@@ -207,9 +215,18 @@ dict 를 키 튜플로 바꿔 버린다.
   또는 `denied={call_id}` 와 `loop.run(resume=True)` 로 다시 돌린다. 재개된 턴도 다시 게이트에
   걸릴 수 있다.
 - 워커 스레드의 `emit` 종류: `delta` · `tool_call` · `tool_result`; 이벤트 루프 스레드가 뒤 둘을
-  장부에 적고 `tool` 을 보낸다. 장부와 상태에 쓰는 일은 전부 그 스레드에서 한다.
+  장부에 적고 `tool` 을 보낸다. 장부와 상태에 쓰는 일은 전부 그 스레드에서 한다. 유저 턴의
+  `TurnControl` 은 `.session` 도 지닌다 - `control` 만 받는 모든 툴 핸들러처럼 `start_job` 의
+  핸들러도 이것으로만 작업 결과를 보낼 세션을 안다.
 - 모델이 막혀도 데몬은 산다: `LLMError` 는 `error` 사건 · `error` 줄 · `turn.end {kind: "error"}`.
   소켓은 0600 으로 태어나고, 살아 있는 소켓이면 거부한다.
+- `jobs.Manager` 는 `__init__` 에서 만들어지고(`self.jobs_mgr`, `jobs.bind` 로 묶임) `self._job_record`
+  (적은 뒤 그 작업의 세션에 `job.start`/`job.gate`/`job.end` 를 보냄), `push_signal`, step factory 를
+  받는다 — 이미 로드된 `self.rules` 를 그대로 넘기지 두 번 로드하지 않는다. 작업은 제 스레드에서
+  돌므로 `Manager.dispatch` 가 `record`/`push` 호출을 이벤트 루프 스레드로 옮긴다
+  (`call_soon_threadsafe`, `start()` 가 돌 때 한 번 걸림) — 워커 스레드가 `state.apply` 나 소켓을
+  직접 건드리지 않게. `close()` 는 먼저 이것을 아무 일도 안 하는 것으로 바꿔서, 종료 중에 끝나는
+  작업이 닫히는 `state.db` 와 경합하지 않게 한다.
 
 ## 8. 신호 · 규칙 · 전달 · 감각 (구획 3)
 
@@ -321,7 +338,66 @@ Daemon.run_signal_turn ── 신호마다 rules.decide 를 먼저(절대 안 �
   (`docs/senses.md`)과 IMAP 서버로의 네트워크 접근이 필요하다. 둘 다 선택 사항 - 나머지는
   이것들 없이도 돈다.
 
-## 9. 불변조건과 그것을 붙드는 테스트
+## 9. 작업자 (`pathfinder/jobs.py`, `pathfinder/llm/slot.py`)
+
+- **`start_job(goal)`** 은 `origins={"user"}` 인 `ToolSpec`(§5)이고, `jobs.py` 가 임포트되는
+  순간 `tools.TOOLS` 에 등록된다. 핸들러는 (데몬이 심어 둔) `control.session` 을 읽어
+  `jobs.Manager.start(goal, session)` 을 부르며, `jobs.bind(manager)` 로 한 번 묶인다 —
+  `signals.load` 가 감각 모듈에 `HOME` 을 심는 것과 같은 방식이다.
+- **`Manager(home, record, push, step_factory, rules)`** 가 작업 전부를 쥔다: `dict[id, Job]`
+  (`Job`: `id, goal, session, control, messages, started_ts, state, steps, usage`; `state` 는
+  `running|gated|done|failed|cancelled`), 자기만의 읽기 전용 `State(home/"state.db")`
+  (`today().jobs` 와 재시작 훑기용 — 실제 쓰기는 여전히 데몬의 State 가 한다), 그리고 데몬이
+  이미 로드해 둔 `Rules`(`jobs_per_day`, `job_steps` — RULES.md 앞머리).
+- **`start(goal, session)`** 은 작업이 이미 `running`/`gated` 이거나(한 번에 하나 — 무료
+  플랜은 슬롯이 하나고 D25 가 이미 호출을 직렬화한다) `today.jobs >= jobs_per_day` 면 오류가
+  아니라 평범한 문자열로 거절한다; 아니면 `job_start {id, goal}` 을 적고, 메시지 =
+  `prompts/job.txt` + `clock.now_line()` + `Goal: ...` 를 짓고, 새 스레드에서 `_drive` 를 돈다.
+- **`_drive`** 는 `Broker(tools.for_origin("job"), "job", ...)` 와 `step_factory(cfg, control,
+  job_tools)` 에서 나온 step(제품판: `default_job_step_factory` — `worker_model` 이나 `model`,
+  `llm.slot.stream_step(..., "job")`)을 짓고 `loop.run(..., budget=rules.job_steps)` 을 돈다.
+  결말 `answer`/`exhausted` → `job_done {id, summary(2000자로 자름), steps, usage, exhausted?}`;
+  `cancelled` → `job_failed {reason: "stopped"}`; `LLMError` → `job_failed {reason: "model:
+  ..."}`; 그 밖의 예외 → `job_failed {reason: "internal: <타입>"}`. 두 결말 다
+  `Signal(sense="jobs", kind="job_done"|"job_failed", trust="user", ...)` 을 push 한다 —
+  `record`/`push` 는 장부에 적힌 *뒤에* `Job` 객체의 상태를 바꾸므로, `job.state` 를 지켜보는
+  쪽은 그 사실이 디스크에 있기 전에 상태가 바뀐 걸 절대 못 본다.
+- **게이트(D24)**: `loop.run` 에서 올라온 `Gate` 는 `approval_pending {..., job: id}` 을 적고
+  그 작업을 `gated` 로 만든다; 스레드는 끝나고 lane 은 비어 있다. `job` 이 있는 줄에 대한
+  `approve`/`deny` 는 세션 lane 을 아예 건너뛰고 `Manager.resume(approval_id, decision)` 을
+  부른다 — 저장된 줄에서 지은 `approved`/`denied` 로 새 스레드에서 `loop.run(resume=True)` 를
+  다시 돈다 — 재개된 작업도 다시 게이트에 걸릴 수 있다.
+- **재시작 훑기**(`Manager.sweep()`, 루프가 돈 뒤 `Daemon.start()` 가 부른다 — `__init__` 에서 밀면
+  받을 lane 이 없다): 끝 사건이 없는 `job_start` 는 (그 id 가 대기 중인 승인
+  줄에 있으면) `gated` 로 되살리거나(메시지는 그 줄에서 돌아온다) `job_failed {reason: "daemon
+  restarted"}` 로 닫는다 — 크래시가 대기 중인 게이트를 조용히 잃는 일은 없다.
+- **`stop(id)`** 는 `control.interrupt` 를 세운다(도는 셸을 interrupt 된 턴과 똑같이 죽인다);
+  게이트에서 기다리는 작업은 지켜볼 스레드가 없으므로 `stop` 이 직접 대기 승인을 거절로 닫고 작업을
+  `cancelled` 로 끝낸다. **`steer(id, text)`** 는 `user {steer: true, job: id, origin: "user"}` 를 적고(작업이 아니라
+  사용자가 말한 것 — `state` 는 이것을 세션 대화 이력에 넣지 않는다)
+  사용자가 한 말이므로) `daemon.steer` 와 똑같이 큐에 넣는다.
+- **`llm/slot.py`**: `slot(priority)` 는 스트리밍 요청 하나를 감싸는 컨텍스트 매니저다. `user`
+  호출자는 지금 쥐고 있는 쪽만 기다리고, `job` 호출자는 사용자가 기다리거나 쥐고 있는 동안도
+  같이 기다린다 — 그래서 사용자의 턴이 먼저 물은 작업 뒤에 줄 서는 일이 없다(m7a, HISTORY:
+  무료 플랜은 겹치는 두 번째 요청을 서버에서 줄 세운다 — 슬롯은 오류 보험이 아니라 순서
+  장치다). `stream_step(endpoint, schemas, control, priority)` 가 `openai_compat.stream` 을
+  거기 감싼다; `daemon.default_step_factory` 는 유저 턴과 신호 턴 둘 다 우선순위 `"user"` 를,
+  `jobs.default_job_step_factory` 는 `"job"` 을 쓴다.
+- **CLI**: `pathfinder jobs`(id, state, started, goal — `state.jobs()` 에서), `pathfinder job
+  stop ID`, `pathfinder job steer ID TEXT`; `pathfinder approvals` 는 있으면 `job: <id>` 를
+  찍는다; `pathfinder listen` 은 `job.start`/`job.gate`/`job.end` 줄도 찍는다.
+- **`state.py` 가 더한 것**: 표 `jobs(id, session, goal, started_ts, ended_ts, state, summary,
+  reason, steps, usage_json)`, 세 작업 사건에서만 투영된다(`gated` 는 여기 안 적힌다 — 그건
+  `Manager` 자신의 메모리 상태이고, 대기 중인 승인의 `job` 칸으로 대신 찾는다); `approvals` 에
+  `job` 칸이 늘고; `jobs()`, `job(id)`, `running_jobs()`. `Today` 에 `jobs`(오늘의 `job_start`
+  수, `clock.day_start` 기준)가 늘었다.
+- **`senses/jobs.py`** 는 `TRUST = "user"` 와 `KINDS = {job_done, job_failed}`(둘 다 기본
+  RULES.md 에서 `always -> speak` — D8 §8: 사용자가 시작한 것의 결말은 예산도 안 쓰고 조용한
+  시간도 안 따진다)를 선언하는데, `Manager` 자신의 `Signal` 객체가 이미 맞추고 있는 모양을
+  문서로 남기기 위해서일 뿐이다; `build` 를 안 내보내므로 `push_capable` 이 절대 안 되고,
+  소켓에서 온 `signal jobs ...` 는 모르는 감각과 똑같이 거부된다.
+
+## 10. 불변조건과 그것을 붙드는 테스트
 
 | 불변조건 | 테스트 |
 |---|---|
@@ -354,18 +430,26 @@ Daemon.run_signal_turn ── 신호마다 rules.decide 를 먼저(절대 안 �
 | `attach {cwd}` 는 감각이 켜져 있을 때만 `context` 신호를 정확히 하나 push 함 | `test_daemon.AttachSenseTest.*` |
 | `claude_code` 의 `task_done`/`needs_input` 은 `today.away` 가 참일 때만 말함 | `test_claude_code.ClaudeCodeAwayTest.test_claude_code_speaks_only_when_away` |
 | `local_datetime` 게이트는 모델이 쓴 것이 아니라 표준 문자열을 보여줌 | `test_calendar.AddEventGateTest.test_add_event_gate_shows_canonical_datetime` |
+| 작업이 기다릴 때는 FIFO 가 아니다: 사용자는 먼저 기다리던 작업보다 앞선다; 슬롯은 스텝 사이에 풀린다 | `test_slot.SlotTest.*` |
+| `start_job` 은 유저 전용; 작업과 신호 턴 자신의 레지스트리엔 절대 없음 | `test_tools.OriginRegistryTest.test_tools_for_origin` |
+| 작업이 요약까지 돌고 그 툴 사건은 `origin: job` 을 닮; 예산 초과와 중복 실행을 거절; `stop` 이 막힌 툴을 1초 안에 죽임; steer 가 다음 스텝에 닿음; 게이트가 서고 `approve`/`deny` 둘 다 올바르게 재개함; 게이트가 재시작을 견디고, 게이트 없이 죽은 것은 `job_failed` 로 닫힘; `LLMError` 는 작업만 실패시킴; 스텝 예산 소진은 `exhausted: true` 를 단 `done` | `test_jobs.*` |
+| `state.db` 삭제: 작업과 그 게이트 승인(`job` 칸 포함)이 장부만으로 돌아옴 | `test_jobs.ReindexRestoresJobsTest.test_reindex_restores_jobs_and_job_approvals` |
+| 작업이 도는 중에도 세션 자신의 턴은 여전히 답함; `job_done` 의 trust 는 `user` 라 하루 예산이 다 쓰였고 조용한 시간이어도 말함 | `test_daemon.JobDaemonIntegrationTest.test_daemon_answers_while_job_runs`, `test_daemon.JobSignalTest.test_job_done_speaks_without_budget` |
+| 소켓이 `signal jobs ...` 를 거부함; `jobs.py` 는 350줄 이하 | `test_daemon.PushDoorValidationTest.test_socket_refuses_signal_jobs`, `test_invariants.test_jobs_module_under_350_lines` |
 
-## 10. 세는 법
+## 11. 세는 법
 
 ```bash
-python3 -m unittest discover -s tests            # 전체 테스트, 네트워크 없음 (171)
-wc -l pathfinder/*.py pathfinder/senses/*.py     # 코어; 배분: ledger 400 · state 600 · daemon 600 ·
-                                                  # loop 400 · broker+policy 350 · exec 300 · tools 300 ·
-                                                  # clock+signals+rules 450 · deliver 250 · 감각 파일 150
+python3 -m unittest discover -s tests            # 전체 테스트, 네트워크 없음 (191)
+wc -l pathfinder/*.py pathfinder/llm/*.py pathfinder/senses/*.py   # 코어; 배분: ledger 400 ·
+                                                  # state 600 · daemon 600(오늘은 642, 구획 4가
+                                                  # 보고하는 초과분) · loop 400 · broker+policy 350 ·
+                                                  # exec 300 · tools 300 · clock+signals+rules 450 ·
+                                                  # deliver 250 · jobs 350 · 감각 파일 150
 python3 scripts/scan_personal.py --all           # 추적 파일 전체 개인정보 스캔
 ```
 
-## 11. 돌리는 법
+## 12. 돌리는 법
 
 ```bash
 python3 -m pathfinder config set model provider:model-name
@@ -383,4 +467,7 @@ security add-generic-password -s pathfinder-mail -a you@example.com -w   # mail 
 python3 -m pathfinder react up                    # 최근 전달에 엄지척
 python3 -m pathfinder rules                       # RULES.md 의 경로를 출력
 python3 -m pathfinder reindex                     # 데몬이 도는 중에는 거부
+python3 -m pathfinder jobs                        # id, state, started, goal - state.db 에서
+python3 -m pathfinder job stop ID                 # 그 작업의 control.interrupt 를 세움
+python3 -m pathfinder job steer ID "X 에 집중해"    # 작업의 다음 모델 호출 전에 닿음
 ```

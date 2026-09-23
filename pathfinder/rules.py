@@ -46,6 +46,8 @@ class Rules:
     burst_limit: int = 5
     judgment_cap: int = 20
     idle_threshold_s: int = 20
+    jobs_per_day: int = 10
+    job_steps: int = 20
     by_kind: dict = field(default_factory=dict)                       # kind -> [(cond, raw, action, note)]
     conditions: dict = field(default_factory=lambda: dict(CORE_CONDITIONS))
 
@@ -113,6 +115,8 @@ def parse(text: str, conditions: dict | None = None, validated_kinds: set | None
                  burst_limit=_int(meta.get("burst_limit"), 5),
                  judgment_cap=_int(meta.get("judgment_cap"), 20),
                  idle_threshold_s=_int(meta.get("idle_threshold_s"), 20),
+                 jobs_per_day=_int(meta.get("jobs_per_day"), 10),
+                 job_steps=_int(meta.get("job_steps"), 20),
                  by_kind=by_kind, conditions=dict(conditions))
 
 
@@ -131,7 +135,16 @@ def load(home, senses) -> Rules:
     for s in senses:
         conditions.update(s.conditions)
         validated_kinds.update(s.kinds)
-    return parse(rules_path.read_text(encoding="utf-8"), conditions, validated_kinds)
+    rules = parse(rules_path.read_text(encoding="utf-8"), conditions, validated_kinds)
+    # A home whose RULES.md predates a sense (partition 4 added job_done/job_failed) has no
+    # section for its kinds, and "no section" means a model judgment - the opposite of the
+    # shipped row. The shipped section stands in until the user writes their own; the file is
+    # theirs and is not rewritten.
+    shipped = parse(DEFAULT_RULES_PATH.read_text(encoding="utf-8"), conditions, validated_kinds).by_kind
+    for kind in validated_kinds - set(rules.by_kind):
+        if kind in shipped:
+            rules.by_kind[kind] = shipped[kind]
+    return rules
 
 
 def user_lists(home) -> dict:

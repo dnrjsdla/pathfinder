@@ -106,3 +106,30 @@ def stream(endpoint, messages, tools=None, cancel=None, timeout=120):
         # (the timeout is per read, not total), a reset, an incomplete read. They must all be
         # LLMError, or a stalled model surfaces as "internal error" instead of a blocked model.
         raise LLMError(0, f"{type(e).__name__}: {e}"[:300])
+
+
+def embed(endpoint, texts):
+    """One batched call to /embeddings (the OpenAI-compatible route Ollama also
+    serves). Returns the vectors in input order, regardless of the order the
+    server's `data` list comes back in."""
+    body = {"model": endpoint.model, "input": texts}
+    headers = {"Content-Type": "application/json"}
+    if endpoint.api_key:
+        headers["Authorization"] = f"Bearer {endpoint.api_key}"
+    req = urllib.request.Request(
+        endpoint.base_url.rstrip("/") + "/embeddings",
+        data=json.dumps(body).encode("utf-8"), headers=headers, method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        items = sorted(data["data"], key=lambda d: d["index"])
+        return [item["embedding"] for item in items]
+    except urllib.error.HTTPError as e:
+        with e:  # e is also the response body; read it before the socket closes
+            message = e.read().decode("utf-8", errors="replace")
+        raise LLMError(e.code, message[:300])
+    except (OSError, http.client.HTTPException) as e:
+        raise LLMError(0, f"{type(e).__name__}: {e}"[:300])
+    except (json.JSONDecodeError, KeyError, TypeError) as e:
+        raise LLMError(0, f"bad embeddings response: {type(e).__name__}: {e}"[:300])

@@ -563,3 +563,41 @@ decision - a job's summary is model-written from whatever it read, yet it entere
 (exemption and authority) and partition 4 is the first place they differ. **The owner chose the
 split: D26** - `Signal.exempt` carries the exemption, `job_done`/`job_failed` are `trust: self`
 + `exempt`, and the user's own schedule/reminders keep `trust: user` as before.
+
+## 2026-09-24 — Before partition 5: contract and three owner decisions
+
+The contract (`docs/plans/partition-5.md`) put three questions to the owner; the answers are D27
+(vectors as float32 blobs in `state.db`, cosine in Python, no extension), D28 (an edit to
+`USER.md`/`RULES.md` goes to the approval box whoever proposes it; the owner's manual/auto idea
+lands as the existing `grants {"edit_memory": "allow"}`, user turns only) and D29 (`USER.md`'s
+body and the wiki map resident in the per-turn second system message).
+
+### m4 — does the hybrid index earn its vectors? (`bench/m4_retrieval.py`, 12 pages, 12 + 4 queries, zero credits)
+
+The Mark.5 retrieval corpus, transplanted: 8 synthetic Korean wiki pages plus the 4 dated notes
+as distractor pages, the 12 positive and 4 negative `search-*` queries verbatim. Indexed through
+the real `state` index: FTS5 with the default `unicode61` tokenizer and one prefix term per query
+token (no Korean segmenter - a particle attaches at the end of a word, so `캘린더*` matches
+`캘린더가`), one `bge-m3` vector per page from the local embedder through `openai_compat.embed`
+(the OpenAI-compatible `/embeddings` route), reciprocal rank fusion. Traces in
+`docs/measurements/m4-fts-only.json` and `m4-ollama-bge-m3.json`.
+
+| branch | recall@3 over 12 positives |
+|---|---|
+| FTS only (prefix terms) | 0.92 (11/12) |
+| vector only | 1.00 |
+| hybrid (RRF, k=60) | 1.00 |
+
+- **D10's pass line is met: hybrid 1.00 >= 0.80, and +8 points over FTS alone (>= 5 needed).**
+  The vector default stays on; `embed_model` is set in config (empty = FTS only, same function).
+- The one FTS miss is `search-03` ("원두를 냉장고에 넣어도 되나" -> `원두 보관법.md`): the page
+  says 냉동실 and 결로, never 냉장고, and a distractor note mentioning 원두 outranks it. Exactly
+  the case a vector recovers.
+- FTS-only with prefix terms scores 11/12 where Mark.5's kiwipiepy-segmented FTS scored hit@1
+  7/12 on the same pages (a different metric - hit@1 vs recall@3 - so not a like-for-like win, but
+  enough to drop the segmenter dependency without measuring further).
+- Negatives: the best vector cosine for an off-topic query is 0.32-0.37, the positives in
+  Mark.5's baseline sat at 0.51-0.74. Not gated here; a floor is a later knob if `search_memory`
+  ever returns junk for an off-topic question. FTS returns *something* for 3 of 4 negatives (a
+  single shared token such as 설정 or 법) - RRF keeps those below any page both branches agree on.
+- Whole run: about 2 s, local embedder only.

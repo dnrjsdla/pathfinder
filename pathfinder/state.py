@@ -2,7 +2,10 @@
 the source of truth - the daemon does ledger.append() then state.apply() so
 live writes and rebuild share one code path."""
 import json
+import math
+import re
 import sqlite3
+import struct
 import threading
 import time
 from dataclasses import dataclass
@@ -32,9 +35,13 @@ CREATE TABLE IF NOT EXISTS jobs (
     id TEXT PRIMARY KEY, session TEXT, goal TEXT, started_ts REAL, ended_ts REAL,
     state TEXT, summary TEXT, reason TEXT, steps INTEGER, usage_json TEXT
 );
+CREATE TABLE IF NOT EXISTS pages (rowid INTEGER PRIMARY KEY, path TEXT UNIQUE, title TEXT, mtime REAL, text TEXT);
+CREATE VIRTUAL TABLE IF NOT EXISTS pages_fts USING fts5(title, text, content='pages', content_rowid='rowid');
+CREATE TABLE IF NOT EXISTS vectors (path TEXT PRIMARY KEY, model TEXT, vec BLOB);
 """
 
-NEW_TABLES = ("signals", "decisions", "judgments", "deliveries", "reactions", "presence", "signal_turns", "jobs")
+NEW_TABLES = ("signals", "decisions", "judgments", "deliveries", "reactions", "presence", "signal_turns", "jobs",
+              "pages_fts", "pages", "vectors")
 
 
 @dataclass
@@ -299,3 +306,76 @@ class State:
         rows = self.db.execute(
             f"SELECT {self._JOB_COLUMNS} FROM jobs WHERE state IN ('running', 'gated') ORDER BY started_ts").fetchall()
         return [self._job_row(r) for r in rows]
+
+    def index_page(self, path: str, title: str, text: str, mtime: float, vector=None, model: str = "") -> None:
+        """Upsert a page (delete + insert) and keep the external-content FTS table in sync: the
+        'delete' command needs the OLD rowid and content, so it runs before the row is replaced."""
+        old = self.db.execute("SELECT rowid, title, text FROM pages WHERE path = ?", (path,)).fetchone()
+        if old is not None:
+            self.db.execute("INSERT INTO pages_fts (pages_fts, rowid, title, text) VALUES ('delete', ?, ?, ?)", old)
+            self.db.execute("DELETE FROM pages WHERE path = ?", (path,))
+        cur = self.db.execute("INSERT INTO pages (path, title, mtime, text) VALUES (?, ?, ?, ?)",
+                              (path, title, mtime, text))
+        self.db.execute("INSERT INTO pages_fts (rowid, title, text) VALUES (?, ?, ?)", (cur.lastrowid, title, text))
+        if vector is not None:
+            blob = struct.pack(f"<{len(vector)}f", *vector)
+            self.db.execute(
+                "INSERT INTO vectors (path, model, vec) VALUES (?, ?, ?) "
+                "ON CONFLICT(path) DO UPDATE SET model = excluded.model, vec = excluded.vec",
+                (path, model, blob))
+        else:
+            # a page re-indexed without an embedding must not keep a stale vector
+            self.db.execute("DELETE FROM vectors WHERE path = ?", (path,))
+
+    def remove_page(self, path: str) -> None:
+        old = self.db.execute("SELECT rowid, title, text FROM pages WHERE path = ?", (path,)).fetchone()
+        if old is not None:
+            self.db.execute("INSERT INTO pages_fts (pages_fts, rowid, title, text) VALUES ('delete', ?, ?, ?)", old)
+            self.db.execute("DELETE FROM pages WHERE path = ?", (path,))
+        self.db.execute("DELETE FROM vectors WHERE path = ?", (path,))
+
+    def pages(self) -> list:
+        rows = self.db.execute("SELECT path, title, mtime FROM pages ORDER BY mtime DESC").fetchall()
+        return [{"path": r[0], "title": r[1], "mtime": r[2]} for r in rows]
+
+    def search(self, query: str, query_vector=None, model: str = "", top_k: int = 3, fts: bool = True) -> list:
+        """Hybrid search: FTS5 prefix match on every query token, cosine over the vectors of
+        `model`, merged by reciprocal rank fusion (k=60). `query_vector=None` (or `fts=False`)
+        runs one branch alone - the D10 fallback is the same function with an argument missing."""
+        ranks: dict[str, float] = {}
+        info: dict[str, tuple] = {}  # path -> (title, text)
+        if fts:
+            tokens = re.findall(r"\w+", query)
+            if tokens:
+                match = " OR ".join('"' + t.replace('"', '""') + '"*' for t in tokens)
+                rows = self.db.execute(
+                    "SELECT rowid FROM pages_fts WHERE pages_fts MATCH ? ORDER BY rank LIMIT 20", (match,)
+                ).fetchall()
+                for i, (rowid,) in enumerate(rows, start=1):
+                    prow = self.db.execute("SELECT path, title, text FROM pages WHERE rowid = ?", (rowid,)).fetchone()
+                    if prow is None:
+                        continue
+                    path, title, text = prow
+                    ranks[path] = ranks.get(path, 0.0) + 1 / (60 + i)
+                    info[path] = (title, text)
+        if query_vector is not None:
+            qnorm = math.sqrt(sum(x * x for x in query_vector))
+            if qnorm > 0:
+                scored = []
+                # ponytail: cosine over every row in Python - fine to ~10k pages; sqlite-vec is the upgrade path
+                for path, blob in self.db.execute("SELECT path, vec FROM vectors WHERE model = ?", (model,)):
+                    vec = struct.unpack(f"<{len(blob) // 4}f", blob)
+                    vnorm = math.sqrt(sum(x * x for x in vec))
+                    if vnorm == 0:
+                        continue
+                    cos = sum(a * b for a, b in zip(query_vector, vec)) / (qnorm * vnorm)
+                    scored.append((cos, path))
+                scored.sort(key=lambda x: -x[0])
+                for i, (_, path) in enumerate(scored[:20], start=1):
+                    ranks[path] = ranks.get(path, 0.0) + 1 / (60 + i)
+                    if path not in info:
+                        prow = self.db.execute("SELECT title, text FROM pages WHERE path = ?", (path,)).fetchone()
+                        if prow is not None:
+                            info[path] = prow
+        top = sorted(ranks.items(), key=lambda x: -x[1])[:top_k]
+        return [{"path": p, "title": info[p][0], "score": s, "snippet": info[p][1][:200]} for p, s in top]

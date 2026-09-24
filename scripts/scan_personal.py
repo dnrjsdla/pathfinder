@@ -16,7 +16,8 @@ PATTERNS = [
     ("home-path", re.compile(r"/(?:Users|home)/(?!\.\.\.|<|\$|USER\b|user\b|you\b|name\b)[A-Za-z0-9._-]+/")),
     ("phone-kr", re.compile(r"\b01[016789][- .]?\d{3,4}[- .]?\d{4}\b")),
 ]
-EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+)")
+# the last label must be alphabetic: an npm spec like `pkg@1.2.3` is not an address
+EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,})")
 BLOCKED_FILES = re.compile(r"(^|/)\.env(\..*)?$|\.(db|db-wal|db-shm|pem|p12|keychain)$|(^|/)credentials(\.|$)")
 
 

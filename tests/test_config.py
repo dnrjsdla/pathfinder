@@ -103,6 +103,27 @@ class ConfigTest(unittest.TestCase):
             config.set(self.home, "schedules",
                       [{"id": "a", "at": "2026-09-22T09:00Z", "repeat": "none", "text": "x"}])
 
+    def test_config_refuses_bad_mcp_servers(self):
+        good_stdio = {"transport": "stdio", "command": ["npx", "server"]}
+        cases = (
+            {"bad_id": good_stdio},                                             # underscore
+            {"srv": {"transport": "carrier-pigeon", "command": ["x"]}},          # unknown transport
+            {"srv": {"transport": "stdio"}},                                    # stdio without command
+            {"srv": {"transport": "stdio", "command": ["x"], "timeout": 0}},     # timeout 0
+        )
+        for value in cases:
+            with self.subTest(value=value):
+                with self.assertRaises(config.ConfigError):
+                    config.set(self.home, "mcp_servers", value)
+
+    def test_config_accepts_a_stdio_and_an_http_server(self):
+        value = {
+            "local": {"transport": "stdio", "command": ["npx", "-y", "server"], "env": {"TOKEN": "keychain:bot"}},
+            "remote": {"transport": "http", "url": "https://example.invalid/mcp", "timeout": 10},
+        }
+        cfg = config.set(self.home, "mcp_servers", value)
+        self.assertEqual(cfg["mcp_servers"], value)
+
     def test_home_tightens_an_existing_directory(self):
         loose = self.home / "loose"
         loose.mkdir(mode=0o755)

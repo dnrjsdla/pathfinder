@@ -1,0 +1,45 @@
+{
+  "name": "io.github.example/mcp-broken",
+  "version": "0.9.0",
+  "source_registry": {
+    "url": "https://registry.modelcontextprotocol.io",
+    "entry_id": "io.github.example/mcp-broken",
+    "updated_at": "2026-09-19T00:00:00Z"
+  },
+  "description": "Example server whose sandbox trial times out, for the connection spec fixtures.",
+  "package": {
+    "registry_type": "npm",
+    "identifier": "@example/mcp-broken",
+    "version": "0.9.0",
+    "runtime": "npx",
+    "args": [
+      "-y",
+      "@example/mcp-broken@0.9.0"
+    ],
+    "env": [],
+    "remotes": []
+  },
+  "verification": {
+    "license": {
+      "spdx": "MIT",
+      "source": "npm",
+      "verdict": "ok"
+    },
+    "malicious_scan": "not_checked",
+    "sandbox_trial": "not_checked",
+    "maintenance": {
+      "last_publish_at": "2026-09-10T00:00:00Z",
+      "namespace_verified": true
+    },
+    "description_hash": "not_checked",
+    "trust_tier": "unverified",
+    "failed_step": "trial",
+    "reason": "McpTransportError: timeout after 60 s"
+  },
+  "install": {
+    "id": "mcp-broken",
+    "needs": []
+  },
+  "billing": "unknown",
+  "outcome": "install_failed"
+}

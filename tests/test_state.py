@@ -128,6 +128,76 @@ class StateTest(unittest.TestCase):
         self.assertEqual([p["id"] for p in self.state.pending()], ["a1"])
         self.assertIsNone(self.state.pending()[0]["job"])
 
+    def test_context_cwds_reader(self):
+        """The catalog's work-context tags read this - `attach:<cwd>` keys of `context` signals,
+        at or after `since`; a signal of another kind (even one that also has a `key`) is left out."""
+        self._record("signal", origin="signal", trust="self", sense="attach", kind="context",
+                     key="attach:/home/user/proj", summary="working", fields={"cwd": "/home/user/proj"})
+        self._record("signal", origin="signal", trust="third_party", sense="mail", kind="new_mail",
+                     key="not-a-context-key", summary="mail", fields={})
+        since = time.time() - 10
+        self.assertEqual(self.state.context_cwds(since), {"/home/user/proj"})
+        self.assertEqual(self.state.context_cwds(time.time() + 10), set())
+
+
+class PinsTest(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.home = Path(self._tmp.name)
+        self.ledger = Ledger(self.home)
+        self.db_path = self.home / "state.db"
+        self.state = State(self.db_path)
+
+    def tearDown(self):
+        self.state.close()
+        self._tmp.cleanup()
+
+    def _record(self, type, **kw):
+        event = self.ledger.append(type, **kw)
+        self.state.apply(event)
+        return event
+
+    def test_pin_accept_upserts_and_pins_reads_it_back(self):
+        self._record("pin_accept", server="gh", tool="alpha",
+                     description_hash="sha256:d1", schema_hash="sha256:s1", params=["owner"])
+        self.assertEqual(self.state.pins(), {
+            "gh": {"alpha": {"description": "sha256:d1", "schema": "sha256:s1", "params": ["owner"]}},
+        })
+        # a second accept for the same (server, tool) replaces, never duplicates
+        self._record("pin_accept", server="gh", tool="alpha",
+                     description_hash="sha256:d2", schema_hash="sha256:s1", params=["owner"])
+        self.assertEqual(self.state.pins()["gh"]["alpha"]["description"], "sha256:d2")
+
+    def test_pin_revoke_forgets_the_server(self):
+        self._record("pin_accept", server="gh", tool="alpha",
+                     description_hash="sha256:d1", schema_hash="sha256:s1", params=[])
+        self._record("pin_accept", server="gh", tool="beta",
+                     description_hash="sha256:d2", schema_hash="sha256:s2", params=[])
+        self._record("pin_revoke", server="gh")  # tool omitted - the whole server is forgotten
+        self.assertEqual(self.state.pins(), {})
+
+    def test_pin_revoke_one_tool_leaves_the_rest(self):
+        self._record("pin_accept", server="gh", tool="alpha",
+                     description_hash="sha256:d1", schema_hash="sha256:s1", params=[])
+        self._record("pin_accept", server="gh", tool="beta",
+                     description_hash="sha256:d2", schema_hash="sha256:s2", params=[])
+        self._record("pin_revoke", server="gh", tool="alpha")
+        self.assertEqual(list(self.state.pins()["gh"]), ["beta"])
+
+    def test_pins_survive_state_db_deletion(self):
+        self._record("pin_accept", server="gh", tool="alpha",
+                     description_hash="sha256:d1", schema_hash="sha256:s1", params=["owner"])
+        before = self.state.pins()
+        self.state.db.close()
+        for suffix in ("", "-wal", "-shm"):
+            p = Path(str(self.db_path) + suffix)
+            if p.exists():
+                p.unlink()
+        rebuilt = State(self.db_path)
+        rebuilt.rebuild(self.ledger)
+        self.assertEqual(rebuilt.pins(), before)
+        rebuilt.close()
+
 
 class PageIndexTest(unittest.TestCase):
     def setUp(self):

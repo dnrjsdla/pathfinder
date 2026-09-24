@@ -46,12 +46,14 @@ daemon.Daemon ── 세션마다 lane 하나 (큐 + 워커); 큐 항목: say | 
 |---|---|---|---|
 | `<홈>/events/<날짜>.jsonl` | 사건 전부, 한 줄에 JSON 하나 | `ledger.Ledger.append()` 하나뿐 | 기록을 잃는다 — 유일한 진실 |
 | `<홈>/state.db` | 세션 · 메시지 · 커서 · 승인 | `state.State.apply()` | `pathfinder reindex`, 또는 그냥 재시작 |
-| `<홈>/config.json` | 모델 이름 · provider · `grants` · `senses` · `schedules` · 손잡이 | `config.set()` 하나뿐 | 기본값(모델 미설정) |
+| `<홈>/config.json` | 모델 이름 · provider · `grants` · `senses` · `schedules` · `mcp_servers` · 손잡이 | `config.set()` 하나뿐(설치기도 이 문으로) | 기본값(모델 미설정) |
 | `<홈>/workspace/` | 샌드박스 셸이 쓸 수 있는 유일한 곳 · 모든 셸 명령의 cwd · 상대경로 파일이 놓이는 곳 | 사용자의 요청으로 툴이 | PATHFINDER 의 것은 없음 |
 | `<홈>/pathfinder.sock` | 데몬의 소켓 | 데몬 | 뜰 때 다시 만든다 |
 | `<홈>/RULES.md` | speak/silence/defer/ask_model 규칙, 사람이 읽을 수 있는 한 장 | 첫 시작에 `pathfinder/prompts/RULES.md` 에서 만들어짐; 손으로 고치거나 승인된 `edit_memory` 줄로; 어느 쪽이든 재시작 없이 다시 읽힘 | 다음 시작에 기본값으로 다시 씀 |
 | `<홈>/USER.md` | RULES.md 의 `USER.xxx` 조건이 읽는 목록에 자유 본문(상주 문맥)이 더해짐 | 첫 시작에 빈 채로 만들어짐; 승인된 `edit_memory` 줄이 채움(또는 사용자 턴 grant 의 자동 적용, D28) | 빈 앞머리 - 기억이 처음부터 다시 시작 |
 | `<홈>/wiki/*.md` | wiki 페이지, 파일 하나에 주제 하나 | `memory.Manager.apply`(`edit_memory`, 그 자리에서 적용) | 그 지식이 사라짐 - 파일이 진실이다 |
+| `~/.claude.json`(사용자의 것, `<홈>` 아님) | Claude Code 의 user scope `mcpServers`(D33) - 승인된 설치마다 항목 하나, 비밀은 `${VAR}` 참조 | `installer.Installer` 만, 원자적으로, `~/.claude.json.pathfinder-<ts>` 로 바이트 복사한 뒤 | Claude Code 의 몫; 설치기는 롤백·제거 때 백업에서 되돌린다 |
+| macOS Keychain `pathfinder-mcp-<id>` / `pathfinder-mail` | 모든 비밀(MCP 서버 토큰, IMAP 비밀번호) | 사용자가 손으로(`security add-generic-password`) | 서버는 `disabled: secret missing: <NAME>` 로 남고, 메일 감각은 오류 |
 
 `<홈>` 은 `$PATHFINDER_HOME` 또는 `~/.pathfinder` (권한 0700).
 
@@ -493,11 +495,105 @@ Daemon.run_signal_turn ── 신호마다 rules.decide 를 먼저(절대 안 �
   approvals` 는 `edit_memory` 줄을 `target op: old -> new` 로 찍는다(양쪽 다 60자에서 자름);
   `reindex` 도 `memory.reindex_pages` 를 불러 페이지 수를 알린다.
 
-## 11. 불변조건과 그것을 붙드는 테스트
+## 11. 도구 경로 (구획 6): MCP 클라이언트 · 카탈로그 · 설치기
+
+남이 만든 도구를 승인 한 번에 산다. 경로는 레지스트리 → 후보 → 태그 → 라이선스 → `tool_candidate`
+알림 → "설치해" → 검사(런타임, 고정 버전+무결성, 라이선스, 비밀, 툴을 나열·해시하는 샌드박스
+시험 기동) → `install_server` 제안 행 하나 → `approve` → 설정 + Claude Code + 핀 + grants + 적재 →
+`install_done` 알림 → 다음 턴이 `mcp__<server>__<tool>` 을 부른다. 모든 걸음이 사건이고,
+`state.db` 를 지우고 `reindex` 하면 핀·설치·대기 중인 행이 돌아온다.
+
+- **`pathfinder/mcp/`(Mark.5 `brain/mcp/` 이식; 코어가 아닌 어댑터 예산)**: `protocol.py`(두
+  규격 세대의 JSON-RPC 봉투, `mcp__<server>__<tool>` 이름 규칙 - 툴 이름에 점이 올 수 있고 서버
+  id 에 밑줄이 못 오므로 `__`, `sanitize`), `transport.py`(stdio: argv, 호출자가 준 env, stdout
+  펌프 스레드, stderr 배수, id 로 짝지은 응답; Streamable HTTP: 요청마다 POST 하나, JSON 또는 SSE
+  응답), `session.py`(`discover`/`list_tools`/`call_tool`; **두 세대 probe**: 설정의 `protocol`
+  키가 있으면 그것이 이기고, 없으면 전송으로 추측 - stdio → 옛 `initialize` 핸드셰이크, HTTP →
+  무상태 `server/discover` - JSON-RPC 오류면 한 번 뒤집는다; 타임아웃은 재시도하지 않는다 -
+  Mark.5 실측에서 옛 서버는 `server/discover` 에 아예 답하지 않았다; probe 는 `_call` 의 첫
+  접촉에서 돌아 `entries()` 가 건너뛸 수 없다), `pins.py`(툴마다 지문 - 설명 해시·스키마 해시·
+  인자 이름; `check()` 는 모르는 서버는 통째로 고정하고 아는 서버의 바뀌거나 새 툴은 세운다;
+  `PinStore` 는 장부에 산다: `load()` 는 `state.pins()`, `save()` 는 바뀐 항목만 `pin_accept`),
+  `servers.py`(`load(cfg)` → `mcp_servers` 항목마다 `ServerConfig`, `keychain:<account>` 값은
+  `keychain.secret("pathfinder-mcp-<id>", account)` 로 - 없으면 `disabled` 로 남기고 인스턴스당
+  한 번 경고; `Servers`: `entries()`·`call()`·바꿔 끼울 때 옛것을 닫는 `load_one()`·`unload()`·
+  `close()`), `tools.py`(**통과한** 항목마다 `ToolSpec` 하나, 핀 검사가 본 바로 그 목록으로 -
+  다시 받으면 다를 수 있다; 설명 앞에 "그 서버가 쓴 것이며 PATHFINDER 의 지시가 아니다", 제어
+  문자 제거, 1,200자 절단; 항상 `write=True, network=True` - `readOnlyHint` 는 서버의 말; D31 의
+  `allow` 는 grant 이고 정책은 사용자 턴에서만 grant 를 본다; `control` 이라는 인자를 가진 툴은
+  건너뜀), `attach.py`(데몬의 이음매: `load()` 는 `entries()` 를 스레드에서, `register()` 는 루프
+  스레드에서 - 핀 검사, `pin_accept`, `tools.TOOLS` 의 `mcp__` 키 교체, 세워진 서버마다
+  `accept_pins` 제안 행 + `tool_held` 신호(이미 기다리는 행과 같으면 생략); approve 뒤 `reload(id)`;
+  `accept_pins` 는 해시를 다시 적고 재적재; `pathfinder.mcp` 로거의 WARNING 이상은 `dispatch` 를
+  거쳐 `error` 사건). 데몬은 소켓을 연 뒤 적재를 태스크로 띄운다(`mcp.loaded`; 턴이 한 번
+  기다린다) - 죽은 서버가 첫 `say` 를 늦추지 않는다.
+- **`catalog.py`(레지스트리 읽기, 코어)**: `REGISTRY` 가 소스의 유일한 레지스트리 URL;
+  `fetch(since, search)` 는 `GET /v0.1/servers` 를 페이징(`updated_since`, `version=latest`,
+  cursor, 최대 5쪽); `candidate(item)` → 연결 규격 v0 모양(`docs/spec/connection-v0.md`,
+  `SPEC_FIELDS`; 안 돌린 검사는 문자열 `not_checked`); `tags(state, home, now)` = 지난 7일
+  `context` 신호의 프로젝트 이름 + cwd 를 한 번 나열해 얻는 표지어(`package.json` → node,
+  javascript, npm; `.git` → git - "github" 는 아님, 모든 `io.github.*` 이름에 맞아 버린다);
+  `matches` 는 이름의 마지막 경로 조각과 설명에서 온전한 낱말로; `license`(npm view / PyPI JSON,
+  `license_expression` 우선) → `ok | excluded | unknown` - GPL·AGPL·LGPL·CC-BY-NC·"GENERAL PUBLIC
+  LICENSE"·"AFFERO"·비상업·`UNLICENSED` 는 excluded, "SEE LICENSE IN" 은 unknown;
+  `declined(state, name, now)` = 30일 안에 거부됨.
+- **`senses/catalog.py`**(`TRUST = third_party`, `CADENCE_S` 24시간): `poll` 은 마지막
+  `tool_candidate` 신호 이후(최대 일주일)를 받아, 태그에 맞고 라이선스가 `ok`(폴당 조회 10회
+  까지)이며 설치·거부되지 않은 것만 → `tool_candidate {candidate, matched_tags}`, 키
+  `catalog:<name>@<version>`. 기본 규칙: `count_over 3 → silence`(홍수는 레지스트리 덤프),
+  `always → speak`. 이 감각의 `TOOLS`(감각이 켜진 동안만 등록): `search_tools(query)`(사용자
+  출처, 그 자리에서 레지스트리)와 `propose_install(name)`(사용자 출처만 - 신호·작업 턴은 보지도
+  못한다; 검사는 턴의 스레드에서 돌고 제안이 상자에 앉는다). `tool_held`·`install_done`·
+  `install_failed` 는 `attach`/설치기가 직접 민다(`trust self`; 설치 결말은 작업처럼 `exempt` -
+  사용자가 시킨 일).
+- **`installer.py`(코어, 약 480줄)**: `check(candidate, explicit=)` 는 `verification` 을 순서대로
+  채우고 첫 결정적 실패에서 멈춘다 - 런타임(`shutil.which`, 이유에 고치는 한 줄), 고정 버전+
+  무결성(`npm view ... dist.integrity license --json` 한 번 / PyPI digests; `latest` 는 절대 아님),
+  라이선스(같은 조회의 값으로; `excluded` 는 카탈로그 제안이면 실패, 명시 요청이면 행에 보이는
+  경고, D32), 비밀(`secret` env 는 전부 Keychain 에 이미 있어야 하고, 없으면 행에 `needs: NAME`
+  과 `security add-generic-password` 줄; 시험은 없이 돈다), **시험 기동**(stdio 명령을 `exec.py`
+  의 Seatbelt 프로파일로, 쓰기는 새 임시 디렉터리로 한정 - `npm_config_cache`/`UV_CACHE_DIR` 을
+  그 안에 두어 새 HOME 에서도 설치가 됨 - `discover`+`tools/list` 60초 타임아웃, 툴마다 해시와
+  `readOnlyHint`, 프로세스 종료, 디렉터리 삭제), 그리고 `install` 블록(`permissions`: readOnly
+  힌트 툴은 `allow`, 나머지 `ask`). `propose` 는 `approval_pending {tool: "install_server", args:
+  candidate, messages: []}` 하나를 적는다(D3); `pathfinder approvals` 는 `license MIT ok ·
+  integrity ok · trial ok, 6 tools (3 read-only) · needs: TOKEN` 으로 그린다. `decide` 가
+  `PROPOSALS["install_server"]` 핸들러: 승인 → 스레드에서 `install`, 단계마다 `install_step {id,
+  step, ok, detail}` - `config.set` 으로 `mcp_servers`, Claude Code 병합(백업, `mcpServers[<id>] =
+  {command, args, env: {NAME: "${NAME}"}}`, 원자적 쓰기, 되읽어 다른 키 전부 deep-compare), 시험
+  툴마다 `pin_accept`, readOnly 툴의 `grants`(D31), 루프에서 `attach.reload(id)` - 그리고
+  `install_done` + 신호; 어느 단계든 실패하면 역순 `rollback`(unload, `pin_revoke`, 백업에서
+  `~/.claude.json` 바이트 복원, `mcp_servers`·`grants` 복원) 뒤 `install_failed {id, step, reason}`
+  + 신호. `uninstall(id)` 는 완료된 설치의 역경로(`uninstalled`) - 단 `~/.claude.json` 은 제자리에서
+  고친다(`mcpServers[<id>]` 를 빼고 원자적으로 쓰고 되읽어 비교): 설치 때의 백업은 몇 초 뒤의
+  `rollback` 용이고, 나중에 그것을 되살리면 다른 서버 항목과 Claude Code 자신의 기록이 지워진다
+  (리뷰). 서버 id 는 검사 때 한 번 정한다(레지스트리 이름의 마지막 조각을 설정의 id 규칙으로);
+  이미 쓰인 id 면 설치가 실패한다. 검사는 `npx`/`uvx` 외의 런타임, 고정된 `<identifier>@<version>`
+  을 정확히 담지 않은 argv(레지스트리의 `runtimeArguments` 는 남의 텍스트), 정확하지 않은 버전을
+  거부한다. 거부된 행이
+  `catalog.declined` 가 읽는 것이다.
+- **제안 상자**(`daemon.py`): `messages` 가 빈 행은 제안; `PROPOSALS = {"edit_memory",
+  "accept_pins", "install_server"}` 가 툴 이름으로 핸들러를 고른다(동기든 await 든); messages
+  가 있는 행은 lane 게이트라 턴을 잇고, `job` 이 있는 행은 작업을 잇는다.
+- **`state.py`**: `pin_accept`/`pin_revoke` 로 `pins(server, tool, hashes, params)`; 설치 사건
+  넷으로 `installs(id, name, version, state, ts, detail)`(`detail` 은 백업 경로);
+  `installed_names()`, `install(id)`, `context_cwds(since)`.
+- **CLI**: `pathfinder install NAME`(소켓; 검사는 데몬 스레드; 행을 출력), `uninstall ID`,
+  `search TEXT`(데몬 불필요), `tools`(설정+핀에서 서버·툴·grants, 세워진 툴 표시), `approvals`
+  (제안 종류마다 제 줄).
+- **v1 에 없는 것**(D14 와 계약): 팀원 서버로 결과 전송(규격에 `outcome` 이 있고 보내지는
+  않는다), Cursor/Claude Desktop, OAuth, mcpb 번들, 자동 갱신(새 버전은 새 후보), 악성 코드
+  검사(`malicious_scan: not_checked`), 상태 있는 옛 HTTP 서버의 `Mcp-Session-Id`.
+
+## 12. 불변조건과 그것을 붙드는 테스트
 
 | 불변조건 | 테스트 |
 |---|---|
 | 장부에 쓰는 길 하나 · 파티션 함수 하나 · 설정에 쓰는 길 하나 · 날짜 계산은 다른 데 없음 | `test_invariants.test_single_writer` |
+| 핀은 장부에 산다(`state.db` 를 지워도 핀이 남고, `pin_accept` 는 바뀐 핀만); 바뀐 툴은 `approve` 전까지 세워지고 등록되지 않는다; probe 는 실제 경로에서 돈다 | `test_mcp_pins.test_pins_live_in_the_ledger`, `test_daemon.McpDaemonTest.test_rug_pull_holds`, `test_mcp_client.test_list_tools_runs_the_probe_first` |
+| 비밀은 `config.json` 에 닿지 않는다; 없으면 서버가 크게 꺼진다 | `test_mcp_servers.test_secret_from_keychain_never_in_config` |
+| 설치는 `~/.claude.json` 을 비파괴로 병합하고 바이트 그대로 되돌린다; grants 는 승인 때 readOnly 힌트 툴에만; 카탈로그는 제외 라이선스를 제안하지 않는다; `propose_install` 은 사용자 전용 | `test_installer.*`, `test_daemon.InstallerDaemonTest` |
+| 소스의 레지스트리 URL 은 하나; `catalog.py` ≤ 300 · `installer.py` ≤ 700 · `senses/catalog.py` ≤ 150 · `mcp/attach.py` ≤ 120 · `daemon.py` ≤ 780; 규격 fixture 는 v0 필드를 전부 가진다 | `test_invariants.*`, `test_spec_fixtures.*` |
 | 닫힌 어휘 · 13일 세션이 통째로 읽힘 · 두 프로세스가 같은 `seq` 안 냄 · 잘린 최신 파티션에서도 `seq` 가 삶 | `test_ledger.*` |
 | 상태는 다시 만들 수 있고 멱등이며 턴은 한 번만 세어짐 · 말한 것만 기억 | `test_state.*` |
 | 대화와 **승인 대기**가 `state.db` 삭제를 견딤 | `test_daemon.test_daemon_resumes_after_state_deleted`, `test_reindex_restores_pending_approval` |
@@ -540,20 +636,22 @@ Daemon.run_signal_turn ── 신호마다 rules.decide 를 먼저(절대 안 �
 | `memory_proposed`/`memory_stalled` 는 기본이 침묵이고 기본 RULES.md 는 둘 다 말함 | `test_senses.MemorySenseTest.test_memory_kinds_default_silence_and_shipped_rules_speak` |
 | `memory` 는 옵트인 툴 origin, 정확히 `search_memory, read_memory, read_ledger, edit_memory`; 소켓이 `signal memory ...` 를 거부함; `memory.py` 와 `daemon.py` 는 780줄 이하(배분 600 의 1.3배 선) | `test_memory.test_tools_for_origin_memory`, `test_daemon.MemoryDaemonTest.test_socket_refuses_signal_memory`, `test_invariants.test_memory_module_under_780_lines`, `test_invariants.test_daemon_module_under_780_lines` |
 
-## 12. 세는 법
+## 13. 세는 법
 
 ```bash
-python3 -m unittest discover -s tests            # 전체 테스트, 네트워크 없음 (250)
+python3 -m unittest discover -s tests            # 전체 테스트, 네트워크 없음 (388)
 wc -l pathfinder/*.py pathfinder/llm/*.py pathfinder/senses/*.py   # 코어; 배분: ledger 400 ·
-                                                  # state 600 · daemon 600(오늘은 701, 780 이 하드
+                                                  # state 600 · daemon 600(오늘은 756, 780 이 하드
                                                   # 라인) · loop 400 · broker+policy 350 ·
                                                   # exec 300 · tools 300 · clock+signals+rules 450 ·
-                                                  # deliver 250 · jobs 350 · memory 600(오늘 685, 780 이 하드 라인) ·
-                                                  # 감각 파일 150
+                                                  # deliver 250 · jobs 350 · memory 600(오늘 686, 780 이 하드 라인) ·
+                                                  # 감각 파일 150 · catalog 300 · installer 700
+wc -l pathfinder/mcp/*.py                         # 이식한 MCP 클라이언트: 어댑터 예산 1,858, 코어 밖
+python3 bench/m5_install.py                       # m5: 임시 HOME 에 레지스트리에서 설치(네트워크·npx, 모델 크레딧 0)
 python3 scripts/scan_personal.py --all           # 추적 파일 전체 개인정보 스캔
 ```
 
-## 13. 돌리는 법
+## 14. 돌리는 법
 
 ```bash
 python3 -m pathfinder config set model provider:model-name

@@ -1,0 +1,145 @@
+{
+ "date": "2026-09-25",
+ "candidates_seen": 50,
+ "attempts": [
+  {
+   "name": "agency.kesey/pretrip",
+   "install_cli": "de6c2acda10a  install_server  agency.kesey/pretrip@1.0.1  license GPL-2.0-or-later excluded · integrity ok · trial ok, 2 tools (0 read-only) · license warning · command: npx pretrip-mcp@1.0.1",
+   "check_s": 11.5,
+   "approve_cli": "",
+   "install_s": 4.1,
+   "total_s": 15.7,
+   "steps": [
+    {
+     "step": "mcp_servers",
+     "ok": true,
+     "at_s": 0.1
+    },
+    {
+     "step": "claude_code",
+     "ok": true,
+     "at_s": 0.1
+    },
+    {
+     "step": "pins",
+     "ok": true,
+     "at_s": 0.1
+    },
+    {
+     "step": "grants",
+     "ok": true,
+     "at_s": 0.1
+    },
+    {
+     "step": "load",
+     "ok": true,
+     "at_s": 4.1
+    }
+   ],
+   "install_id": "pretrip",
+   "claude_added": true,
+   "config_added": true,
+   "others_preserved": true,
+   "backup_exists": true,
+   "uninstall_cli": "uninstalled pretrip",
+   "uninstall_s": 2.1,
+   "restored_claude": true,
+   "restored_config": true,
+   "outcome": "installed"
+  },
+  {
+   "name": "ai.adeu/adeu",
+   "install_cli": "947145bd6eeb  install_server  ai.adeu/adeu@1.7.1  license MIT ok · integrity ok · trial ok, 9 tools (0 read-only) · command: npx @adeu/mcp-server@1.7.1",
+   "check_s": 9.0,
+   "approve_cli": "",
+   "install_s": 2.4,
+   "total_s": 11.4,
+   "steps": [
+    {
+     "step": "mcp_servers",
+     "ok": true,
+     "at_s": 0.1
+    },
+    {
+     "step": "claude_code",
+     "ok": true,
+     "at_s": 0.1
+    },
+    {
+     "step": "pins",
+     "ok": true,
+     "at_s": 0.1
+    },
+    {
+     "step": "grants",
+     "ok": true,
+     "at_s": 0.1
+    },
+    {
+     "step": "load",
+     "ok": true,
+     "at_s": 2.3
+    }
+   ],
+   "install_id": "adeu",
+   "claude_added": true,
+   "config_added": true,
+   "others_preserved": true,
+   "backup_exists": true,
+   "uninstall_cli": "uninstalled adeu",
+   "uninstall_s": 2.1,
+   "restored_claude": true,
+   "restored_config": true,
+   "outcome": "installed"
+  },
+  {
+   "name": "ai.aetherwealth/mcp",
+   "install_cli": "ac09777c383d  install_server  ai.aetherwealth/mcp@0.2.17  license SEE LICENSE IN LICENSE unknown · integrity ok · trial ok, 49 tools (0 read-only) · command: npx @aetherwealth/mcp@0.2.17",
+   "check_s": 7.6,
+   "approve_cli": "",
+   "install_s": 3.8,
+   "total_s": 11.5,
+   "steps": [
+    {
+     "step": "mcp_servers",
+     "ok": true,
+     "at_s": 0.1
+    },
+    {
+     "step": "claude_code",
+     "ok": true,
+     "at_s": 0.1
+    },
+    {
+     "step": "pins",
+     "ok": true,
+     "at_s": 0.1
+    },
+    {
+     "step": "grants",
+     "ok": true,
+     "at_s": 0.1
+    },
+    {
+     "step": "load",
+     "ok": true,
+     "at_s": 3.8
+    }
+   ],
+   "install_id": "mcp",
+   "claude_added": true,
+   "config_added": true,
+   "others_preserved": true,
+   "backup_exists": true,
+   "uninstall_cli": "uninstalled mcp",
+   "uninstall_s": 2.1,
+   "restored_claude": true,
+   "restored_config": true,
+   "outcome": "installed"
+  }
+ ],
+ "installed": 3,
+ "within_limit": 3,
+ "rolled_back": 3,
+ "pass": true
+}

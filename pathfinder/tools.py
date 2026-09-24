@@ -51,7 +51,8 @@ def for_origin(origin: str) -> dict:
     """The registry a turn of this origin may call - `start_job` declares `origins={"user"}`, so
     a job's own registry (origin "job") and a signal turn's (origin "signal") never contain it:
     "a worker cannot make a worker" and "a mail cannot start a job" are structure, not policy."""
-    return {name: spec for name, spec in TOOLS.items() if origin in spec.origins}
+    # list(): an MCP reload mutates TOOLS on the loop thread while a job or a pass iterates here
+    return {name: spec for name, spec in list(TOOLS.items()) if origin in spec.origins}
 
 
 _BOOL = {"true": True, "false": False, "1": True, "0": False}

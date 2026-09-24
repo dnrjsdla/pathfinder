@@ -18,6 +18,8 @@ TYPES = frozenset({
     "signal", "decision", "judgment", "delivery", "reaction", "presence",
     "job_start", "job_done", "job_failed",
     "memory_pass", "memory_apply", "session_summary",
+    "pin_accept", "pin_revoke",
+    "install_step", "install_done", "install_failed", "uninstalled",
 })
 ORIGINS = frozenset({"user", "signal", "job", "system", "memory"})
 TRUST = frozenset({"user", "self", "third_party"})

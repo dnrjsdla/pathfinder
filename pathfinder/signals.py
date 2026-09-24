@@ -105,6 +105,8 @@ def load(cfg: dict, home=None) -> list:
         if home is not None:
             resolved["_home"] = home
             mod.HOME = home
+        if hasattr(mod, "REGISTRY_URL"):  # a tool handler gets no `options` - catalog.py's reads this
+            mod.REGISTRY_URL = resolved.get("registry")
         for tool_name, spec in (getattr(mod, "TOOLS", {}) or {}).items():
             tools.TOOLS[tool_name] = spec
         senses.append(Sense(name=name, trust=trust, kinds=dict(kinds),

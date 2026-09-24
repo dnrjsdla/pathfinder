@@ -49,8 +49,7 @@ class MailHeadersOnlyTest(unittest.TestCase):
     def _run_poll(self):
         fake = FakeIMAP()
         with mock.patch("pathfinder.senses.mail.imaplib.IMAP4_SSL", return_value=fake), \
-             mock.patch("pathfinder.senses.mail.subprocess.run",
-                       return_value=mock.Mock(returncode=0, stdout="secret-pw\n")):
+             mock.patch("pathfinder.senses.mail.keychain.secret", return_value="secret-pw"):
             signals = mail_sense.poll({"host": "imap.example.com", "user": "me@example.com"}, time.time())
         return fake, signals
 
@@ -70,14 +69,10 @@ class MailHeadersOnlyTest(unittest.TestCase):
 
     def test_mail_password_from_keychain_only(self):
         self.assertNotIn("password", mail_sense.OPTIONS)  # never a config key
-        with mock.patch("pathfinder.senses.mail.subprocess.run",
-                        return_value=mock.Mock(returncode=0, stdout="secret-pw\n")) as run, \
+        with mock.patch("pathfinder.senses.mail.keychain.secret", return_value="secret-pw") as secret, \
              mock.patch("pathfinder.senses.mail.imaplib.IMAP4_SSL", return_value=FakeIMAP()) as ssl_cls:
             mail_sense.poll({"host": "imap.example.com", "user": "me@example.com"}, time.time())
-        argv = run.call_args[0][0]
-        self.assertEqual(argv[:2], ["security", "find-generic-password"])
-        self.assertIn("me@example.com", argv)
-        self.assertIn("pathfinder-mail", argv)  # the default keychain_service
+        secret.assert_called_once_with("pathfinder-mail", "me@example.com")  # the default keychain_service
         fake = ssl_cls.return_value
         logins = [c for c in fake.commands if c[0] == "login"]
         self.assertEqual(logins[0][2], "secret-pw")  # the password came from the mocked Keychain call
@@ -93,8 +88,7 @@ class ReadMailInjectionGuardTest(unittest.TestCase):
     def _try(self, bad_id):
         fake = FakeIMAP()
         with mock.patch("pathfinder.senses.mail.imaplib.IMAP4_SSL", return_value=fake), \
-             mock.patch("pathfinder.senses.mail.subprocess.run",
-                       return_value=mock.Mock(returncode=0, stdout="pw\n")), \
+             mock.patch("pathfinder.senses.mail.keychain.secret", return_value="pw"), \
              mock.patch("pathfinder.senses.mail.config.load", return_value={"senses": {"mail": {
                  "host": "imap.example.com", "user": "me@example.com"}}}):
             with self.assertRaises(ValueError):
@@ -118,8 +112,7 @@ class UidvalidityWatermarkTest(unittest.TestCase):
 
     def test_uidvalidity_change_resets_watermark(self):
         options = {"host": "imap.example.com", "user": "me@example.com"}
-        with mock.patch("pathfinder.senses.mail.subprocess.run",
-                        return_value=mock.Mock(returncode=0, stdout="pw\n")):
+        with mock.patch("pathfinder.senses.mail.keychain.secret", return_value="pw"):
             fake1 = FakeIMAP(uidvalidity=b"100", search_uids=b"1 2 3 4")
             with mock.patch("pathfinder.senses.mail.imaplib.IMAP4_SSL", return_value=fake1):
                 first = mail_sense.poll(options, time.time())
@@ -154,8 +147,7 @@ class FoldedMessageIdTest(unittest.TestCase):
 
         fake.uid = uid
         with mock.patch("pathfinder.senses.mail.imaplib.IMAP4_SSL", return_value=fake), \
-             mock.patch("pathfinder.senses.mail.subprocess.run",
-                       return_value=mock.Mock(returncode=0, stdout="pw\n")):
+             mock.patch("pathfinder.senses.mail.keychain.secret", return_value="pw"):
             signals = mail_sense.poll({"host": "imap.example.com", "user": "me@example.com"}, time.time())
         self.assertEqual(len(signals), 1)
         self.assertEqual(signals[0].key, "uid:7")  # not the mangled folded value

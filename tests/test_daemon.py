@@ -3,7 +3,9 @@ import asyncio
 import dataclasses
 import json
 import os
+import shutil
 import stat
+import sys
 import tempfile
 import threading
 import time
@@ -17,6 +19,7 @@ from pathfinder.daemon import SOCKET, Daemon
 from pathfinder.deliver import Notice
 from pathfinder.ledger import Ledger
 from pathfinder.llm import LLMError
+from pathfinder.mcp import pins as mcp_pins
 from pathfinder.loop import TurnControl
 from pathfinder.signals import Signal
 from pathfinder.state import State
@@ -1393,6 +1396,211 @@ class JobSignalTest(DaemonHarness):
         events = self.run_with(fake_model("ok"), scenario)
         decisions = [e for e in events if e["type"] == "decision"]
         self.assertTrue(any(d["action"] == "speak" for d in decisions))
+
+
+FAKE_SERVER = Path(__file__).parent / "mcp_fake_server.py"
+
+
+class McpDaemonTest(DaemonHarness):
+    """The mcp load/close/pin-check path, live against `tests/mcp_fake_server.py` - a real
+    child process, no model credits."""
+
+    def test_mcp_tools_registered_at_start(self):
+        config.set(self.home, "mcp_servers",
+                   {"fake": {"transport": "stdio", "command": [sys.executable, str(FAKE_SERVER)]}})
+
+        async def scenario(daemon):
+            await daemon.mcp.loaded  # load() now runs as a background task - wait for it
+            return dict(tools_mod.TOOLS), daemon.mcp.servers._sessions["fake"]._transport._proc
+
+        snapshot, proc = self.run_with(fake_model("ok"), scenario)
+        self.assertIn("mcp__fake__echo", snapshot)
+        self.assertEqual(len([e for e in self.events() if e["type"] == "pin_accept"]), 1)
+        self.assertNotIn("mcp__fake__echo", tools_mod.TOOLS)  # closed: the key is gone
+        self.assertIsNotNone(proc.poll())  # and the child is dead
+
+    def test_rug_pull_holds(self):
+        config.set(self.home, "mcp_servers",
+                   {"fake": {"transport": "stdio", "command": [sys.executable, str(FAKE_SERVER)]}})
+        self.run_with(fake_model("ok"), lambda daemon: _noop())  # pins the original description
+
+        config.set(self.home, "mcp_servers", {"fake": {
+            "transport": "stdio", "command": [sys.executable, str(FAKE_SERVER), "--description", "changed"]}})
+        self.run_with(fake_model("ok"), lambda daemon: _noop())
+
+        self.assertNotIn("mcp__fake__echo", tools_mod.TOOLS)
+        events = self.events()
+        pending = [e for e in events if e["type"] == "approval_pending" and e["tool"] == "accept_pins"]
+        self.assertEqual(len(pending), 1)
+        self.assertTrue(any(e["type"] == "signal" and e["kind"] == "tool_held" for e in events))
+        approval_id = pending[0]["id"]
+
+        async def approve_scenario(daemon):
+            c = await Client.open(self.home)
+            c.send({"type": "approve", "id": approval_id})
+            await c.recv()
+            c.close()
+            return dict(tools_mod.TOOLS)
+
+        snapshot = self.run_with(fake_model("ok"), approve_scenario)
+        self.assertIn("mcp__fake__echo", snapshot)
+        # The first run's own pin_accept (the original description) would already satisfy a bare
+        # "any pin_accept exists" - assert the NEW description's hash specifically, and that
+        # approving actually cleared the hold (review).
+        new_hash = mcp_pins.fingerprint({"description": "changed", "inputSchema": {
+            "type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]}})["description"]
+        pin_accepts = [e for e in self.events() if e["type"] == "pin_accept"]
+        self.assertTrue(any(e["description_hash"] == new_hash for e in pin_accepts))
+        state = State(self.home / "state.db")
+        self.assertEqual([r for r in state.pending() if r["tool"] == "accept_pins"], [])
+
+    def test_proposal_table_routes_by_tool(self):
+        async def scenario(daemon):
+            proposal = {"target": "USER.md", "op": "add", "old": "", "new": "Likes tea.", "evidence": [1]}
+            daemon.record("approval_pending", session="s1", origin="memory", id="appr1",
+                          call_id="appr1", tool="edit_memory", args=proposal, messages=[])
+            c = await Client.open(self.home)
+            c.send({"type": "approve", "id": "appr1"})
+            reply = await c.recv()
+            c.close()
+            return reply, (self.home / "USER.md").read_text(encoding="utf-8")
+
+        reply, after = self.run_with(fake_model("ok"), scenario)
+        self.assertEqual(reply, {"type": "turn.end", "turn": "", "kind": "resumed"})
+        self.assertIn("Likes tea.", after)  # edit_memory still reaches memory_mgr.decide
+
+        config.set(self.home, "grants", {"edit_memory": "ask"})
+
+        def gate_model(cfg, control=None, tools=None):
+            def step(messages):
+                yield ("tool_calls", [{"id": "c1", "name": "edit_memory", "arguments": {
+                    "target": "wiki/Test.md", "op": "add", "old": "", "new": "# Test\nline"}}])
+            return step
+
+        async def gate_scenario(daemon):
+            c = await Client.open(self.home)
+            c.send({"type": "say", "text": "please remember this"})
+            seen = await c.until("turn.end")
+            c.close()
+            return seen
+
+        seen = self.run_with(gate_model, gate_scenario)
+        self.assertEqual(seen[-1]["kind"], "gated")  # a LANE row still resumes, unaffected by the table
+
+    def test_secret_missing_records_one_error(self):
+        config.set(self.home, "mcp_servers", {"gh": {
+            "transport": "stdio", "command": ["true"], "env": {"TOKEN": "keychain:bot"}}})
+
+        with mock.patch("pathfinder.keychain.subprocess.run", side_effect=FileNotFoundError):
+            snapshot = self.run_with(fake_model("ok"), _snapshot)
+
+        self.assertFalse(any(name.startswith("mcp__gh__") for name in snapshot))
+        errors = [e for e in self.events() if e["type"] == "error"]
+        self.assertEqual(len(errors), 1)
+        self.assertIn("secret missing", errors[0]["message"])
+
+    def test_mcp_tool_call_in_a_turn(self):
+        config.set(self.home, "mcp_servers",
+                   {"fake": {"transport": "stdio", "command": [sys.executable, str(FAKE_SERVER)]}})
+
+        def call_model(cfg, control=None, tools=None):
+            calls = {"n": 0}
+            def step(messages):
+                calls["n"] += 1
+                if calls["n"] == 1:
+                    yield ("tool_calls", [{"id": "c1", "name": "mcp__fake__echo", "arguments": {"text": "hi"}}])
+                else:
+                    yield ("text", "done")
+            return step
+
+        async def scenario(daemon):
+            c = await Client.open(self.home)
+            c.send({"type": "say", "text": "echo hi"})
+            seen = await c.until("turn.end")
+            c.close()
+            return seen
+
+        config.set(self.home, "grants", {"mcp__fake__echo": "allow"})
+        seen = self.run_with(call_model, scenario)
+        self.assertEqual(seen[-1]["kind"], "answer")
+        results = [e for e in self.events() if e["type"] == "tool_result"]
+        self.assertTrue(any("hi" in str(e["result"]) for e in results))
+
+        config.set(self.home, "grants", {})
+        seen2 = self.run_with(call_model, scenario)
+        self.assertEqual(seen2[-1]["kind"], "gated")
+
+
+async def _noop():
+    return None
+
+
+async def _snapshot(daemon):
+    await daemon.mcp.loaded  # load() now runs as a background task - wait for it
+    return dict(tools_mod.TOOLS)
+
+
+class InstallerDaemonTest(DaemonHarness):
+    """`install`/`uninstall` over the socket, and the `propose_install` tool's origin - against
+    `tests/mcp_fake_server.py`, no model credits, no npm/PyPI network."""
+
+    def test_install_over_socket_then_approve(self):
+        # B3 requires the runtime hint to be the real launcher ("npx" for npm) - a symlink named
+        # "npx" standing in for it on PATH keeps this offline (the fake server ignores the
+        # `-y`/pinned-spec argv npx would normally get, via `parse_known_args`).
+        npx_dir = Path(tempfile.mkdtemp(prefix="npx-"))
+        (npx_dir / "npx").symlink_to(FAKE_SERVER)
+        self.addCleanup(shutil.rmtree, npx_dir, True)
+        fake_run_ok = mock.patch(
+            "pathfinder.installer.subprocess.run",
+            return_value=type("R", (), {"returncode": 0, "stdout": json.dumps(
+                {"dist.integrity": "sha512-abc", "dist.tarball": "https://x", "license": "MIT"})})())
+        fake_fetch = mock.patch("pathfinder.catalog.fetch", return_value=[{"server": {
+            "name": "io.github.acme/widget", "version": "1.0.0", "description": "a widget server",
+            "packages": [{"registryType": "npm", "identifier": "widget", "version": "1.0.0",
+                         "runtimeHint": "npx"}]}}])
+        fake_path = mock.patch.dict(os.environ, {"PATH": f"{npx_dir}:{os.environ.get('PATH', '')}"})
+
+        async def scenario(daemon):
+            c = await Client.open(self.home)
+            c.send({"type": "install", "name": "widget"})
+            reply = await c.recv()
+            c.close()
+            return reply
+
+        with fake_run_ok, fake_fetch, fake_path:
+            reply = self.run_with(fake_model("ok"), scenario)
+        self.assertEqual(reply["type"], "install")
+        self.assertIn("install_server", reply["line"])
+        approval_id = reply["id"]
+
+        async def approve_scenario(daemon):
+            c = await Client.open(self.home)
+            c.send({"type": "approve", "id": approval_id})
+            await c.recv()
+            c.close()
+            return dict(tools_mod.TOOLS), config.load(self.home)["grants"]
+
+        with mock.patch.dict(os.environ, {"HOME": str(self.home),
+                                          "PATH": f"{npx_dir}:{os.environ.get('PATH', '')}"}):
+            snapshot, grants = self.run_with(fake_model("ok"), approve_scenario)
+        server_id = next(iter(config.load(self.home)["mcp_servers"]))
+        self.assertIn(f"mcp__{server_id}__echo", snapshot)
+        self.assertEqual(grants.get(f"mcp__{server_id}__echo"), "allow")
+        self.assertTrue(any(e["type"] == "install_done" for e in self.events()))
+
+    def test_signal_turn_cannot_propose_install(self):
+        config.set(self.home, "senses", {"catalog": {}})
+        self.addCleanup(tools_mod.TOOLS.pop, "search_tools", None)
+        self.addCleanup(tools_mod.TOOLS.pop, "propose_install", None)
+
+        async def scenario(daemon):
+            return dict(tools_mod.TOOLS)
+
+        self.run_with(fake_model("ok"), scenario)
+        self.assertIn("propose_install", tools_mod.for_origin("user"))
+        self.assertNotIn("propose_install", tools_mod.for_origin("signal"))
+        self.assertNotIn("search_tools", tools_mod.for_origin("signal"))
 
 
 if __name__ == "__main__":

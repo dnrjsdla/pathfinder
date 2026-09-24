@@ -147,9 +147,10 @@ def load(home, senses) -> Rules:
     # shipped row. The shipped section stands in until the user writes their own; the file is
     # theirs and is not rewritten.
     shipped = parse(DEFAULT_RULES_PATH.read_text(encoding="utf-8"), conditions, validated_kinds).by_kind
-    for kind in validated_kinds - set(rules.by_kind):
-        if kind in shipped:
-            rules.by_kind[kind] = shipped[kind]
+    # ...and a kind the daemon pushes itself (tool_held) has no sense to validate it, so every
+    # shipped section a home file lacks stands in, not only the loaded senses' kinds.
+    for kind in set(shipped) - set(rules.by_kind):
+        rules.by_kind[kind] = shipped[kind]
     return rules
 
 

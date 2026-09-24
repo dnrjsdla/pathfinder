@@ -47,10 +47,17 @@ CREATE TABLE IF NOT EXISTS memory_passes (ts REAL, since INTEGER, upto INTEGER, 
 CREATE TABLE IF NOT EXISTS memory_applies (
     seq INTEGER PRIMARY KEY, ts REAL, target TEXT, op TEXT, old TEXT, new TEXT, approval TEXT
 );
+CREATE TABLE IF NOT EXISTS pins (
+    server TEXT, tool TEXT, description_hash TEXT, schema_hash TEXT, params_json TEXT, ts REAL,
+    PRIMARY KEY (server, tool)
+);
+CREATE TABLE IF NOT EXISTS installs (
+    id TEXT PRIMARY KEY, name TEXT, version TEXT, state TEXT, ts REAL, detail TEXT
+);
 """
 
 NEW_TABLES = ("signals", "decisions", "judgments", "deliveries", "reactions", "presence", "signal_turns", "jobs",
-              "pages_fts", "pages", "vectors", "summaries", "memory_passes", "memory_applies")
+              "pages_fts", "pages", "vectors", "summaries", "memory_passes", "memory_applies", "pins", "installs")
 
 
 @dataclass
@@ -191,6 +198,38 @@ class State:
                 "INSERT INTO memory_applies (seq, ts, target, op, old, new, approval) VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (seq, event["ts"], event["target"], event["op"], event.get("old"), event.get("new"),
                  event.get("approval")))
+        if event["type"] == "pin_accept":
+            self.db.execute(
+                "INSERT OR REPLACE INTO pins (server, tool, description_hash, schema_hash, params_json, ts) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (event["server"], event["tool"], event["description_hash"], event["schema_hash"],
+                 json.dumps(event["params"]), event["ts"]))
+        if event["type"] == "pin_revoke":
+            if event.get("tool"):
+                self.db.execute("DELETE FROM pins WHERE server = ? AND tool = ?", (event["server"], event["tool"]))
+            else:  # tool omitted - the whole server is forgotten
+                self.db.execute("DELETE FROM pins WHERE server = ?", (event["server"],))
+        if event["type"] == "install_step":
+            self.db.execute(
+                "INSERT INTO installs (id, name, version, state, ts, detail) VALUES (?, '', '', 'installing', ?, ?) "
+                "ON CONFLICT(id) DO UPDATE SET state = 'installing', ts = excluded.ts, detail = excluded.detail",
+                (event["id"], event["ts"], event.get("step", "")))
+        if event["type"] == "install_done":
+            self.db.execute(
+                "INSERT INTO installs (id, name, version, state, ts, detail) VALUES (?, ?, ?, 'installed', ?, ?) "
+                "ON CONFLICT(id) DO UPDATE SET name = excluded.name, version = excluded.version, "
+                "state = 'installed', ts = excluded.ts, detail = excluded.detail",
+                (event["id"], event["name"], event["version"], event["ts"], event.get("backup", "")))
+        if event["type"] == "install_failed" and event.get("id"):
+            # id == "" is a check that failed before any server id was even computed (propose
+            # time) - nothing to project into a row for that.
+            self.db.execute(
+                "INSERT INTO installs (id, name, version, state, ts, detail) VALUES (?, ?, '', 'failed', ?, ?) "
+                "ON CONFLICT(id) DO UPDATE SET state = 'failed', ts = excluded.ts, detail = excluded.detail",
+                (event["id"], event.get("name", ""), event["ts"], event.get("reason", "")))
+        if event["type"] == "uninstalled":
+            self.db.execute("UPDATE installs SET state = 'uninstalled', ts = ? WHERE id = ?",
+                            (event["ts"], event["id"]))
         if event["type"] == "job_failed":
             # "stopped" is the one reason the user themselves caused (interrupt) - the CLI shows
             # it as its own state rather than lumping a cancel in with a model/internal failure.
@@ -344,6 +383,12 @@ class State:
 
     def has_delivery(self, id: str) -> bool:
         return self.db.execute("SELECT 1 FROM deliveries WHERE id = ?", (id,)).fetchone() is not None
+
+    def context_cwds(self, since: float) -> set:
+        """cwd of every `context` signal (the attach sense's `attach:<cwd>` key) at or after
+        `since` - the catalog's work-context tags read this, not `signals` directly."""
+        rows = self.db.execute("SELECT key FROM signals WHERE kind = 'context' AND ts >= ?", (since,)).fetchall()
+        return {k[len("attach:"):] for (k,) in rows if k.startswith("attach:")}
 
     def seen(self, key: str, since: float) -> bool:
         """True when `key` was recorded (any sense, any kind) at or after `since` - the 24 h
@@ -550,3 +595,27 @@ class State:
             judgments.append(self.db.execute(
                 "SELECT COUNT(*) FROM judgments WHERE ts >= ? AND ts < ?", (start, next_start)).fetchone()[0])
         return {"days": days, "pending": len(self.pending_memory()), "judgments": judgments}
+
+    def installed_names(self) -> set:
+        """Server ids currently in the `installed` state - the installer's clash check."""
+        rows = self.db.execute("SELECT id FROM installs WHERE state = 'installed'").fetchall()
+        return {r[0] for r in rows}
+
+    def install(self, id: str):
+        row = self.db.execute(
+            "SELECT id, name, version, state, ts, detail FROM installs WHERE id = ?", (id,)).fetchone()
+        if row is None:
+            return None
+        return {"id": row[0], "name": row[1], "version": row[2], "state": row[3], "ts": row[4], "detail": row[5]}
+
+    def pins(self) -> dict:
+        """server -> tool -> {"description": hash, "schema": hash, "params": [...]} -
+        `mcp.pins.PinStore.load`'s source, rebuilt by `pin_accept`/`pin_revoke` events."""
+        rows = self.db.execute(
+            "SELECT server, tool, description_hash, schema_hash, params_json FROM pins").fetchall()
+        out: dict = {}
+        for server, tool, description_hash, schema_hash, params_json in rows:
+            out.setdefault(server, {})[tool] = {
+                "description": description_hash, "schema": schema_hash, "params": json.loads(params_json),
+            }
+        return out

@@ -1,0 +1,106 @@
+{
+  "name": "io.github.example/mcp-notes",
+  "version": "1.2.3",
+  "source_registry": {
+    "url": "https://registry.modelcontextprotocol.io",
+    "entry_id": "io.github.example/mcp-notes",
+    "updated_at": "2026-09-20T00:00:00Z"
+  },
+  "description": "Example notes server for the connection spec fixtures.",
+  "package": {
+    "registry_type": "npm",
+    "identifier": "@example/mcp-notes",
+    "version": "1.2.3",
+    "runtime": "npx",
+    "args": [
+      "-y",
+      "@example/mcp-notes@1.2.3"
+    ],
+    "env": [
+      {
+        "name": "NOTES_TOKEN",
+        "secret": true,
+        "required": true
+      }
+    ],
+    "remotes": []
+  },
+  "verification": {
+    "license": {
+      "spdx": "MIT",
+      "source": "npm",
+      "verdict": "ok"
+    },
+    "malicious_scan": "not_checked",
+    "sandbox_trial": {
+      "ran_at": "2026-09-24T12:00:00Z",
+      "started": true,
+      "tools": [
+        {
+          "name": "list_notes",
+          "description_hash": "sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "schema_hash": "sha256-1111111111111111111111111111111111111111111111111111111111111111",
+          "read_only_hint": true,
+          "params": []
+        },
+        {
+          "name": "get_note",
+          "description_hash": "sha256-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "schema_hash": "sha256-2222222222222222222222222222222222222222222222222222222222222222",
+          "read_only_hint": true,
+          "params": []
+        },
+        {
+          "name": "create_note",
+          "description_hash": "sha256-cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "schema_hash": "sha256-3333333333333333333333333333333333333333333333333333333333333333",
+          "read_only_hint": false,
+          "params": []
+        }
+      ],
+      "file_writes_outside_tmp": false,
+      "network": "not_checked",
+      "verdict": "ok",
+      "skipped": [],
+      "sandboxed": true
+    },
+    "maintenance": {
+      "last_publish_at": "2026-09-18T00:00:00Z",
+      "namespace_verified": true
+    },
+    "description_hash": "sha256-dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "trust_tier": "checked"
+  },
+  "install": {
+    "id": "mcp-notes",
+    "needs": [
+      "NOTES_TOKEN"
+    ],
+    "runtime": "npx",
+    "pinned_version": "1.2.3",
+    "integrity": "sha512-00000000000000000000...",
+    "env_from_keychain": [
+      "NOTES_TOKEN"
+    ],
+    "args": [
+      "-y",
+      "@example/mcp-notes@1.2.3"
+    ],
+    "permissions": [
+      {
+        "tool": "list_notes",
+        "grant": "allow"
+      },
+      {
+        "tool": "get_note",
+        "grant": "allow"
+      },
+      {
+        "tool": "create_note",
+        "grant": "ask"
+      }
+    ]
+  },
+  "billing": "unknown",
+  "outcome": "proposed"
+}

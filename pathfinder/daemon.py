@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import collections
+import inspect
 import json
 import os
 import socket
@@ -21,6 +22,8 @@ from .ledger import Ledger
 from .llm import LLMError, resolve
 from .llm import slot as slot_mod
 from .loop import TurnControl
+from . import installer as installer_mod
+from .mcp import attach as mcp_attach
 from .state import State
 
 SOCKET = "pathfinder.sock"
@@ -94,6 +97,11 @@ class Daemon:
         self.system_prompt = PROMPT.read_text(encoding="utf-8") + "\n\n" + signals.SIGNAL_TURNS_CLAUSE
         self.sessions = {}
         self.server = None
+        self.dispatch = lambda fn: fn()  # direct until start() swaps in the threadsafe version
+        self.mcp = mcp_attach.Attach(self.home, self.state, self.record, self.push_signal, self.dispatch)
+        self.installer = installer_mod.Installer(self.home, self.state, self.record, self.push_signal,
+                                                 self.mcp, self.dispatch)
+        installer_mod.bind(self.installer)
 
         cfg = config.load(self.home)
         self.senses = {s.name: s for s in signals.load(cfg, self.home)}
@@ -112,6 +120,10 @@ class Daemon:
         # `record` is loop-thread-only, so marshal through `dispatch` like every other callback.
         self.memory_mgr.on_rules_changed = lambda: self.memory_mgr.dispatch(self.reload_rules)
         memory.bind(self.memory_mgr)
+        # A row with empty `messages` is a proposal (Manager.edit's/Attach.register's shape),
+        # keyed by tool.
+        self.PROPOSALS = {"edit_memory": self.memory_mgr.decide, "accept_pins": self.mcp.accept_pins,
+                          "install_server": self.installer.decide}
 
     def _is_busy(self) -> bool:
         """The memory trigger's own gate: no turn running in any session, no job holding the
@@ -172,6 +184,9 @@ class Daemon:
                 pass  # loop already closed: a job's late call has nothing left to report to
         self.jobs_mgr.dispatch = dispatch
         self.memory_mgr.dispatch = dispatch
+        self.mcp.dispatch = dispatch
+        self.installer.dispatch = dispatch
+        self.dispatch = dispatch
         self.jobs_mgr.sweep()  # a job the last daemon died under is closed and announced here
         path = self.home / SOCKET
         if path.exists():
@@ -184,6 +199,9 @@ class Daemon:
         finally:
             os.umask(old)
         os.chmod(path, 0o600)
+        # A dead or slow server must not delay the socket bind (and so the first `say`) by its
+        # timeout - loaded as a background task once the socket is up, awaited in close() instead.
+        self.mcp.loaded = asyncio.ensure_future(self.mcp.load())
         return self.server
 
     async def serve(self):
@@ -197,6 +215,11 @@ class Daemon:
     async def close(self):
         self.jobs_mgr.dispatch = lambda fn: None  # drop a job's late calls, not race a closing state
         self.memory_mgr.dispatch = lambda fn: None
+        self.mcp.dispatch = lambda fn: None
+        self.installer.dispatch = lambda fn: None
+        self.dispatch = lambda fn: None
+        if self.mcp.loaded is not None:
+            await self.mcp.loaded
         await self.sense_loop.stop()
         for s in self.sessions.values():
             if s.worker:
@@ -210,6 +233,7 @@ class Daemon:
         self.jobs_mgr.close()
         self.memory_mgr.stop()
         self.memory_mgr.close()
+        self.mcp.close()
         self.state.close()
 
     def _sense_error(self, name, exc):
@@ -283,13 +307,15 @@ class Daemon:
                         self.jobs_mgr.resume(approval_id, decision)
                         _write(writer, {"type": "turn.end", "turn": "", "kind": "resumed"})
                         continue
-                    # a Manager-queued proposal (Manager.edit records it with messages=[]) goes to
-                    # the memory box; a broker Gate on edit_memory (grants "ask") is a LANE row
-                    # (non-empty messages, the model's own call id) and must resume the turn.
-                    if row["tool"] == "edit_memory" and not row.get("job") and not row["messages"]:
+                    # A queued proposal (empty `messages` - Manager.edit's and Attach.register's
+                    # shape) routes by tool through PROPOSALS; a broker Gate (non-empty messages,
+                    # the model's own call id) is a LANE row and must resume the turn instead.
+                    if row["tool"] in self.PROPOSALS and not row.get("job") and not row["messages"]:
                         self.record("approval", session=row["session"], turn=row["turn"], origin="user",
                                     id=approval_id, decision=decision)
-                        self.memory_mgr.decide(approval_id, decision)
+                        result = self.PROPOSALS[row["tool"]](approval_id, decision)
+                        if inspect.isawaitable(result):  # an async handler (mcp.accept_pins) blocks nothing
+                            await result
                         _write(writer, {"type": "turn.end", "turn": "", "kind": "resumed"})
                         continue
                     target = self._session(row["session"])
@@ -316,6 +342,29 @@ class Daemon:
                 elif kind == "memory.run":
                     result = await asyncio.to_thread(self.memory_mgr.run_pass, True)
                     _write(writer, {"type": "memory.run", "result": result})
+                elif kind == "install":
+                    name = msg.get("name")
+                    if not isinstance(name, str) or not name:
+                        _write(writer, {"type": "error", "message": "install needs a \"name\""})
+                        continue
+                    try:
+                        result = await asyncio.to_thread(self.installer.propose_by_name, name)
+                    except Exception as e:  # a check that raised must answer, not drop the connection (m5: "no reply")
+                        result = {"error": f"{type(e).__name__}: {e}"[:300]}
+                    if "error" in result:
+                        _write(writer, {"type": "error", "message": result["error"]})
+                    else:
+                        _write(writer, {"type": "install", "id": result["id"], "line": result["line"]})
+                elif kind == "uninstall":
+                    id = msg.get("id")
+                    if not isinstance(id, str) or not id:
+                        _write(writer, {"type": "error", "message": "uninstall needs an \"id\""})
+                        continue
+                    result = await self.installer.uninstall(id)
+                    if "error" in result:
+                        _write(writer, {"type": "error", "message": result["error"]})
+                    else:
+                        _write(writer, {"type": "uninstall", "id": result["id"]})
                 elif kind == "signal":
                     sense_name, fields = msg.get("sense"), msg.get("fields")
                     sense = self.senses.get(sense_name)
@@ -561,6 +610,8 @@ class Daemon:
             def emit(kind, payload):
                 aio.call_soon_threadsafe(out_q.put_nowait, (kind, payload))
 
+            if self.mcp.loaded is not None and not self.mcp.loaded.done():
+                await self.mcp.loaded  # a turn must see the full tool surface, not a partial one
             signal_tools = tools.for_origin("signal")
             broker = Broker(signal_tools, "signal", cfg["grants"], control=control, emit=emit)
             step = self.step_factory(cfg, control, signal_tools)
@@ -626,6 +677,8 @@ class Daemon:
             aio.call_soon_threadsafe(out_q.put_nowait, (kind, payload))
 
         cfg = config.load(self.home)
+        if self.mcp.loaded is not None and not self.mcp.loaded.done():
+            await self.mcp.loaded  # a turn must see the full tool surface, not a partial one
         user_tools = tools.for_origin("user")
         broker = Broker(user_tools, "user", cfg["grants"], control=control, emit=emit,
                         approved=approved, denied=denied)

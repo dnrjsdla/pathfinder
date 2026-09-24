@@ -130,3 +130,28 @@ one" - the third failure in ten minutes is itself the one that matches `count_ov
 | condition | value | action | note |
 | --- | --- | --- | --- |
 | `always` | `-` | `speak` | nothing learned in three days although there was something to read (blueprint §9: Mark.5's 24 silent days become 3) |
+
+## tool_held
+
+| condition | value | action | note |
+| --- | --- | --- | --- |
+| `always` | `-` | `speak` | a pinned tool changed its description or schema; approve the row to accept it |
+
+## tool_candidate
+
+| condition | value | action | note |
+| --- | --- | --- | --- |
+| `count_over` | `3` | `silence` | a flood of matches is a registry dump, not news |
+| `always` | `-` | `speak` | a new tool that fits the work is worth one line (daily budget and quiet hours still apply) |
+
+## install_done
+
+| condition | value | action | note |
+| --- | --- | --- | --- |
+| `always` | `-` | `speak` | the install the user asked for finished - always say it (exempt from a model's own judgment, like a job's outcome) |
+
+## install_failed
+
+| condition | value | action | note |
+| --- | --- | --- | --- |
+| `always` | `-` | `speak` | the install the user asked for could not finish - always say it, with the reason |

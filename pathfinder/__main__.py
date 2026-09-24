@@ -1,8 +1,9 @@
 """pathfinder daemon | reindex | say TEXT | config set KEY VALUE |
 approvals | approve ID | deny ID | interrupt |
-listen | signal SENSE JSON | react up|down [ID] | rules |
+listen | signal SENSE JSON | react up|down [ID] | rules | tools |
 jobs | job stop ID | job steer ID TEXT |
-memory | memory run | memory undo [N]"""
+memory | memory run | memory undo [N] |
+install NAME | uninstall ID | search TEXT"""
 from __future__ import annotations
 
 import asyncio
@@ -12,10 +13,13 @@ import sys
 import time
 from pathlib import Path
 
-from . import config, memory
+from . import catalog, config, memory
+from . import installer as installer_mod
 from .clock import format_local
 from .daemon import SOCKET, Daemon, is_serving
 from .ledger import Ledger
+from .mcp import servers as mcp_servers
+from .mcp.protocol import qualify
 from .state import State
 
 USAGE = __doc__
@@ -83,8 +87,47 @@ def approvals(home):
                 print(f"{row['id']}  edit_memory  {a['target']} {a['op']}: "
                       f"{_clip60(a['old'])} -> {_clip60(a['new'])}")
                 continue
+            if row["tool"] == "accept_pins":
+                a = row["args"]
+                held = a.get("held") or []
+                print(f"{row['id']}  accept_pins  {a['server']}: {len(held)} held — {held[0] if held else ''}")
+                continue
+            if row["tool"] == "install_server":
+                print(installer_mod.render_row(row))
+                continue
             job = f"  job: {row['job']}" if row.get("job") else ""
             print(f"{row['id']}  {row['tool']}  {json.dumps(row['args'], ensure_ascii=False)}{job}")
+    finally:
+        state.close()
+    return 0
+
+
+def mcp_tools_list(home):
+    """`pathfinder tools`: reads config + state directly, like `approvals` - no daemon needed
+    to see the tool surface."""
+    cfg = config.load(home)
+    state = State(home / "state.db")
+    try:
+        pins, grants = state.pins(), cfg["grants"]
+        held_rows = [r for r in state.pending() if r["tool"] == "accept_pins"]
+        held_names = {qualify(row["args"]["server"], t["name"])
+                      for row in held_rows for t in row["args"]["tools"]}
+        for server_cfg in mcp_servers.load(cfg):
+            sid = server_cfg.server_id
+            if server_cfg.disabled:
+                print(f"{sid}  {server_cfg.transport_kind}  disabled: {server_cfg.disabled}")
+                continue
+            tool_names = sorted(pins.get(sid, {}))
+            print(f"{sid}  {server_cfg.transport_kind}  {len(tool_names)} tools")
+            for tool_name in tool_names:
+                name = qualify(sid, tool_name)
+                label = "held" if name in held_names else grants.get(name, "ask")
+                print(f"  {name}  {label}")
+        if held_rows:
+            print("held:")
+            for row in held_rows:
+                for line in row["args"]["held"]:
+                    print(f"  {line}")
     finally:
         state.close()
     return 0
@@ -177,6 +220,56 @@ def react(home, vote, delivery_id=None):
             if resp.get("type") == "error":
                 print(f"pathfinder: {resp['message']}", file=sys.stderr)
                 return 1
+    return 0
+
+
+def install_cmd(home, name):
+    """`pathfinder install NAME`: check + propose over the socket, print the proposal's row."""
+    sock = _connect(home)
+    if sock is None:
+        return 1
+    with sock:
+        f = sock.makefile("rwb")
+        f.write((json.dumps({"type": "install", "name": name}) + "\n").encode())
+        f.flush()
+        line = f.readline()
+        if not line:
+            print("pathfinder: no reply", file=sys.stderr)
+            return 1
+        msg = json.loads(line)
+        if msg["type"] == "error":
+            print(f"pathfinder: {msg['message']}", file=sys.stderr)
+            return 1
+        print(msg["line"])
+    return 0
+
+
+def uninstall_cmd(home, id):
+    sock = _connect(home)
+    if sock is None:
+        return 1
+    with sock:
+        f = sock.makefile("rwb")
+        f.write((json.dumps({"type": "uninstall", "id": id}) + "\n").encode())
+        f.flush()
+        line = f.readline()
+        if not line:
+            print("pathfinder: no reply", file=sys.stderr)
+            return 1
+        msg = json.loads(line)
+        if msg["type"] == "error":
+            print(f"pathfinder: {msg['message']}", file=sys.stderr)
+            return 1
+        print(f"uninstalled {msg['id']}")
+    return 0
+
+
+def search_cmd(home, text):
+    """`pathfinder search TEXT`: the registry on the spot - no daemon needed."""
+    for item in catalog.fetch(search=text, pages=1):
+        cand = catalog.candidate(item)
+        pkg = cand["package"]
+        print(f"{cand['name']}  {cand['version']}  {pkg['registry_type']}  {cand['description'][:80]}")
     return 0
 
 
@@ -321,6 +414,14 @@ def main(argv=None):
         return react(home, args[1], args[2] if len(args) == 3 else None)
     if args == ["rules"]:
         return rules_path(home)
+    if args == ["tools"]:
+        return mcp_tools_list(home)
+    if len(args) == 2 and args[0] == "install":
+        return install_cmd(home, args[1])
+    if len(args) == 2 and args[0] == "uninstall":
+        return uninstall_cmd(home, args[1])
+    if len(args) == 2 and args[0] == "search":
+        return search_cmd(home, args[1])
     if args == ["jobs"]:
         return jobs_list(home)
     if len(args) == 3 and args[0] == "job" and args[1] == "stop":

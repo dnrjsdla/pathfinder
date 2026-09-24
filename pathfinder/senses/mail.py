@@ -6,11 +6,10 @@ import contextlib
 import email
 import imaplib
 import re
-import subprocess
 from email import policy
 from email.header import decode_header, make_header
 
-from .. import config
+from .. import config, keychain
 from ..signals import Signal
 from ..tools import ToolSpec
 
@@ -46,12 +45,11 @@ def _connect(options):
         raise RuntimeError("mail sense is not configured (host/user)")
     host, user, mailbox = options["host"], options["user"], options.get("mailbox", "INBOX")
     service = options.get("keychain_service", "pathfinder-mail")
-    password = subprocess.run(["security", "find-generic-password", "-s", service, "-a", user, "-w"],
-                              capture_output=True, text=True, timeout=5)
-    if password.returncode != 0:
+    password = keychain.secret(service, user)
+    if password is None:
         raise RuntimeError(f"no Keychain password for service {service!r}, account {user!r}")
     conn = imaplib.IMAP4_SSL(host, timeout=_TIMEOUT)
-    conn.login(user, password.stdout.strip())
+    conn.login(user, password)
     conn.select(mailbox, readonly=True)  # readonly + PEEK: polling never marks mail seen
     _typ, uidval = conn.response("UIDVALIDITY")
     return conn, (host, user, mailbox, uidval[0] if uidval and uidval[0] else b"0")

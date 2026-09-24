@@ -74,6 +74,32 @@ class SourceInvariants(unittest.TestCase):
             if line.startswith(("import ", "from ")):
                 self.assertNotIn("llm", line, f"rules.py imports llm at module level: {line!r}")
 
+    def test_catalog_module_under_300_lines(self):
+        n = len((SRC / "catalog.py").read_text(encoding="utf-8").splitlines())
+        self.assertLessEqual(n, 300, f"catalog.py is {n} lines, over the partition-6 budget of 300")
+
+    def test_installer_module_under_700_lines(self):
+        """installer.py is being written by a concurrent unit of this same partition; skip until
+        it lands rather than fail on a file that is not this test's to write."""
+        installer = SRC / "installer.py"
+        if not installer.exists():
+            self.skipTest("installer.py not landed yet")
+        n = len(installer.read_text(encoding="utf-8").splitlines())
+        self.assertLessEqual(n, 700, f"installer.py is {n} lines, over the partition-6 budget of 700")
+
+    def test_mcp_attach_module_under_120_lines(self):
+        n = len((SRC / "mcp" / "attach.py").read_text(encoding="utf-8").splitlines())
+        self.assertLessEqual(n, 120, f"mcp/attach.py is {n} lines, over the partition-6 budget of 120")
+
+    def test_only_catalog_names_the_registry_url(self):
+        """`catalog.REGISTRY` is the one place the registry URL is written (docs/spec/connection-v0.md)."""
+        from pathfinder import catalog
+        for name, text in sources().items():
+            if name == "catalog.py":
+                continue
+            self.assertNotIn(catalog.REGISTRY, text,
+                             f"{name} hardcodes the registry URL; only catalog.py may")
+
 
 class SignalEnvelopeInvariants(unittest.TestCase):
     """m3 (HISTORY.md) measured that this exact wording keeps the injection defense at 0/20;

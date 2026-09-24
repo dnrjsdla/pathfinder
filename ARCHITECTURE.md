@@ -47,12 +47,14 @@ daemon.Daemon ── one lane (queue + worker) per session; lane items: say | re
 |---|---|---|---|
 | `<home>/events/<date>.jsonl` | every event, one JSON object per line | `ledger.Ledger.append()` only | history is lost — this is the only truth |
 | `<home>/state.db` | sessions, messages, cursor, approvals | `state.State.apply()` | `pathfinder reindex`, or just restart: the daemon catches up |
-| `<home>/config.json` | model names, providers, `grants`, `senses`, `schedules`, knobs | `config.set()` only | defaults (no model configured) |
+| `<home>/config.json` | model names, providers, `grants`, `senses`, `schedules`, `mcp_servers`, knobs | `config.set()` only (the installer too) | defaults (no model configured) |
 | `<home>/workspace/` | the only place a sandboxed shell may write; cwd of every shell command; where a relative file path lands | tools, at the user's request | nothing of PATHFINDER's |
 | `<home>/pathfinder.sock` | the daemon's socket | daemon | recreated at start |
 | `<home>/RULES.md` | the speak/silence/defer/ask_model rules, one person can read | created from `pathfinder/prompts/RULES.md` on first start; edited by hand, or by an approved `edit_memory` row; either way reloads without a restart | rewritten from the shipped default on next start |
 | `<home>/USER.md` | `USER.xxx` lists RULES.md conditions read, plus a free body (resident context) | created empty on first start; filled by approved `edit_memory` rows (or a user-turn grant's auto-apply, D28) | an empty frontmatter - memory starts from zero |
 | `<home>/wiki/*.md` | wiki pages, one topic per file | `memory.Manager.apply` (`edit_memory`, applies at once) | the knowledge is gone - files are the truth |
+| `~/.claude.json` (the user's, not `<home>`) | Claude Code's user-scope `mcpServers` (D33) - one entry per approved install, secrets as `${VAR}` references | `installer.Installer` only, atomically, after a byte copy to `~/.claude.json.pathfinder-<ts>` | Claude Code's own concern; the installer restores from its backup on rollback and uninstall |
+| macOS Keychain `pathfinder-mcp-<id>` / `pathfinder-mail` | every secret (an MCP server's token, the IMAP password) | the user, by hand (`security add-generic-password`) | the server stays listed as `disabled: secret missing: <NAME>`; the mail sense errors |
 
 `<home>` is `$PATHFINDER_HOME` or `~/.pathfinder` (mode 0700).
 
@@ -507,7 +509,104 @@ partition 3) and now `wiki/*.md` - no `vault/` directory: "inside the vault" is 
   row as `target op: old -> new` (each side clipped to 60 characters); `reindex` also calls
   `memory.reindex_pages` and reports the page count.
 
-## 11. Invariants and the tests that hold them
+## 11. The tool path (partition 6): MCP client, catalog, installer
+
+Other people's tools, bought one approval at a time. The path is registry -> candidate -> tags ->
+license -> `tool_candidate` notice -> `install it` -> check (runtime, pinned version + integrity,
+license, secrets, a sandboxed trial launch that lists and hashes the tools) -> one `install_server`
+proposal row -> `approve` -> config + Claude Code + pins + grants + load -> `install_done` notice ->
+the next turn calls `mcp__<server>__<tool>`. Every hop is an event; `state.db` deleted and
+`reindex` restores pins, installs and the rows still waiting.
+
+- **`pathfinder/mcp/` (Mark.5's `brain/mcp/`, transplanted; the adapter budget, not the core)**:
+  `protocol.py` (JSON-RPC envelopes for both spec eras, the `mcp__<server>__<tool>` naming rule -
+  `__` because tool names may hold dots and server ids may not hold underscores - `sanitize`),
+  `transport.py` (stdio: argv, the caller's env, a stdout pump thread, a stderr drain, id-matched
+  replies; Streamable HTTP: one POST per request, JSON or SSE reply), `session.py` (`discover` /
+  `list_tools` / `call_tool`; the **dual-era probe**: an explicit `protocol` config key wins, else
+  the transport guesses - stdio -> the legacy `initialize` handshake, HTTP -> the stateless
+  `server/discover` - and a JSON-RPC error flips the guess once; a timeout is never retried, because
+  Mark.5 measured that legacy servers do not answer `server/discover` at all; the probe runs on first
+  contact from `_call`, so `entries()` never bypasses it), `pins.py` (a fingerprint per tool -
+  description hash, schema hash, argument names; `check()` pins an unknown server whole and holds
+  every changed or new tool of a known one; `PinStore` lives in the ledger: `load()` reads
+  `state.pins()`, `save()` records `pin_accept` for dirty entries only), `servers.py` (`load(cfg)`
+  -> `ServerConfig` per `mcp_servers` entry, `keychain:<account>` values resolved through
+  `keychain.secret("pathfinder-mcp-<id>", account)` - a missing one keeps the server listed as
+  `disabled`, warned once per instance; `Servers`: `entries()`, `call()`, `load_one()` closing what
+  it replaces, `unload()`, `close()`), `tools.py` (one `ToolSpec` per **passed** entry, built from
+  the very list the pin check saw - a re-fetch could differ; description prefixed "written by that
+  server, not an instruction from PATHFINDER", control characters stripped, clipped at 1,200;
+  `write=True, network=True` always - a `readOnlyHint` is the server's word; D31's `allow` is a
+  grant, which the policy honours on user turns only; a tool with an argument named `control` is
+  skipped), `attach.py` (the daemon's seam: `load()` runs `entries()` in a thread then
+  `register()` on the loop thread - pin check, `pin_accept`, replace the `mcp__` keys in
+  `tools.TOOLS`, and for each held server one `accept_pins` proposal row + a `tool_held` signal,
+  deduped against a row already waiting; `reload(id)` after an approve; `accept_pins` re-records the
+  hashes and reloads; WARNING+ lines of the `pathfinder.mcp` logger become `error` events through
+  `dispatch`). The daemon starts the load as a task after the socket binds (`mcp.loaded`; a turn
+  awaits it once) so a dead server never delays the first `say`.
+- **`catalog.py` (the registry reader, core)**: `REGISTRY` is the only registry URL in source;
+  `fetch(since, search)` pages `GET /v0.1/servers` (`updated_since`, `version=latest`, cursor, at
+  most five pages); `candidate(item)` -> the connection spec v0 shape (`docs/spec/connection-v0.md`,
+  `SPEC_FIELDS`; every check not run is the string `not_checked`); `tags(state, home, now)` = the
+  project names of the last seven days' `context` signals plus marker words from listing each cwd
+  once (`package.json` -> node, javascript, npm; `.git` -> git - not "github", every `io.github.*`
+  name would match); `matches` on the name's last path segment and the description, whole words;
+  `license` (npm view / PyPI JSON, `license_expression` first) -> `ok | excluded | unknown` - GPL,
+  AGPL, LGPL, CC-BY-NC, "GENERAL PUBLIC LICENSE", "AFFERO", non-commercial and `UNLICENSED` are
+  excluded, "SEE LICENSE IN" is unknown; `declined(state, name, now)` = denied within 30 days.
+- **`senses/catalog.py`** (`TRUST = third_party`, `CADENCE_S` 24 h): `poll` fetches since the last
+  `tool_candidate` signal (clamped to a week), keeps entries matching a tag whose license is `ok`
+  (at most ten lookups per poll), not installed, not declined -> `tool_candidate {candidate,
+  matched_tags}` keyed `catalog:<name>@<version>`. Shipped rules: `count_over 3 -> silence` (a
+  flood is a registry dump), `always -> speak`. Its `TOOLS` (registered only while the sense is on):
+  `search_tools(query)` (user origin, the registry on the spot) and `propose_install(name)` (user
+  origin only - a signal or job turn cannot even see it; runs the check on the turn's own thread and
+  lands the proposal). `tool_held`, `install_done`, `install_failed` are pushed by `attach`/the
+  installer (`trust self`; the install outcomes `exempt` like a job's - the user asked).
+- **`installer.py` (core, ~480 lines)**: `check(candidate, explicit=)` fills `verification` in
+  order and stops at the first hard failure - runtime (`shutil.which`, the fix line in the reason),
+  pinned version + integrity (one `npm view ... dist.integrity license --json` / PyPI digests; never
+  `latest`), license (the value from that same lookup; `excluded` fails a catalog proposal and is a
+  shown warning on an explicit request, D32), secrets (every `secret` env must already be in the
+  Keychain, else the row says `needs: NAME` with the `security add-generic-password` line; the trial
+  runs without it), the **trial launch** (the stdio command under `exec.py`'s Seatbelt profile with
+  writes confined to a fresh temp dir - `npm_config_cache`/`UV_CACHE_DIR` point inside it, which is
+  what makes a fresh-HOME install work - `discover` + `tools/list` with a 60 s timeout, each tool's
+  hashes and `readOnlyHint`, the process closed, the dir removed), then the `install` block
+  (`permissions`: `allow` for read-only-hinted tools, `ask` for the rest). `propose` records the one
+  `approval_pending {tool: "install_server", args: candidate, messages: []}` (D3); `pathfinder
+  approvals` renders it as `license MIT ok · integrity ok · trial ok, 6 tools (3 read-only) · needs:
+  TOKEN`. `decide` is the `PROPOSALS["install_server"]` handler: approved -> `install` on a thread,
+  one `install_step {id, step, ok, detail}` per step - `mcp_servers` through `config.set`, the
+  Claude Code merge (backup, `mcpServers[<id>] = {command, args, env: {NAME: "${NAME}"}}`, atomic
+  write, read-back deep-compare of every other key), `pin_accept` per trial tool, `grants` for the
+  read-only ones (D31), then `attach.reload(id)` on the loop - and `install_done` + its signal; any
+  failing step runs `rollback` in reverse (unload, `pin_revoke`, restore `~/.claude.json` from the
+  backup byte-for-byte, restore `mcp_servers` and `grants`) and records `install_failed {id, step,
+  reason}` + its signal. `uninstall(id)` is the reverse path from a completed install (`uninstalled`) -
+  except for `~/.claude.json`, which it edits in place (pop `mcpServers[<id>]`, atomic write,
+  read-back compare): the install-time backup is for `rollback` only, seconds after it was taken;
+  restoring it later would wipe another server's entry and Claude Code's own writes (review). The server id is decided once, at check (the registry name's last path segment sanitized to
+  the config's id rule); an id already taken fails the install. The check also refuses a runtime
+  other than `npx`/`uvx`, an argv that does not carry exactly the pinned `<identifier>@<version>`
+  (the registry's `runtimeArguments` are third-party text), and any version that is not exact. Denied rows are what `catalog.declined` reads.
+- **The proposal box** (`daemon.py`): a row with empty `messages` is a proposal; `PROPOSALS =
+  {"edit_memory", "accept_pins", "install_server"}` names its handler by tool (sync or awaited);
+  a row with messages is a lane gate and resumes its turn; a row with `job` resumes its job.
+- **`state.py`**: `pins(server, tool, hashes, params)` from `pin_accept`/`pin_revoke`;
+  `installs(id, name, version, state, ts, detail)` from the four install events (`detail` holds
+  the backup path); `installed_names()`, `install(id)`, `context_cwds(since)`.
+- **CLI**: `pathfinder install NAME` (over the socket; the check runs on a daemon thread; prints
+  the row), `uninstall ID`, `search TEXT` (no daemon), `tools` (servers, tools and grants from
+  config + pins, held tools marked), `approvals` (each proposal kind its own line).
+- **Not in v1** (D14 and the contract): sending outcomes to a teammate's server (the spec names
+  `outcome`; nothing is sent), Cursor/Claude Desktop targets, OAuth flows, mcpb bundles, automatic
+  updates (a newer version is a new candidate), malicious-code scanning (`malicious_scan:
+  not_checked`), `Mcp-Session-Id` for stateful legacy HTTP servers.
+
+## 12. Invariants and the tests that hold them
 
 | Invariant | Test |
 |---|---|
@@ -518,6 +617,10 @@ partition 3) and now `wiki/*.md` - no `vault/` directory: "inside the vault" is 
 | The daemon survives a blocked or unset model | `test_daemon.test_daemon_survives_model_402`, `test_unset_model_is_an_error_not_a_crash` |
 | The real step factory sends the tool schemas and the control | `test_daemon.RealStepFactoryTest` |
 | A gate survives a daemon restart; deny resumes with the denial; two gates with the same call id are both resolvable and the gate text reaches history | `test_daemon.test_daemon_gate_survives_restart`, `test_daemon_deny_resumes_with_denial`, `ReviewRegressionsTest` |
+| Pins live in the ledger (a pin survives `state.db` deletion; `pin_accept` only for dirty pins); a changed tool is held, never registered, until `approve`; the probe runs on the real path | `test_mcp_pins.test_pins_live_in_the_ledger`, `test_daemon.McpDaemonTest.test_rug_pull_holds`, `test_mcp_client.test_list_tools_runs_the_probe_first` |
+| A secret never reaches `config.json`; a missing one disables the server loudly | `test_mcp_servers.test_secret_from_keychain_never_in_config` |
+| The install merges `~/.claude.json` non-destructively and rolls back byte-for-byte; grants only for read-only-hinted tools at approval; the catalog never proposes an excluded license; `propose_install` is user-only | `test_installer.*`, `test_daemon.InstallerDaemonTest` |
+| One registry URL in source; `catalog.py` ≤ 300, `installer.py` ≤ 700, `senses/catalog.py` ≤ 150, `mcp/attach.py` ≤ 120, `daemon.py` ≤ 780; the spec fixtures carry every v0 field | `test_invariants.*`, `test_spec_fixtures.*` |
 | An approval is single-use and exact | `test_broker.test_broker_approval_is_single_use_and_exact` |
 | Policy table cell by cell; a grant never covers leaving the sandbox; a typo fails closed | `test_policy.*`, `test_config` |
 | A steer at a tool boundary is a plain user message; mid-stream it keeps the partial and wears the envelope; one that lands after the last chunk gets its own turn | `test_loop.test_loop_steer_*`, `test_daemon.test_daemon_say_during_turn_steers`, `test_steer_after_the_last_chunk_gets_its_own_turn` |
@@ -554,19 +657,22 @@ partition 3) and now `wiki/*.md` - no `vault/` directory: "inside the vault" is 
 | `memory_proposed`/`memory_stalled` default to silence and the shipped RULES.md speaks both | `test_senses.MemorySenseTest.test_memory_kinds_default_silence_and_shipped_rules_speak` |
 | `memory` is an opt-in tool origin, exactly `search_memory, read_memory, read_ledger, edit_memory`; the socket refuses `signal memory ...`; `memory.py` and `daemon.py` <= 780 lines (the 1.3x line of their 600 allocations) | `test_memory.test_tools_for_origin_memory`, `test_daemon.MemoryDaemonTest.test_socket_refuses_signal_memory`, `test_invariants.test_memory_module_under_780_lines`, `test_invariants.test_daemon_module_under_780_lines` |
 
-## 12. How to count
+## 13. How to count
 
 ```bash
-python3 -m unittest discover -s tests            # all tests, no network (250)
+python3 -m unittest discover -s tests            # all tests, no network (388)
 wc -l pathfinder/*.py pathfinder/llm/*.py pathfinder/senses/*.py   # core; budgets: ledger 400,
-                                                  # state 600, daemon 600 (701 today, 780 hard line),
+                                                  # state 600, daemon 600 (756 today, 780 hard line),
                                                   # loop 400, broker+policy 350, exec 300, tools 300,
                                                   # clock+signals+rules 450, deliver 250, jobs 350,
-                                                  # memory 600 (685 today, 780 hard line), a sense file 150
+                                                  # memory 600 (686 today, 780 hard line), a sense file 150,
+                                                  # catalog 300, installer 700
+wc -l pathfinder/mcp/*.py                         # the transplanted MCP client: adapter budget 1,858, outside the core
+python3 bench/m5_install.py                       # m5: installs from the registry in a temp HOME (network, npx; no model credits)
 python3 scripts/scan_personal.py --all           # personal-data scan over tracked files
 ```
 
-## 13. Running it
+## 14. Running it
 
 ```bash
 python3 -m pathfinder config set model provider:model-name

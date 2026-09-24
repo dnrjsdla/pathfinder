@@ -212,3 +212,26 @@ question. "I looked eight times and found nothing" beats silence, and the histor
 at most one extra request per exhausted turn. — *Reversed if* the final step itself comes back
 empty in more than a fifth of exhausted turns in real use: then an assistant placeholder in
 history instead.
+
+## 2026-09-24 — Partition 6 (owner's choices on the contract's three questions)
+
+**D31. The install approval itself grants `allow` to the tools the sandboxed trial listed with
+`readOnlyHint`; every other MCP tool asks until the user grants it.** The proposal row shows the
+list, so the one approval is an informed one. — A hint is the server's own word (the spec calls
+it non-binding), so it is trusted only for tools the trial actually saw, and only because the
+user read the list before approving; asking on every search call would make an installed tool
+useless (D8). — *Reversed if* a read-only-hinted tool is caught writing or sending in real use:
+then every MCP tool asks until granted by hand.
+
+**D32. The catalog never proposes a package whose license the application excludes (GPL, AGPL,
+LGPL, non-commercial, none); an explicit "install X" still checks it, shows the verdict on the
+proposal row, and leaves the approval to the owner.** — The verified path is the product's
+promise; the owner's own named request is their choice, and the record shows the license they
+accepted. — *Reversed if* legal advice at the public launch says an excluded license must never
+be installed through the product: then a hard refusal.
+
+**D33. A Claude Code install lands in user scope: `mcpServers` at the top of `~/.claude.json`.**
+— Every project sees it, nothing is written into a repository other people share, and the file is
+the one the installer already backs up and restores byte-for-byte. — *Reversed if* beta users
+ask for per-project tools more often than not: then project scope by default, with the proposal
+naming the file.

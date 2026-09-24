@@ -568,7 +568,8 @@ class Daemon:
             def work():
                 try:
                     return loop.run(step, messages, call_tool=broker.call, emit=emit,
-                                    budget=SIGNAL_TURN_BUDGET, control=control)
+                                    budget=SIGNAL_TURN_BUDGET, control=control,
+                                    final_step=self.step_factory(cfg, control, {}))
                 finally:
                     aio.call_soon_threadsafe(out_q.put_nowait, (None, None))
 
@@ -632,7 +633,8 @@ class Daemon:
         def work(step, budget):
             try:
                 return loop.run(step, messages, call_tool=broker.call, emit=emit,
-                                budget=budget, control=control, resume=resume)
+                                budget=budget, control=control, resume=resume,
+                                final_step=self.step_factory(cfg, control, {}))  # D30: no tools
             finally:
                 aio.call_soon_threadsafe(out_q.put_nowait, (None, None))
 

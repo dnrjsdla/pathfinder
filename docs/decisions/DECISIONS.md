@@ -202,3 +202,13 @@ talking to and what it has written down can look one step ahead without a tool r
 free models mostly skip; the cost is about 500–800 uncached tokens per turn, five to six percent
 of an m6 day. — *Reversed if* two weeks of real use put the resident context above 15% of the
 day's tokens: then the map only, `USER.md` through `read_memory`.
+
+**D30 (after partition 5's live checks, 2026-09-24). When a turn's step budget is spent and the
+model's last reply was still a tool call, the loop makes one more request with no tools, so the
+turn ends in words.** Every trigger (user, signal, job, consolidation) gets it through `loop.run`'s
+`final_step`. — Live, three turns in a row exhausted eight steps on repeated searches and said
+nothing; the dangling `user` message then made the next turn keep answering the previous
+question. "I looked eight times and found nothing" beats silence, and the history closes. Cost:
+at most one extra request per exhausted turn. — *Reversed if* the final step itself comes back
+empty in more than a fifth of exhausted turns in real use: then an assistant placeholder in
+history instead.

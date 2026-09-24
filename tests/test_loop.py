@@ -51,6 +51,19 @@ class TestLoop(unittest.TestCase):
         self.assertEqual(outcome.kind, "exhausted")
         self.assertEqual(outcome.steps, 3)
 
+    def test_loop_final_step_answers_when_exhausted(self):
+        """D30: budget spent on tool calls -> one tool-less request, the turn ends in words."""
+        tool_call = {"id": "call_0", "name": "noop", "arguments": {}}
+        step = _make_step([[("tool_calls", [tool_call])]] * 2)
+        final = _make_step([[("text", "looked twice, found nothing")]])
+        messages, deltas = [], []
+        outcome = run(step, messages, call_tool=lambda id, n, a: {"ok": True},
+                      emit=lambda k, p: deltas.append(p) if k == "delta" else None, budget=2, final_step=final)
+        self.assertEqual(outcome.kind, "exhausted")
+        self.assertEqual(outcome.text, "looked twice, found nothing")
+        self.assertEqual(deltas, ["looked twice, found nothing"])
+        self.assertEqual(messages[-1], {"role": "assistant", "content": "looked twice, found nothing"})
+
     def test_loop_does_not_echo_reasoning(self):
         step = _make_step([[("reasoning", "thinking..."), ("text", "answer")]])
         messages = []

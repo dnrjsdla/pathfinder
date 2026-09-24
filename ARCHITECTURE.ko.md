@@ -193,8 +193,11 @@ dict 를 키 튜플로 바꿔 버린다.
 
 ## 6. 루프 (`pathfinder/loop.py`)
 
-`run(step, messages, *, call_tool, emit, budget, control, resume)` 이 한 턴을
-`Outcome("answer" | "exhausted" | "cancelled")` 로 끝낸다. 게이트는 결말이 아니라 예외다.
+`run(step, messages, *, call_tool, emit, budget, control, resume, final_step)` 이 한 턴을
+`Outcome("answer" | "exhausted" | "cancelled")` 로 끝낸다. 게이트는 결말이 아니라 예외다. 예산을
+다 썼는데 마지막 응답이 여전히 툴 호출이면 `final_step`(같은 공장, 툴 없음 - 호출 자리 넷이 모두
+넘긴다)이 요청을 한 번 더 보내, 소진된 턴도 말로 끝나고 다음 턴에 매달린 `user` 메시지를 남기지
+않는다(D30).
 `TurnControl` 이 손잡이 하나: `interrupt` · `steer_cut` 이벤트, `steers` deque, `in_tool`;
 `is_set()` 은 둘 중 하나라 어댑터의 `cancel=` 에 그대로 들어간다.
 

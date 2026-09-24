@@ -101,7 +101,7 @@ def settle(messages, call_tool, control=None):
         messages.append({"role": "tool", "tool_call_id": tc_id, "content": json.dumps(result)})
 
 
-def run(step, messages, *, call_tool, emit, budget=8, control=None, resume=False):
+def run(step, messages, *, call_tool, emit, budget=8, control=None, resume=False, final_step=None):
     usage = None
     said = []  # everything streamed to the user this turn: what was said must reach history
 
@@ -175,4 +175,23 @@ def run(step, messages, *, call_tool, emit, budget=8, control=None, resume=False
         except Gate as g:
             raise gated(g)
 
+    if final_step is not None:
+        # D30: the budget is spent and the last reply was still a tool call. One more request
+        # with no tools, so the turn ends in words ("found nothing" beats silence) and no
+        # `user` message is left dangling for the next turn to keep answering. Live: three
+        # turns in a row exhausted on repeated searches and said nothing.
+        if control is not None and control.interrupt.is_set():
+            return Outcome("cancelled", text="".join(said), steps=budget, usage=usage)
+        text_parts = []
+        for kind, payload in final_step(messages):
+            if kind == "text":
+                text_parts.append(payload)
+                emit("delta", payload)
+            elif kind == "usage":
+                usage = _sum_usage(usage, payload)
+            elif kind == "cancelled":
+                return Outcome("cancelled", text="".join(said + text_parts), steps=budget, usage=usage)
+        if text_parts:
+            said.append("".join(text_parts))
+            messages.append({"role": "assistant", "content": "".join(text_parts)})
     return Outcome("exhausted", text="".join(said), steps=budget, usage=usage)

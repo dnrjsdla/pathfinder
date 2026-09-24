@@ -184,6 +184,9 @@ class DaemonTest(DaemonHarness):
     def test_exhausted_turn_still_records_what_was_said(self):
         def talkative(cfg, cancel=None, tools=None):
             def step(messages):
+                if not tools:  # D30: the final tool-less request - the model must answer in words
+                    yield ("text", "no luck.")
+                    return
                 yield ("text", "working ")
                 yield ("tool_calls", [{"id": "c1", "name": "anything", "arguments": {}}])
             return step
@@ -199,7 +202,7 @@ class DaemonTest(DaemonHarness):
         self.assertEqual(seen[-1]["kind"], "exhausted")
         said = [e for e in self.events() if e["type"] == "assistant"]
         self.assertEqual(len(said), 1)
-        self.assertEqual(said[0]["text"], "working " * 8)  # the user saw 8 steps of it; history must too
+        self.assertEqual(said[0]["text"], "working " * 8 + "no luck.")  # 8 steps plus D30's final words, all in history
 
     def test_attach_with_a_non_string_session_keeps_the_connection(self):
         async def scenario(daemon):

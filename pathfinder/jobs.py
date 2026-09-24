@@ -208,7 +208,8 @@ class Manager:
                         emit=self._emit(job), approved=approved, denied=denied)
         try:
             out = loop.run(step, job.messages, call_tool=broker.call, emit=self._emit(job),
-                           budget=self.rules.job_steps, control=job.control, resume=resume)
+                           budget=self.rules.job_steps, control=job.control, resume=resume,
+                           final_step=self.step_factory(cfg, job.control, {}))  # D30: no tools
         except Gate as g:
             self._gate(job, g)
             return

@@ -674,13 +674,20 @@ block, the split vet, locks, the full rule vocabulary, undo as a stack), `daemon
   a rule"), proposed the RULES.md row that gpt-oss never reached. The pass and the judge both use
   `worker_model`; setting it to the gemma family is the working configuration for Korean.
 
+### After the live checks: D30
+
+A turn that exhausted its step budget ended with no answer, and the next turn then kept answering
+the previous question (the dangling `user` message had no `assistant` after it) - three times
+live once memory tools gave the model more to loop on. The owner chose a final tool-less step
+(D30): `loop.run(final_step=...)`, passed by all four call sites, makes one more request with no
+tools when the budget is spent, so the turn ends in words. Live, the question that had gone
+silent three times now answered in words at step 7 (the earlier fixes cut the search loop before
+the final step was needed); the final step itself is held by `test_loop_final_step_answers_when_exhausted`
+and the daemon's exhausted-turn test, which now ends in "no luck.".
+
 ### Left open on purpose
 
-A turn that exhausts its step budget ends with no answer, and the next turn then continues
-answering the previous question (the dangling `user` message has no `assistant` after it) - seen
-three times live once memory tools gave the model more to loop on. That is `loop.run`'s outcome
-(partition 2): a final tool-less step when the budget is spent, or an assistant placeholder in
-history, is a decision for the owner before partition 6. Summaries lose concrete names unless told
+Summaries lose concrete names unless told
 not to (one clause added; not measured). A `new` line can carry the model's own typo into the
 wiki - the gate checks shape, not spelling. `undo` of a `remove` re-appends at the end. A pass on
 a home with a large ledger takes several 400-line passes to catch up. The wiki map is resident every

@@ -203,8 +203,11 @@ ask → `raise Gate(id, name, arguments)`, allow → `emit("tool_call")`, run th
 
 ## 6. The loop (`pathfinder/loop.py`)
 
-`run(step, messages, *, call_tool, emit, budget, control, resume)` drives one turn to
-`Outcome("answer" | "exhausted" | "cancelled")`; a gate is an exception, not an outcome.
+`run(step, messages, *, call_tool, emit, budget, control, resume, final_step)` drives one turn to
+`Outcome("answer" | "exhausted" | "cancelled")`; a gate is an exception, not an outcome. When the
+budget is spent and the last reply was still a tool call, `final_step` (the same factory with no
+tools - every call site passes one) makes one more request, so an exhausted turn still ends in
+words and leaves no dangling `user` message (D30).
 `TurnControl` is the one handle: `interrupt` and `steer_cut` events, a `steers` deque, `in_tool`;
 `is_set()` is either event, so the adapter's `cancel=` takes it unchanged.
 

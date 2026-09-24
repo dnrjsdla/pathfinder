@@ -613,7 +613,8 @@ class Manager:
         out, error = None, None
         try:
             out = loop.run(step, messages, call_tool=broker.call, emit=self._emit(),
-                           budget=self.rules.consolidate_steps, control=control)
+                           budget=self.rules.consolidate_steps, control=control,
+                           final_step=self.step_factory(cfg, control, {}))  # D30: the summary still comes
         except Gate as g:
             self.record("error", origin="memory", message=f"memory pass gated: {g.name}")
         except LLMError as e:

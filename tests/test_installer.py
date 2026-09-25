@@ -368,6 +368,16 @@ class InstallerTest(unittest.TestCase):
         self.assertEqual(failed[0]["id"], "")
         self.assertIn("already taken", failed[0]["reason"])
 
+    def test_reproposing_an_installed_name_fails_at_check(self):
+        """Review round 3: the same name again got `-2` at check and a second copy at approve."""
+        cand = self._check(_candidate(), run=_fake_run())
+        self._install(cand)
+        again = self._check(_candidate(version="1.0.1"), run=_fake_run())
+        self.assertEqual(again["outcome"], "install_failed")
+        self.assertEqual(again["verification"]["failed_step"], "installed")
+        self.assertIn(f"already installed as {cand['install']['id']}", again["verification"]["reason"])
+        self.assertEqual(again["install"], "not_checked")  # nothing decided, nothing suffixed
+
 
 if __name__ == "__main__":
     unittest.main()

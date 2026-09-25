@@ -66,7 +66,7 @@ Every check the code did not run is the literal string `"not_checked"`. The fiel
 | `sandbox_trial.skipped[]` | array of tool names | the installer (a tool whose qualified name does not fit the provider naming rule is listed here, never granted) | (only present once the trial ran) |
 | `sandbox_trial.sandboxed` | bool | the installer (`false` when this machine has no `sandbox-exec`) | (only present once the trial ran) |
 | `sandbox_trial.verdict` | `ok` | the installer | (only present once the trial ran; a trial that fails leaves `sandbox_trial` at `"not_checked"` and sets `failed_step`/`reason` below) |
-| `failed_step` | `runtime\|version\|license\|trial` | the installer (`check()`, on the first hard failure) | absent on success |
+| `failed_step` | `installed\|runtime\|version\|license\|trial` | the installer (`check()`, on the first hard failure) | absent on success |
 | `reason` | string | the installer, with `failed_step` | absent on success |
 | `maintenance.last_publish_at` | string | `catalog.candidate` (registry metadata) | the registry gives neither `publishedAt` nor `updatedAt` |
 | `maintenance.namespace_verified` | bool | `catalog.candidate` | never - `true` for every active registry entry |

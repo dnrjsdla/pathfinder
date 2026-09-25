@@ -188,6 +188,13 @@ class Installer:
 
         rtype, runtime = pkg["registry_type"], pkg["runtime"]
 
+        # 0. already installed under this name: a re-proposal is not a second copy (review, round
+        # 3 - `server_id` would suffix `-2` and approve would install it). An upgrade is uninstall + install.
+        for installed in self.state.installed_names():
+            row = self.state.install(installed)
+            if row and row["name"] == candidate["name"]:
+                return fail("installed", f"already installed as {installed} - `pathfinder uninstall {installed}` first")
+
         # 1. runtime
         if rtype != "remote" and which(runtime) is None:
             fix = _RUNTIME_FIX.get(runtime, f"install {runtime}")

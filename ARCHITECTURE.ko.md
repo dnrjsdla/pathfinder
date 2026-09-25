@@ -639,7 +639,7 @@ Daemon.run_signal_turn ── 신호마다 rules.decide 를 먼저(절대 안 �
 ## 13. 세는 법
 
 ```bash
-python3 -m unittest discover -s tests            # 전체 테스트, 네트워크 없음 (388)
+python3 -m unittest discover -s tests            # 전체 테스트, 네트워크 없음 (389)
 wc -l pathfinder/*.py pathfinder/llm/*.py pathfinder/senses/*.py   # 코어; 배분: ledger 400 ·
                                                   # state 600 · daemon 600(오늘은 756, 780 이 하드
                                                   # 라인) · loop 400 · broker+policy 350 ·

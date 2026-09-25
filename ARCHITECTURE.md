@@ -660,7 +660,7 @@ the next turn calls `mcp__<server>__<tool>`. Every hop is an event; `state.db` d
 ## 13. How to count
 
 ```bash
-python3 -m unittest discover -s tests            # all tests, no network (388)
+python3 -m unittest discover -s tests            # all tests, no network (389)
 wc -l pathfinder/*.py pathfinder/llm/*.py pathfinder/senses/*.py   # core; budgets: ledger 400,
                                                   # state 600, daemon 600 (756 today, 780 hard line),
                                                   # loop 400, broker+policy 350, exec 300, tools 300,

@@ -866,8 +866,10 @@ against; a remote entry with a bearer token installs, a session-bound one may 40
 descriptions inside a tool's `inputSchema` reach the model without the "written by that server"
 prefix; only the schema hash covers them. `uninstall`'s unload runs on its worker thread while
 an `accept_pins` reload may iterate `tools.TOOLS` on the loop (a dictionary-changed race,
-not reproduced); the CLI `install` ignores a configured non-default registry; an explicit
-proposal of an already-installed name is refused at approve, not at check. The trial observes no network (`network: not_checked`;
+not reproduced); the CLI `install` ignores a configured non-default registry; a re-proposal
+of an already-installed name failed only when its id was literally taken - `check` suffixed `-2` and
+approve installed a second copy (reviewer, round 3; fixed after the commit: `check` fails with
+`installed` when the name is installed; an upgrade is uninstall + install). The trial observes no network (`network: not_checked`;
 the profile allows it). `malicious_scan` is `not_checked` in v1. A registry entry whose package
 version is literally `latest` is refused, not resolved. The catalog poll's ten license lookups per
 day can be spent on entries whose license is not `ok` before newer ones are reached; the week's

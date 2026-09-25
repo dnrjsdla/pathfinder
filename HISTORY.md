@@ -890,3 +890,15 @@ the proposal (the row says `needs: NAME`; the server stays `disabled` until the 
 `pathfinder install <registry name>` / `pathfinder search <text>` / `pathfinder tools` /
 `pathfinder uninstall <id>`. The main checkout still carries the untracked `bench/` copy an agent
 left in partition 0.
+
+## 2026-09-25 — Before partition 7: contract and four owner decisions
+
+The contract (`docs/plans/partition-7.md`) put four questions to the owner; the answers are D34
+(the core cap is 7,000, the 1.3x per-module line is the measured gate - the blueprint's 5,500 in
+§6 and §15 is superseded, not edited), D35 (the screen is a scrollback line client, no curses),
+D36 (one foreign-file helper generalised from the installer's) and D37 (the Anthropic adapter
+now, last unit, recorded tests only, experimental). The core stands at 6,379 lines going in;
+the contract adds about 300 (`init.py`, a new module with a 300-line ceiling in the invariant
+test). Partition 7 has no entrance measurement; its exit measurement is `m8` - a person on a
+fresh macOS account reaching the first conversation from the README alone in ten minutes -
+which gates partition 8, not the commit.

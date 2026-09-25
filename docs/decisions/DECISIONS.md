@@ -235,3 +235,33 @@ be installed through the product: then a hard refusal.
 the one the installer already backs up and restores byte-for-byte. — *Reversed if* beta users
 ask for per-project tools more often than not: then project scope by default, with the proposal
 naming the file.
+
+## 2026-09-25 — Partition 7 (owner's choices on the contract's four questions)
+
+**D34. The core cap is 7,000 lines; the per-module 1.3x line of §6 is the gate that is
+measured.** The blueprint's 5,500 was the 4,600 allocation plus slack; the allocation was low
+(memory, daemon, state and installer each passed review as minimal and each sits over its row),
+not the code fat. — Trimming 900 lines would cost a partition of its own and improve nothing the
+assistant does; a cap that is never true measures nothing. — *Reversed if* a module crosses its
+1.3x line without a review finding it minimal: then that module is cut before the next partition,
+not the cap raised again.
+
+**D35. The screen is a line client in the terminal's own scrollback**: cbreak mode, one redrawn
+input line, slash commands, `tui.py` <= 400 lines, stdlib only; no curses, no panes. — Scrollback
+is kept, it runs inside another tool's shell, and `say`/`listen` stay as they are, so there is
+nothing to reverse. — *Reversed if* two weeks of use show the single input line is what stops
+the owner from keeping it attached: then `readline` first, a full screen only after that.
+
+**D36. One foreign-file helper, generalised from the installer's, lives in `installer.py`**
+(`merge_json_file(path, mutate)`: backup, atomic write, read-back deep-compare of every other
+key); `init` imports it for `~/.claude/settings.json`, and `~/.zshrc` gets the same backup
+discipline as an append. — One reviewed place to fix; a second copy is the defect class the
+partition-6 review flagged. — *Reversed if* a third caller outside the installer appears: then a
+module of its own.
+
+**D37. The Anthropic adapter is built now, as the partition's last unit, with recorded responses
+only and marked experimental everywhere it is named.** — D2 promised two adapters and D7's
+reversal (a key appears -> m1 on that provider) needs the adapter to exist that day; building it
+now also catches the loop's message shape drifting away from a second provider. It is the first
+unit dropped if the partition runs long. — *Reversed if* no key exists by the public release:
+then the adapter ships as a documented stub, not a promise.

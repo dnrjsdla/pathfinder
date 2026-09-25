@@ -11,14 +11,17 @@ Add to `~/.zshrc` (requires the sense to be turned on: `pathfinder config set se
 '{"shell": {}}'`):
 
 ```zsh
+zmodload zsh/datetime          # $EPOCHSECONDS is empty without it
+autoload -Uz add-zsh-hook
+
 _pathfinder_cmd_start=0
 
-preexec() {
+_pathfinder_preexec() {
   _pathfinder_cmd_start=$EPOCHSECONDS
   _pathfinder_cmd=$1
 }
 
-precmd() {
+_pathfinder_precmd() {
   local exit=$?
   if [[ -n $_pathfinder_cmd ]]; then
     local seconds=$(( EPOCHSECONDS - _pathfinder_cmd_start ))
@@ -30,6 +33,9 @@ precmd() {
     _pathfinder_cmd=""
   fi
 }
+
+add-zsh-hook preexec _pathfinder_preexec   # beside the user's own hooks, never over them
+add-zsh-hook precmd _pathfinder_precmd
 ```
 
 `( ... & )` backgrounds the call and disowns it from the shell's job table; `>/dev/null 2>&1`

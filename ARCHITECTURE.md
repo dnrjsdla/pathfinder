@@ -53,7 +53,11 @@ daemon.Daemon ── one lane (queue + worker) per session; lane items: say | re
 | `<home>/RULES.md` | the speak/silence/defer/ask_model rules, one person can read | created from `pathfinder/prompts/RULES.md` on first start; edited by hand, or by an approved `edit_memory` row; either way reloads without a restart | rewritten from the shipped default on next start |
 | `<home>/USER.md` | `USER.xxx` lists RULES.md conditions read, plus a free body (resident context) | created empty on first start; filled by approved `edit_memory` rows (or a user-turn grant's auto-apply, D28) | an empty frontmatter - memory starts from zero |
 | `<home>/wiki/*.md` | wiki pages, one topic per file | `memory.Manager.apply` (`edit_memory`, applies at once) | the knowledge is gone - files are the truth |
-| `~/.claude.json` (the user's, not `<home>`) | Claude Code's user-scope `mcpServers` (D33) - one entry per approved install, secrets as `${VAR}` references | `installer.Installer` only, atomically, after a byte copy to `~/.claude.json.pathfinder-<ts>` | Claude Code's own concern; the installer restores from its backup on rollback and uninstall |
+| `~/.claude.json` (the user's, not `<home>`) | Claude Code's user-scope `mcpServers` (D33) - one entry per approved install, secrets as `${VAR}` references | `installer.Installer` only, atomically (the resolved target of a symlink, in its own mode), after a byte copy to `~/.claude.json.pathfinder-<ts>` | Claude Code's own concern; the installer restores from its backup on rollback and uninstall |
+| `~/Library/LaunchAgents/pathfinder.daemon.plist` | the launchd agent: the running interpreter `-m pathfinder daemon`, a literal `PATH`, `PATHFINDER_HOME` when set, `KeepAlive`, log to `<home>/daemon.log`, `WorkingDirectory` = the package's parent | `init` (plistlib), after a yes | `pathfinder service start` fails until `init` is run again |
+| `<home>/daemon.log` | the daemon's stderr under launchd | launchd | nothing |
+| `<home>/hooks/pathfinder.zsh` and one guarded line in `~/.zshrc` | the shell sense's `preexec`/`precmd` hook (`docs/senses.md`), sourced only if the file exists | `init`, after a yes; `~/.zshrc` is backed up to `~/.zshrc.pathfinder-<ts>` and appended, never rewritten | the shell sense hears nothing |
+| `~/.claude/settings.json` (`hooks.Stop`, `hooks.Notification`) | the Claude Code sense's two hook entries | `init` through `installer.merge_json_file` (D36): backup, atomic write, read-back; idempotent by the `pathfinder signal claude_code` marker | Claude Code's own concern |
 | macOS Keychain `pathfinder-mcp-<id>` / `pathfinder-mail` | every secret (an MCP server's token, the IMAP password) | the user, by hand (`security add-generic-password`) | the server stays listed as `disabled: secret missing: <NAME>`; the mail sense errors |
 
 `<home>` is `$PATHFINDER_HOME` or `~/.pathfinder` (mode 0700).
@@ -130,12 +134,22 @@ stalled-memory trigger. `rebuild(ledger)` drops and replays these tables too.
 ## 4. The model layer (`pathfinder/llm/`)
 
 - `resolve(cfg, "provider:model")` splits on the first colon and returns an `Endpoint`. Model
-  names exist only in `config.json`; an unset model is a clear error.
+  names exist only in `config.json`; an unset model is a clear error. `Endpoint.api` is
+  `providers.<name>.api`, `"openai"` when absent (every existing config resolves as before) or
+  `"anthropic"`; anything else is a config error. `llm.stream(endpoint, ...)` picks the adapter by
+  it - the slot and `rules.judge` call that, never an adapter module (D2).
 - `openai_compat.stream(endpoint, messages, tools, cancel)` speaks the OpenAI-compatible
   chat-completions SSE protocol and yields `text | reasoning | tool_calls | usage | cancelled`.
   `cancel` is anything with `is_set()`, checked between chunks. Every failure is an `LLMError`;
   `blocked` is true for 402/429. The daemon's step factory always passes the tool schemas: the
   model must see its hands (the first live run found it did not - `test_default_step_factory_sends_tool_schemas`).
+- `anthropic.stream` (D37, **experimental - never run live, D7**) speaks the Messages API SSE
+  (`/v1/messages`, `anthropic-version: 2023-06-01`, `x-api-key`) and yields the same tuples: the
+  loop's OpenAI-shaped history is converted at the edge (system messages -> the top-level
+  `system`, tool calls -> `tool_use` blocks, tool results -> `tool_result` blocks in one user turn),
+  `input_json_delta` pieces are joined and parsed at `content_block_stop`, a mid-stream `error`
+  event is an `LLMError`. Tests run recorded fixtures only (`tests/fixtures/anthropic_*.sse`).
+  No embeddings: `embed` stays with the compatible adapter.
 - `openai_compat.embed(endpoint, texts) -> list[list[float]]` embeds a batch through the same
   `/embeddings` OpenAI-compatible route. The embedder is `cfg["embed_model"]`, resolved through
   `resolve` the same way `model`/`worker_model` are; empty means no vectors, never an error.
@@ -242,7 +256,9 @@ words and leaves no dangling `user` message (D30).
 - **The resident system prompt is `prompts/system.txt` + `signals.SIGNAL_TURNS_CLAUSE`, byte-stable
   across every turn, user and signal alike** (cache); a second system message, `clock.now_line()`
   ("Local time now: ..."), carries the only thing that changes turn to turn.
-- **A `say` while a turn is running is a steer** (D17): recorded as `user {steer: true}`, appended
+- **A `say` while the user's own turn is running is a steer** (D17; `Session.origin` is `"user"`
+  for a fresh, resumed or continued turn and `"signal"` for a signal turn - a say during a signal
+  turn is queued as its own turn, because that turn is invisible to the user): recorded as `user {steer: true}`, appended
   to `control.steers`, and `steer_cut` is set unless a tool handler is running (`in_tool`) — a
   stream is cut, a tool is not. A steer that arrives after the model's last chunk is not lost:
   when the turn ends with steers still queued, the lane runs a `continue` turn that appends them
@@ -262,6 +278,10 @@ words and leaves no dangling `user` message (D30).
   records the last two and sends `tool`. All ledger and state writes happen on that thread. A
   user turn's own `TurnControl` also carries `.session` - the one way `start_job`'s handler (which
   gets only `control`, like every tool handler) learns which session to report a job's outcome to.
+- `serve()` registers a SIGTERM handler that closes the server (no `async with server`: its
+  `wait_closed()` would wait for the attached clients that only `close()` closes); SIGTERM
+  (launchd's `service stop`) and Ctrl-C both end in one `close()` (MCP servers closed, their process groups killed, the
+  socket unlinked) - before this, Ctrl-C never reached `close()` and every npx child was orphaned.
 - The daemon survives a blocked model: `LLMError` becomes an `error` event, an `error` line and
   `turn.end {kind: "error"}`. The socket is born 0600; a live one is refused.
 - `jobs.Manager` is built in `__init__` (`self.jobs_mgr`, bound via `jobs.bind`) and given
@@ -655,18 +675,26 @@ the next turn calls `mcp__<server>__<tool>`. Every hop is an event; `state.db` d
 | Hybrid search beats FTS-only by D10's margin on the transplanted corpus, or vectors ship off by default; a stale-model vector is never a hit; a session's history folds after its summary; `state.db` deleted restores pages, summaries and the memory cursor | `bench/m4_retrieval.py`, `test_state.test_search_hybrid_rrf_order`, `test_search_ignores_vectors_of_another_model`, `test_history_folds_after_summary`, `test_reindex_restores_summaries_and_applies` |
 | An `edit_memory` approval routes to the memory manager, not a session lane; RULES.md reloads without a restart on an approved edit or a hand edit, keeping the old rules on a parse error; the resident context carries USER.md's body and the wiki map in the turn's second system message only, the first unchanged | `test_daemon.MemoryDaemonTest.*` |
 | `memory_proposed`/`memory_stalled` default to silence and the shipped RULES.md speaks both | `test_senses.MemorySenseTest.test_memory_kinds_default_silence_and_shipped_rules_speak` |
+| `init` stops at the first failing check and writes nothing before Ollama answers; the model pick goes through `config.set`; senses merge, never replace; the zshrc line and the Claude Code hooks land once (a second run changes no derived file); the plist names the interpreter, a literal `PATH` and the log; `service` never calls the real launchd in tests; no model name in `init.py` | `test_init.*` |
+| The TUI sends `say`/`approve`/`react`/`interrupt` over the same protocol, produces `presence` (typing = 0, silence = idle seconds), holds a notice while hands are on the keyboard, prints a stream as one paragraph, decodes UTF-8 keys, restores the terminal on every exit, and sanitizes third-party text | `test_tui.*`, `test_invariants.test_presence_has_a_producer` |
+| SIGTERM and Ctrl-C both end in one `close()` (the fake stdio server's process is gone); a `say` during a signal turn gets its own turn, during the user's turn still steers | `test_daemon.SigtermTest`, `test_say_during_signal_turn_starts_its_own_turn`, `test_daemon_say_during_turn_steers` |
+| `merge_json_file` keeps every other key, backs up first, creates a missing file, raises when the read-back differs | `test_installer.test_merge_json_file_*` |
+| The Anthropic adapter yields the same tuples from recorded SSE (text, tool_use from `input_json_delta`, usage), converts the history at the edge, maps 429/402 to `blocked`; a config without `api` resolves to `openai` exactly as before; no test opens a network socket | `test_llm_anthropic.*` |
+| `init.py` <= 300, `tui.py` <= 400; README.md and README.ko.md have the same headings | `test_invariants.test_init_module_under_300_lines`, `test_tui_module_under_400_lines`, `test_readme_pair_has_equal_heading_counts` |
 | `memory` is an opt-in tool origin, exactly `search_memory, read_memory, read_ledger, edit_memory`; the socket refuses `signal memory ...`; `memory.py` and `daemon.py` <= 780 lines (the 1.3x line of their 600 allocations) | `test_memory.test_tools_for_origin_memory`, `test_daemon.MemoryDaemonTest.test_socket_refuses_signal_memory`, `test_invariants.test_memory_module_under_780_lines`, `test_invariants.test_daemon_module_under_780_lines` |
 
 ## 13. How to count
 
 ```bash
-python3 -m unittest discover -s tests            # all tests, no network (389)
+python3 -m unittest discover -s tests            # all tests, no network (440)
 wc -l pathfinder/*.py pathfinder/llm/*.py pathfinder/senses/*.py   # core; budgets: ledger 400,
                                                   # state 600, daemon 600 (756 today, 780 hard line),
                                                   # loop 400, broker+policy 350, exec 300, tools 300,
                                                   # clock+signals+rules 450, deliver 250, jobs 350,
                                                   # memory 600 (686 today, 780 hard line), a sense file 150,
-                                                  # catalog 300, installer 700
+                                                  # catalog 300, installer 700, init 300 (partition 7);
+                                                  # core cap 7,000 (D34) - the 1.3x line per module is the gate
+wc -l pathfinder/tui.py pathfinder/llm/anthropic.py  # outside the core: tui <= 400, the experimental adapter in llm/'s 600
 wc -l pathfinder/mcp/*.py                         # the transplanted MCP client: adapter budget 1,858, outside the core
 python3 bench/m5_install.py                       # m5: installs from the registry in a temp HOME (network, npx; no model credits)
 python3 scripts/scan_personal.py --all           # personal-data scan over tracked files
@@ -675,8 +703,11 @@ python3 scripts/scan_personal.py --all           # personal-data scan over track
 ## 14. Running it
 
 ```bash
+pathfinder init                                   # onboarding: checks, model pick, senses, hooks, launchd (partition 7)
+pathfinder service start|stop|restart|status      # the launchd agent; stop = bootout (KeepAlive cannot respawn it)
+pathfinder tui                                    # one screen: type, read, /approve ID, /deny ID, /approvals, /jobs, + or -, /quit; Ctrl-C interrupts, twice quits
 python3 -m pathfinder config set model provider:model-name
-python3 -m pathfinder daemon
+python3 -m pathfinder daemon                      # by hand, without launchd
 python3 -m pathfinder say "hello"                 # a second `say` while one streams is a steer
 python3 -m pathfinder listen                      # attach and print deltas and signal notices
 python3 -m pathfinder approvals                   # pending gates, read from state.db
@@ -698,3 +729,52 @@ python3 -m pathfinder memory                      # cursor, passes/read/applied,
 python3 -m pathfinder memory run                   # force a consolidation pass now
 python3 -m pathfinder memory undo                  # replay the last memory_apply as its inverse
 ```
+
+## 15. Installing and the screen (partition 7)
+
+- **`pathfinder init`** (`init.py`, <= 300 lines) walks the checks in order and stops at the first
+  hard failure, printing the exact fix line: Python >= 3.11; Ollama answering `GET
+  <providers.ollama.base_url>/models` (the ids are listed with numbers, the pick goes through
+  `config.set("model", "ollama:<id>")`; an embedding model in the list is offered as `embed_model`;
+  no model name is in the code or the README - the list comes from the machine); `npx` (a warning
+  only); the home directory (0700; `RULES.md`/`USER.md` stay the daemon's first-start job); the
+  secret-free senses one yes/no each, merged into `senses` through one `config.set` (mail and
+  calendar are announced, not asked - they need a password or a permission prompt and `init` must
+  not block on either); the shell hook (the snippet to `<home>/hooks/pathfinder.zsh`, one guarded
+  line appended to `~/.zshrc` after a backup, a newline first when the file lacks one; the snippet
+  loads `zsh/datetime` and registers through `add-zsh-hook`, beside the user's own hooks); the Claude Code hooks (two entries merged into
+  `~/.claude/settings.json` through `installer.merge_json_file`, D36); the launchd agent (written
+  with `plistlib`, then `launchctl bootstrap gui/<uid> <plist>`, then up to ten seconds waiting for
+  the socket). Every step is idempotent: a second run changes no derived file. Answers come from
+  `input()` so a test pipes them; `launchctl` is one injectable function.
+- **`pathfinder service start|stop|restart|status`**: `bootstrap` / `bootout gui/<uid>/pathfinder.daemon`
+  / `kickstart -k` / `print`, reduced to one line plus whether the socket answers. `stop` is
+  `bootout`, not a signal: a loaded agent with `KeepAlive` would respawn on a bare SIGTERM.
+- **The daemon under launchd** (§7): SIGTERM and Ctrl-C both reach `close()`; the log is
+  `<home>/daemon.log`; `WorkingDirectory` is the package's parent so `-m pathfinder` resolves from a
+  clone (launchd's cwd is `/`).
+- **`pathfinder tui`** (`tui.py`, <= 400 lines, stdlib, outside the core like `mcp/`; D35): one
+  attached client for the sitting. Connects, sends `attach {cwd}` (the `attach` sense's context
+  source - before this only the one-shot `say` sent it), puts the terminal in cbreak with `ISIG`
+  off (so Ctrl-C arrives as a byte and is handled: `interrupt` while a turn runs, quit otherwise),
+  multiplexes stdin and the socket with `selectors`. The screen is the terminal's own scrollback:
+  a stream prints as one paragraph between `turn.start` and `turn.end`; anything else prints above
+  and the input line (`\r\033[K` + prompt + buffer) is redrawn after it; a `notice` that arrives
+  while keys are arriving waits until they have been silent for a second. Keys are decoded as
+  UTF-8 (a Hangul syllable is three bytes). Enter -> `say`; `+`/`-` alone -> `react`; `/approve ID`,
+  `/deny ID`, `/approvals`, `/jobs` (the CLI's own lists from `state.db`), `/quit`; a second Ctrl-C
+  while a turn refuses to be cut quits; arrow keys are dropped. During a stream keys buffer
+  silently and any other line takes a line of its own, so nothing erases the streamed text. **It is the only real producer
+  of `presence`**: `{idle_s: 0}` at most once a second while typing, `{idle_s: n}` every 30 s of
+  silence - the deliver state machine's typing and away branches (§8) had no live source from
+  partition 3 to 6. `tui.render(msg)` is the one renderer; `listen` prints through it too. Fixed
+  strings are bilingual side by side in one table (D6, no setting); notice text and job goals pass
+  `mcp.protocol.sanitize`. The terminal is restored in a `finally` on every path.
+- **`llm/anthropic.py`** (§4; D2, D37): experimental, recorded tests only, never run live (D7).
+  `providers.<name>.api = "anthropic"` selects it; every existing config resolves to `openai`.
+- **README.md / README.ko.md** carry the ten-minute path (Homebrew prerequisites, the Ollama
+  account, `git clone` + `pipx install .` - Homebrew's Python refuses a plain `pip install`, PEP 668, `pathfinder init`, `pathfinder tui`) and name no model; the
+  invariant test keeps their headings in step. The partition's exit measurement is `m8` - a person
+  on a fresh macOS account reaching the first conversation from the README alone in ten minutes -
+  recorded in HISTORY, gating partition 8.
+

@@ -1,0 +1,99 @@
+# PATHFINDER
+
+[English](README.md)
+
+AI로 일하는 사람을 위한 상주형 능동 비서. Mac 위에서 백그라운드 데몬으로 살면서, 말할 가치가 있는
+일이 생기면 먼저 말을 건다(실패한 빌드, 답해야 할 메일, 지금 연 프로젝트에 맞는 도구). 사용자가 한
+말은 사람이 읽을 수 있는 Markdown 파일에 기억하고, 하는 일에 맞는 검증된 도구(MCP 서버)를 제안해
+승인 한 번으로 설치한다. 하는 일 전부가 사용자 소유의 장부 한 줄이다.
+
+**상태: 프리알파.** 돈다; 아직 패키징 전이다. 당분간 macOS 전용.
+
+## 첫 대화까지 10분
+
+준비물(Homebrew). macOS에 딸려 오는 Python은 너무 오래됐다; PATHFINDER는 3.11 이상이 필요하다.
+
+```bash
+brew install python@3.14 pipx ollama node   # node는 도구 설치(npx)에만 필요; 지금은 건너뛰어도 된다
+pipx ensurepath                          # 한 번만; 그다음 새 터미널을 연다
+brew services start ollama               # 또는: ollama serve
+ollama signin                            # 브라우저로 ollama.com이 열린다; 무료 플랜으로 충분하다
+```
+
+설치와 설정:
+
+```bash
+git clone <이 저장소> pathfinder && cd pathfinder
+pipx install .                           # `pathfinder` 를 PATH 에 올린다; 셸과 Claude Code 훅이 이 이름으로 부른다
+pathfinder init
+```
+
+(Homebrew 의 Python 은 자기 안으로의 맨 `pip install` 을 거부한다, PEP 668; `pipx` 가 PATHFINDER 에
+자기 환경과 PATH 위의 명령을 준다.)
+
+`init`은 Python과 Ollama를 검사하고, 내 Ollama가 닿는 모델 목록을 보여 주어 하나를 고르게 하고,
+어떤 감각을 켤지 묻고, 셸과 Claude Code에 훅을 걸지 제안하고, launchd로 로그인 시 데몬을
+시작하게 한다. 그다음:
+
+```bash
+pathfinder tui                           # 화면 하나: 입력, 읽기, /approve, 알림에 +/-, /quit
+pathfinder say "안녕"                    # 또는 한 번에 한 마디
+```
+
+어느 단계가 실패하면 `init`은 정확한 해결 줄을 출력하고 멈춘다; 고친 뒤 다시 돌리면 된다 - 이미
+된 것은 건드리지 않는다.
+
+## 무엇이 어디서 도나
+
+| 자리 | 무엇 |
+|---|---|
+| `~/.pathfinder/` (`$PATHFINDER_HOME`) | PATHFINDER 소유 전부: 장부(`events/`), `config.json`, `RULES.md`, `USER.md`, `wiki/`, 소켓, `daemon.log` |
+| `~/Library/LaunchAgents/pathfinder.daemon.plist` | `init`이 쓴 launchd 에이전트; `pathfinder service start\|stop\|restart\|status` |
+| `~/.zshrc`(가드된 한 줄)와 `~/.pathfinder/hooks/pathfinder.zsh` | 셸 감각, 예라고 했을 때만 |
+| `~/.claude/settings.json`(훅 두 항목) | Claude Code 감각, 예라고 했을 때만 |
+| `~/.claude.json`(`mcpServers`) | 승인한 도구; Claude Code도 같이 본다 |
+| macOS 키체인 | 모든 비밀(MCP 서버 토큰, 메일 비밀번호); 파일에는 절대 없다 |
+
+`ARCHITECTURE.ko.md`(와 `ARCHITECTURE.md`)가 모듈 하나하나를 설명한다;
+`docs/decisions/DECISIONS.md`는 결정 목록이며 각각을 뒤집을 조건이 적혀 있다.
+
+## 감각 더 켜기
+
+`init`은 비밀이 필요 없는 감각을 켜고, 필요한 둘에 대해서는 나중에 붙여 넣을 정확한 줄을 찍어 준다.
+`config set senses` 는 값 전체를 바꾸므로 이미 켜진 것을 같이 적는다:
+
+```bash
+security add-generic-password -s pathfinder-mail -a you@example.com -w      # IMAP 비밀번호
+pathfinder config set senses '{"attach": {}, "catalog": {}, "schedule": {}, "reminders": {}, "shell": {}, "claude_code": {}, "calendar": {}, "mail": {"host": "imap.example.com", "user": "you@example.com"}}'
+```
+
+캘린더 감각이 처음 돌 때 macOS가 캘린더 접근을 묻는다.
+
+## 도구 설치
+
+```bash
+pathfinder search "postgres"             # MCP 레지스트리에서; 라이선스와 무결성 검사
+pathfinder install <레지스트리 이름>      # 제안; 행에 검사 결과와 발견한 툴이 보인다
+pathfinder approve ID                    # config.json과 ~/.claude.json에 설치; pathfinder uninstall <id>가 되돌린다
+```
+
+또는 데몬이 지금 연 프로젝트에 맞는 도구를 제안하면 "설치해"라고 말하면 된다.
+
+## 모델 제공자
+
+OpenAI 호환 엔드포인트면 무엇이든: `pathfinder config set model provider:model-name`, 제공자의
+`base_url`과 `api_key_env`는 `config.json`에. Anthropic 네이티브 어댑터도 있지만
+(`providers.<name>.api = "anthropic"`) **실험적**이다: 녹화된 응답으로만 테스트했고 라이브로
+돌린 적이 없다.
+
+## 실측
+
+모든 구획은 실측을 거쳐 들어왔다(`HISTORY.md`); `bench/` 아래 벤치가 그것을 다시 돌린다.
+`python3 -m unittest discover -s tests`가 오프라인 스위트를 돈다, 네트워크 없이.
+
+## 기여 위생
+
+`git config core.hooksPath .githooks`가 커밋 전 개인정보 스캔(`scripts/scan_personal.py`)을 켠다.
+자리표시자만: `admin@example.com`, `sk-...`. 추적되는 파일에 모델 이름은 없다: `config.json`에 산다.
+
+라이선스: 저장소가 공개되기 전에 정한다.

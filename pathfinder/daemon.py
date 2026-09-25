@@ -10,6 +10,7 @@ import collections
 import inspect
 import json
 import os
+import signal
 import socket
 import time
 import uuid
@@ -79,6 +80,7 @@ class Session:
         self.worker = None
         self.control: TurnControl | None = None  # of the running turn; None between turns
         self.turn = ""  # id of the running turn, valid while control is not None
+        self.origin = None  # "user" | "signal" of the running turn, set with control (D17)
         self.last_cwd = None  # attach()'s last pushed cwd - dedupes a client reattaching every second
 
 
@@ -209,8 +211,18 @@ class Daemon:
         self.sense_loop.start()
         self.memory_mgr.start()
         self.outbox.release()  # flush anything a previous crash left pending, now that we can
-        async with self.server:
+        loop = asyncio.get_running_loop()
+        # launchd's `service stop` sends SIGTERM: the same shutdown Ctrl-C runs below (`close()`:
+        # MCP servers closed, their child processes killed) - without it every npx child is
+        # orphaned (m5's bench had to killpg by hand for this).
+        loop.add_signal_handler(signal.SIGTERM, self.server.close)
+        try:  # not `async with self.server`: its wait_closed() waits for attached clients that only close() closes
             await self.server.serve_forever()
+        except asyncio.CancelledError:
+            pass  # our own close() above, or an outer cancellation (Ctrl-C) - either way, clean up below
+        finally:
+            loop.remove_signal_handler(signal.SIGTERM)
+            await self.close()
 
     async def close(self):
         self.jobs_mgr.dispatch = lambda fn: None  # drop a job's late calls, not race a closing state
@@ -282,9 +294,9 @@ class Daemon:
                         _write(writer, {"type": "error", "message": "say needs a non-empty \"text\""})
                         continue
                     session = session or self.attach(writer, None, None)
-                    if session.control is not None:
-                        self.steer(session, text)  # a turn is running: this is a mid-turn steer
-                    else:
+                    if session.control is not None and session.origin == "user":
+                        self.steer(session, text)  # the user's own turn is running: a mid-turn steer
+                    else:  # no turn running, or a signal turn: queued as its own turn (D17)
                         session.queue.put_nowait(("say", text))
                 elif kind == "interrupt":
                     if session is None or session.control is None:
@@ -494,7 +506,7 @@ class Daemon:
             finally:
                 if s.control is not None:
                     leftover = list(s.control.steers)  # said after the last drain: recorded, not yet answered
-                    s.control, s.turn = None, ""
+                    s.control, s.turn, s.origin = None, "", None
             self.send(s, {"type": "turn.end", "turn": turn, "kind": kind})
             self.outbox.release()  # a held notice may be releasable now that this turn ended
             if leftover and kind != "gated":  # a gate took its leftovers into the pending messages
@@ -595,7 +607,7 @@ class Daemon:
         sigs = [sig for sig, _why in to_speak]
         self.record("turn_start", session=s.id, turn=turn, origin="signal")
         control = TurnControl()
-        s.control, s.turn = control, turn  # note 13: without this, is_running(s) is False mid-turn
+        s.control, s.turn, s.origin = control, turn, "signal"  # note 13: without this, is_running(s) is False mid-turn
         answer, gated, ending = "", False, {"kind": "answer"}
         try:
             messages = [
@@ -649,7 +661,7 @@ class Daemon:
                 self.record("error", session=s.id, turn=turn, origin="signal", status=e.status, message=str(e)[:300])
                 ending = {"kind": "error"}
         finally:
-            s.control, s.turn = None, ""
+            s.control, s.turn, s.origin = None, "", None
 
         summaries = "\n".join(sig.summary for sig in sigs)
         text = f"{summaries}\n{answer}".strip() if answer and not gated else summaries
@@ -668,7 +680,7 @@ class Daemon:
         self.send(s, {"type": "turn.start", "turn": turn})
         control = TurnControl()
         control.session = s.id  # the one way start_job's handler learns which session to report to
-        s.control, s.turn = control, turn
+        s.control, s.turn, s.origin = control, turn, "user"  # resume/continue are user turns too (D17)
 
         aio = asyncio.get_running_loop()
         out_q = asyncio.Queue()

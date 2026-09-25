@@ -202,12 +202,12 @@ _JUDGE_SYSTEM = ('You decide whether a resident assistant should interrupt its u
 def judge(signal, cfg: dict) -> tuple:
     """D13: one request, no tools, no history, strict JSON - the only llm import here (see test_invariants)."""
     from . import signals as _signals
-    from .llm import LLMError, openai_compat, resolve
+    from .llm import LLMError, resolve, stream
     try:
         endpoint = resolve(cfg, cfg.get("worker_model") or cfg.get("model") or "")
         messages = [{"role": "system", "content": _JUDGE_SYSTEM},
                     {"role": "user", "content": _signals.render_envelope([signal])}]
-        text = "".join(p for k, p in openai_compat.stream(endpoint, messages, tools=None) if k == "text")
+        text = "".join(p for k, p in stream(endpoint, messages, tools=None) if k == "text")
     except LLMError:
         return False, "model unavailable"
     text = text.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -12,7 +13,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 from pathfinder import config, tools as tools_mod
-from pathfinder.installer import Installer, render_row, server_id
+from pathfinder.installer import Installer, merge_json_file, render_row, server_id
 from pathfinder.ledger import Ledger
 from pathfinder.state import State
 
@@ -377,6 +378,66 @@ class InstallerTest(unittest.TestCase):
         self.assertEqual(again["verification"]["failed_step"], "installed")
         self.assertIn(f"already installed as {cand['install']['id']}", again["verification"]["reason"])
         self.assertEqual(again["install"], "not_checked")  # nothing decided, nothing suffixed
+
+
+class MergeJsonFileTest(unittest.TestCase):
+    """`merge_json_file` (D36) - the one foreign-file helper `_merge_claude_json` is a caller
+    of, backup + atomic write + read-back deep-compare generalised out of it."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.home = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_merge_json_file_keeps_other_keys(self):
+        path = self.home / "settings.json"
+        before = {"oneKey": 1, "anotherKey": "x"}
+        path.write_text(json.dumps(before), encoding="utf-8")
+        os.chmod(path, 0o640)
+
+        backup = merge_json_file(path, lambda d: {**d, "added": True})
+
+        after = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(after, {"oneKey": 1, "anotherKey": "x", "added": True})
+        self.assertTrue(backup)
+        self.assertEqual(json.loads(Path(backup).read_text(encoding="utf-8")), before)
+        self.assertEqual(Path(backup).stat().st_mode & 0o777, 0o640)
+
+    def test_merge_json_file_keeps_symlink_and_mode(self):
+        """A dotfile-repo `~/.claude/settings.json` is a symlink with mode 0644: the merge must
+        rewrite the target, keep the link, and keep the mode (mkstemp would make it 0600)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "repo" / "settings.json"
+            target.parent.mkdir()
+            target.write_text('{"a": 1}', encoding="utf-8")
+            os.chmod(target, 0o644)
+            link = Path(tmp) / "settings.json"
+            link.symlink_to(target)
+            merge_json_file(link, lambda d: {**d, "b": 2})
+            self.assertTrue(link.is_symlink())
+            self.assertEqual(json.loads(target.read_text(encoding="utf-8")), {"a": 1, "b": 2})
+            self.assertEqual(target.stat().st_mode & 0o777, 0o644)
+
+    def test_merge_json_file_missing_file(self):
+        path = self.home / "sub" / "settings.json"
+        self.assertFalse(path.exists())
+
+        backup = merge_json_file(path, lambda d: {**d, "added": True})
+
+        self.assertEqual(backup, "")
+        self.assertEqual(json.loads(path.read_text(encoding="utf-8")), {"added": True})
+        self.assertEqual(list(path.parent.glob("settings.json.pathfinder-*")), [])
+
+    def test_merge_json_file_readback_mismatch_raises(self):
+        path = self.home / "settings.json"
+        path.write_text(json.dumps({"a": 1}), encoding="utf-8")
+
+        # A tuple round-trips through json.dump as a list - readback then differs from the
+        # `after` object `mutate` returned, exactly the mismatch this check exists to catch.
+        with self.assertRaises(RuntimeError):
+            merge_json_file(path, lambda d: {**d, "pair": (1, 2)})
 
 
 if __name__ == "__main__":

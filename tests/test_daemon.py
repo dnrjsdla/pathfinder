@@ -4,6 +4,7 @@ import dataclasses
 import json
 import os
 import shutil
+import signal
 import stat
 import sys
 import tempfile
@@ -1131,6 +1132,51 @@ class SignalTurnControlTest(DaemonHarness):
         is_running = self.run_with(slow_model, scenario)
         self.assertTrue(is_running)
 
+    def test_say_during_signal_turn_starts_its_own_turn(self):
+        """Partition-7 defect: D17 only covers the user's own turn - a `say` that arrives while
+        a SIGNAL turn is running (the assistant speaking on its own initiative, nothing the user
+        said yet) must not steer it; it queues as its own turn, run once the signal turn ends."""
+        proceed = threading.Event()
+
+        def slow_model(cfg, control=None, tools=None):
+            def step(messages):
+                proceed.wait(2)
+                yield ("text", "ok")
+            return step
+
+        async def scenario(daemon):
+            _never_quiet(daemon)
+            c = await Client.open(self.home)
+            c.send({"type": "attach"})
+            await c.recv()
+
+            daemon.push_signal(Signal(sense="schedule", kind="schedule_due", key="k-say-signal",
+                                      summary="A", fields={}, trust="user"))
+            s = None
+            for _ in range(200):
+                s = next(iter(daemon.sessions.values()), None)
+                if s is not None and s.control is not None:
+                    break
+                await asyncio.sleep(0.01)
+            self.assertEqual(s.origin, "signal")  # the running turn is the signal's, not the user's
+
+            c.send({"type": "say", "text": "hello"})
+            await asyncio.sleep(0.1)  # a chance to wrongly steer the signal turn, if it would
+            self.assertEqual(s.origin, "signal")  # unchanged: "hello" only queued, not steered
+
+            proceed.set()
+            seen = await c.until("turn.end")  # the queued say's own turn - the signal turn
+                                              # never talks to the client directly, only via `notice`
+            c.close()
+            return seen
+
+        seen = self.run_with(slow_model, scenario)
+        self.assertIn("turn.start", [m["type"] for m in seen])
+        self.assertEqual(seen[-1]["kind"], "answer")
+        self.assertEqual([e for e in self.events() if e["type"] == "user" and e.get("steer")], [])
+        says = [e for e in self.events() if e["type"] == "user" and e.get("text") == "hello"]
+        self.assertEqual(len(says), 1)
+
 
 class MemoryDaemonTest(DaemonHarness):
     def test_lane_gated_edit_memory_resumes_the_turn(self):
@@ -1601,6 +1647,40 @@ class InstallerDaemonTest(DaemonHarness):
         self.assertIn("propose_install", tools_mod.for_origin("user"))
         self.assertNotIn("propose_install", tools_mod.for_origin("signal"))
         self.assertNotIn("search_tools", tools_mod.for_origin("signal"))
+
+
+class SigtermTest(DaemonHarness):
+    """`serve()` runs a real Daemon (not through `run_with`, which owns start()/close() itself -
+    the SIGTERM handler lives inside `serve()`)."""
+
+    def test_sigterm_closes_mcp_servers(self):
+        """launchd's `service stop` sends SIGTERM - without a handler for it, `close()` never
+        runs and every npx child is orphaned (m5's bench had to killpg by hand for this)."""
+        config.set(self.home, "mcp_servers",
+                   {"fake": {"transport": "stdio", "command": [sys.executable, str(FAKE_SERVER)]}})
+
+        async def main():
+            daemon = Daemon(self.home, step_factory=fake_model("ok"))
+            serve_task = asyncio.ensure_future(daemon.serve())
+            for _ in range(500):
+                if daemon.mcp.loaded is not None:
+                    break
+                await asyncio.sleep(0.01)
+            await daemon.mcp.loaded
+            proc = daemon.mcp.servers._sessions["fake"]._transport._proc
+            # an attached client (the TUI, all day): `async with server` waited for it forever
+            reader, writer = await asyncio.open_unix_connection(str(daemon.home / SOCKET))
+            writer.write(b'{"type": "attach"}\n')
+            await writer.drain()
+            await reader.readline()  # attached
+            os.kill(os.getpid(), signal.SIGTERM)
+            await asyncio.wait_for(serve_task, 5)
+            writer.close()
+            return proc, daemon.home / SOCKET
+
+        proc, sock_path = asyncio.run(main())
+        self.assertIsNotNone(proc.poll())  # the child is dead, not orphaned
+        self.assertFalse(sock_path.exists())
 
 
 if __name__ == "__main__":

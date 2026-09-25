@@ -53,6 +53,10 @@ daemon.Daemon ── 세션마다 lane 하나 (큐 + 워커); 큐 항목: say | 
 | `<홈>/USER.md` | RULES.md 의 `USER.xxx` 조건이 읽는 목록에 자유 본문(상주 문맥)이 더해짐 | 첫 시작에 빈 채로 만들어짐; 승인된 `edit_memory` 줄이 채움(또는 사용자 턴 grant 의 자동 적용, D28) | 빈 앞머리 - 기억이 처음부터 다시 시작 |
 | `<홈>/wiki/*.md` | wiki 페이지, 파일 하나에 주제 하나 | `memory.Manager.apply`(`edit_memory`, 그 자리에서 적용) | 그 지식이 사라짐 - 파일이 진실이다 |
 | `~/.claude.json`(사용자의 것, `<홈>` 아님) | Claude Code 의 user scope `mcpServers`(D33) - 승인된 설치마다 항목 하나, 비밀은 `${VAR}` 참조 | `installer.Installer` 만, 원자적으로, `~/.claude.json.pathfinder-<ts>` 로 바이트 복사한 뒤 | Claude Code 의 몫; 설치기는 롤백·제거 때 백업에서 되돌린다 |
+| `~/Library/LaunchAgents/pathfinder.daemon.plist` | launchd 에이전트: 지금 인터프리터로 `-m pathfinder daemon`, 리터럴 `PATH`, 설정돼 있으면 `PATHFINDER_HOME`, `KeepAlive`, 로그는 `<home>/daemon.log`, `WorkingDirectory` = 패키지의 부모 | `init`(plistlib), 예라고 한 뒤 | `init` 을 다시 돌리기 전까지 `pathfinder service start` 가 실패 |
+| `<home>/daemon.log` | launchd 아래 데몬의 stderr | launchd | 없음 |
+| `<home>/hooks/pathfinder.zsh` 와 `~/.zshrc` 의 가드된 한 줄 | 셸 감각의 `preexec`/`precmd` 훅(`docs/senses.md`), 파일이 있을 때만 source | `init`, 예라고 한 뒤; `~/.zshrc` 는 `~/.zshrc.pathfinder-<ts>` 로 백업하고 덧붙이기만, 다시 쓰지 않음 | 셸 감각이 아무것도 못 듣는다 |
+| `~/.claude/settings.json`(`hooks.Stop`, `hooks.Notification`) | Claude Code 감각의 훅 두 항목 | `init` 이 `installer.merge_json_file`(D36)로: 백업 · 원자 쓰기 · 읽어서 대조; `pathfinder signal claude_code` 표식으로 멱등 | Claude Code 자기 일 |
 | macOS Keychain `pathfinder-mcp-<id>` / `pathfinder-mail` | 모든 비밀(MCP 서버 토큰, IMAP 비밀번호) | 사용자가 손으로(`security add-generic-password`) | 서버는 `disabled: secret missing: <NAME>` 로 남고, 메일 감각은 오류 |
 
 `<홈>` 은 `$PATHFINDER_HOME` 또는 `~/.pathfinder` (권한 0700).
@@ -123,12 +127,21 @@ idle_s)`, `signal_turns(ts)`(신호 기원 `turn_start` 한 번마다 한 줄 �
 ## 4. 모델 층 (`pathfinder/llm/`)
 
 - `resolve(cfg, "provider:model")` 은 첫 콜론에서 갈라 `Endpoint` 를 돌려준다. 모델 이름은
-  `config.json` 에만 있고, 미설정이면 분명한 오류가 난다.
+  `config.json` 에만 있고, 미설정이면 분명한 오류가 난다. `Endpoint.api` 는
+  `providers.<name>.api` — 없으면 `"openai"`(기존 설정 전부 그대로 풀린다), 아니면
+  `"anthropic"`; 그 밖은 설정 오류. `llm.stream(endpoint, ...)` 이 그것으로 어댑터를 고른다 —
+  slot 과 `rules.judge` 는 어댑터 모듈이 아니라 그것을 부른다(D2).
 - `openai_compat.stream(endpoint, messages, tools, cancel)` 은 OpenAI 호환 SSE 를 말하고
   `text | reasoning | tool_calls | usage | cancelled` 를 낸다. `cancel` 은 `is_set()` 이 있는
   무엇이든 되고 청크 사이에서 확인한다. 실패는 전부 `LLMError`, 402 · 429 는 `blocked`. 데몬의
   step factory 는 툴 스키마를 항상 넘긴다 — 모델이 자기 손을 봐야 한다(첫 라이브 실행에서
   안 넘기고 있던 것이 잡혔다 — `test_default_step_factory_sends_tool_schemas`).
+- `anthropic.stream`(D37, **실험적 — 라이브로 돌린 적 없음, D7**)은 Messages API SSE
+  (`/v1/messages`, `anthropic-version: 2023-06-01`, `x-api-key`)를 말하고 같은 튜플을 낸다: 루프의
+  OpenAI 모양 이력을 가장자리에서 바꾼다(system 메시지 → 최상위 `system`, 툴 호출 → `tool_use`
+  블록, 툴 결과 → user 턴 하나 안의 `tool_result` 블록), `input_json_delta` 조각은 이어 붙여
+  `content_block_stop` 에서 파싱, 스트림 도중 `error` 이벤트는 `LLMError`. 테스트는 녹화 픽스처만
+  (`tests/fixtures/anthropic_*.sse`). 임베딩 없음: `embed` 는 호환 어댑터에 남는다.
 - `openai_compat.embed(endpoint, texts) -> list[list[float]]` 는 같은 `/embeddings` OpenAI 호환
   경로로 묶어서 임베딩한다. 임베더는 `cfg["embed_model"]` 이고 `model`/`worker_model` 과 같은
   방식으로 `resolve` 를 거친다; 비어 있으면 벡터 없음이지 오류가 아니다.
@@ -232,7 +245,9 @@ dict 를 키 튜플로 바꿔 버린다.
 - **상주 시스템 프롬프트는 `prompts/system.txt` + `signals.SIGNAL_TURNS_CLAUSE` 이고, 유저 턴과
   신호 턴을 가리지 않고 모든 턴에서 바이트 단위로 같다**(캐시); 두 번째 시스템 메시지
   `clock.now_line()`("Local time now: ...")만 턴마다 바뀐다.
-- **턴이 도는 중의 `say` 는 steer 다**(D17): `user {steer: true}` 로 적히고 `control.steers` 에
+- **사용자 자신의 턴이 도는 중의 `say` 는 steer 다**(D17; `Session.origin` 은 새·재개·continue 턴에서
+  `"user"`, 신호 턴에서 `"signal"` — 신호 턴 도중의 say 는 자기 턴으로 큐에 들어간다, 그 턴은
+  사용자에게 보이지 않으므로): `user {steer: true}` 로 적히고 `control.steers` 에
   들어가며, 툴 핸들러가 도는 중(`in_tool`)이 아니면 `steer_cut` 이 선다 — 스트림은 끊지만 툴은
   안 끊는다. 모델의 마지막 청크 뒤에 도착한 steer 도 잃지 않는다: 턴이 끝났는데 steer 가 남아
   있으면 lane 이 `continue` 턴을 돌려 그것을 마지막 user 메시지로 붙인다(다시 적지는 않는다).
@@ -251,6 +266,10 @@ dict 를 키 튜플로 바꿔 버린다.
   장부에 적고 `tool` 을 보낸다. 장부와 상태에 쓰는 일은 전부 그 스레드에서 한다. 유저 턴의
   `TurnControl` 은 `.session` 도 지닌다 - `control` 만 받는 모든 툴 핸들러처럼 `start_job` 의
   핸들러도 이것으로만 작업 결과를 보낼 세션을 안다.
+- `serve()` 는 서버를 닫는 SIGTERM 핸들러를 건다(`async with server` 없이: 그 `wait_closed()` 는
+  `close()` 만이 닫는 붙은 클라이언트를 영원히 기다린다); SIGTERM(launchd 의 `service stop`)과 Ctrl-C 둘 다
+  `close()` 하나로 끝난다(MCP 서버 닫기, 그 프로세스 그룹 죽이기, 소켓 삭제) — 전에는 Ctrl-C 가
+  `close()` 에 닿지 않아 npx 자식이 전부 고아가 됐다.
 - 모델이 막혀도 데몬은 산다: `LLMError` 는 `error` 사건 · `error` 줄 · `turn.end {kind: "error"}`.
   소켓은 0600 으로 태어나고, 살아 있는 소켓이면 거부한다.
 - `jobs.Manager` 는 `__init__` 에서 만들어지고(`self.jobs_mgr`, `jobs.bind` 로 묶임) `self._job_record`
@@ -634,18 +653,26 @@ Daemon.run_signal_turn ── 신호마다 rules.decide 를 먼저(절대 안 �
 | 옮겨온 말뭉치에서 하이브리드 검색이 D10 기준만큼 FTS 만보다 나음(아니면 벡터는 기본으로 꺼짐); 낡은 모델의 벡터는 절대 안 맞음; 세션 이력은 요약 뒤로 접힘; `state.db` 삭제는 페이지 · 요약 · 기억 커서를 복구함 | `bench/m4_retrieval.py`, `test_state.test_search_hybrid_rrf_order`, `test_search_ignores_vectors_of_another_model`, `test_history_folds_after_summary`, `test_reindex_restores_summaries_and_applies` |
 | `edit_memory` 승인은 세션 lane 이 아니라 기억 매니저로 감; RULES.md 는 승인된 수정이나 손 수정 뒤 재시작 없이 다시 읽히고, 파싱 오류면 옛 규칙을 지킴; 상주 문맥은 USER.md 본문과 wiki 지도를 턴의 두 번째 시스템 메시지에만 싣고 첫 메시지는 그대로임 | `test_daemon.MemoryDaemonTest.*` |
 | `memory_proposed`/`memory_stalled` 는 기본이 침묵이고 기본 RULES.md 는 둘 다 말함 | `test_senses.MemorySenseTest.test_memory_kinds_default_silence_and_shipped_rules_speak` |
+| `init` 은 첫 실패 검사에서 멈추고 Ollama 가 답하기 전엔 아무것도 쓰지 않음; 모델 선택은 `config.set` 을 거침; 감각은 병합, 교체 아님; zshrc 한 줄과 Claude Code 훅은 한 번만 들어감(두 번째 실행은 파생 파일을 바꾸지 않음); plist 는 인터프리터 · 리터럴 `PATH` · 로그를 담음; 테스트의 `service` 는 진짜 launchd 를 절대 안 부름; `init.py` 에 모델 이름 없음 | `test_init.*` |
+| TUI 는 같은 프로토콜로 `say`/`approve`/`react`/`interrupt` 를 보내고, `presence` 를 생산하며(타이핑 = 0, 침묵 = 유휴 초), 손이 키보드에 있는 동안 알림을 붙들고, 스트림을 한 문단으로 찍고, UTF-8 키를 디코드하고, 모든 종료 경로에서 터미널을 복원하고, 제3자 글을 sanitize 함 | `test_tui.*`, `test_invariants.test_presence_has_a_producer` |
+| SIGTERM 과 Ctrl-C 둘 다 `close()` 하나로 끝남(가짜 stdio 서버 프로세스가 사라짐); 신호 턴 도중의 `say` 는 자기 턴을 얻고, 사용자 턴 도중엔 여전히 steer | `test_daemon.SigtermTest`, `test_say_during_signal_turn_starts_its_own_turn`, `test_daemon_say_during_turn_steers` |
+| `merge_json_file` 은 다른 키를 전부 지키고, 먼저 백업하고, 없는 파일은 만들고, 읽어서 다르면 raise | `test_installer.test_merge_json_file_*` |
+| Anthropic 어댑터는 녹화 SSE 에서 같은 튜플을 냄(text, `input_json_delta` 로 조립한 tool_use, usage), 이력을 가장자리에서 변환, 429/402 는 `blocked`; `api` 없는 설정은 전과 똑같이 `openai` 로 풀림; 어느 테스트도 네트워크 소켓을 열지 않음 | `test_llm_anthropic.*` |
+| `init.py` ≤ 300, `tui.py` ≤ 400; README.md 와 README.ko.md 의 제목 수가 같음 | `test_invariants.test_init_module_under_300_lines`, `test_tui_module_under_400_lines`, `test_readme_pair_has_equal_heading_counts` |
 | `memory` 는 옵트인 툴 origin, 정확히 `search_memory, read_memory, read_ledger, edit_memory`; 소켓이 `signal memory ...` 를 거부함; `memory.py` 와 `daemon.py` 는 780줄 이하(배분 600 의 1.3배 선) | `test_memory.test_tools_for_origin_memory`, `test_daemon.MemoryDaemonTest.test_socket_refuses_signal_memory`, `test_invariants.test_memory_module_under_780_lines`, `test_invariants.test_daemon_module_under_780_lines` |
 
 ## 13. 세는 법
 
 ```bash
-python3 -m unittest discover -s tests            # 전체 테스트, 네트워크 없음 (389)
+python3 -m unittest discover -s tests            # 전체 테스트, 네트워크 없음 (440)
 wc -l pathfinder/*.py pathfinder/llm/*.py pathfinder/senses/*.py   # 코어; 배분: ledger 400 ·
                                                   # state 600 · daemon 600(오늘은 756, 780 이 하드
                                                   # 라인) · loop 400 · broker+policy 350 ·
                                                   # exec 300 · tools 300 · clock+signals+rules 450 ·
                                                   # deliver 250 · jobs 350 · memory 600(오늘 686, 780 이 하드 라인) ·
                                                   # 감각 파일 150 · catalog 300 · installer 700
+                                                  # init 300(구획 7); 코어 상한 7,000(D34) — 모듈별 1.3배 선이 게이트
+wc -l pathfinder/tui.py pathfinder/llm/anthropic.py  # 코어 밖: tui ≤ 400, 실험 어댑터는 llm/ 의 600 안
 wc -l pathfinder/mcp/*.py                         # 이식한 MCP 클라이언트: 어댑터 예산 1,858, 코어 밖
 python3 bench/m5_install.py                       # m5: 임시 HOME 에 레지스트리에서 설치(네트워크·npx, 모델 크레딧 0)
 python3 scripts/scan_personal.py --all           # 추적 파일 전체 개인정보 스캔
@@ -654,6 +681,9 @@ python3 scripts/scan_personal.py --all           # 추적 파일 전체 개인�
 ## 14. 돌리는 법
 
 ```bash
+pathfinder init                                   # 온보딩: 검사 · 모델 선택 · 감각 · 훅 · launchd(구획 7)
+pathfinder service start|stop|restart|status      # launchd 에이전트; stop = bootout(KeepAlive 가 되살릴 수 없음)
+pathfinder tui                                    # 화면 하나: 입력 · 읽기 · /approve ID · /deny ID · /approvals · /jobs · + 또는 - · /quit; Ctrl-C 는 중단, 두 번이면 종료
 python3 -m pathfinder config set model provider:model-name
 python3 -m pathfinder daemon
 python3 -m pathfinder say "안녕"                  # 답이 흐르는 중의 두 번째 `say` 는 steer
@@ -677,3 +707,46 @@ python3 -m pathfinder memory                      # 커서, passes/read/applied,
 python3 -m pathfinder memory run                   # 지금 통합 패스를 강제로 돌림
 python3 -m pathfinder memory undo                  # 최근 memory_apply 를 그 역으로 되돌림
 ```
+
+## 15. 설치와 화면 (구획 7)
+
+- **`pathfinder init`**(`init.py`, ≤ 300줄)은 검사를 순서대로 돌고 첫 하드 실패에서 정확한 해결 줄을
+  찍고 멈춘다: Python ≥ 3.11; Ollama 가 `GET <providers.ollama.base_url>/models` 에 답함(id 를 번호
+  매겨 보이고, 선택은 `config.set("model", "ollama:<id>")` 을 거친다; 목록에 임베딩 모델이 있으면
+  `embed_model` 로 제안; 코드에도 README 에도 모델 이름은 없다 — 목록은 기계에서 온다); `npx`(경고만);
+  홈 디렉터리(0700; `RULES.md`/`USER.md` 는 데몬의 첫 시작 몫); 비밀 없는 감각을 하나씩 예/아니오로
+  묻고 `config.set` 한 번으로 `senses` 에 병합(mail · calendar 는 묻지 않고 안내만 — 비밀번호나 권한
+  창이 필요하고 `init` 은 어느 쪽에도 막히면 안 된다); 셸 훅(스니펫을 `<home>/hooks/pathfinder.zsh`
+  에, 백업 뒤 `~/.zshrc` 에 가드된 한 줄 덧붙임 — 파일 끝에 줄바꿈이 없으면 먼저 하나; 스니펫은
+  `zsh/datetime` 을 싣고 `add-zsh-hook` 으로 사용자 훅 옆에 붙는다); Claude Code 훅(`installer.merge_json_file`, D36 으로
+  `~/.claude/settings.json` 에 두 항목 병합); launchd 에이전트(`plistlib` 로 쓰고 `launchctl bootstrap
+  gui/<uid> <plist>`, 그 뒤 소켓을 최대 10초 기다림). 모든 단계가 멱등이다: 두 번째 실행은 파생 파일을
+  바꾸지 않는다. 답은 `input()` 으로 받아 테스트가 파이프로 넣고, `launchctl` 은 주입 가능한 함수 하나다.
+- **`pathfinder service start|stop|restart|status`**: `bootstrap` / `bootout gui/<uid>/pathfinder.daemon`
+  / `kickstart -k` / `print` 를 한 줄 + 소켓이 답하는지로 줄인 것. `stop` 은 신호가 아니라 `bootout`:
+  `KeepAlive` 가 걸린 에이전트는 맨 SIGTERM 에 되살아난다.
+- **launchd 아래의 데몬**(§7): SIGTERM 과 Ctrl-C 둘 다 `close()` 에 닿는다; 로그는 `<home>/daemon.log`;
+  `WorkingDirectory` 는 패키지의 부모라 클론에서도 `-m pathfinder` 가 풀린다(launchd 의 cwd 는 `/`).
+- **`pathfinder tui`**(`tui.py`, ≤ 400줄, stdlib, `mcp/` 처럼 코어 밖; D35): 한 자리 동안 붙어 있는
+  클라이언트 하나. 연결하고 `attach {cwd}` 를 보내고(`attach` 감각의 맥락 출처 — 전에는 일회성 `say`
+  만 보냈다), 터미널을 cbreak + `ISIG` 꺼짐으로 두고(Ctrl-C 가 바이트로 와서 직접 처리한다: 턴이 도는
+  중이면 `interrupt`, 아니면 종료), `selectors` 로 stdin 과 소켓을 다중화한다. 화면은 터미널 자신의
+  스크롤백: 스트림은 `turn.start` 와 `turn.end` 사이에 한 문단으로 찍히고, 그 밖의 것은 위에 찍힌 뒤
+  입력줄(`\r\033[K` + 프롬프트 + 버퍼)이 다시 그려진다; 키가 들어오는 중에 온 `notice` 는 1초 조용해질
+  때까지 기다린다. 키는 UTF-8 로 디코드한다(한글 한 음절은 3바이트). Enter → `say`; `+`/`-` 만 → `react`;
+  `/approve ID` · `/deny ID` · `/approvals` · `/jobs`(CLI 자신의 목록, `state.db` 에서) · `/quit`; 툴이
+  끊기지 않는 턴에서 두 번째 Ctrl-C 는 종료; 화살표 키는 버린다. 스트림 중에는 키가 조용히 버퍼에
+  쌓이고 다른 줄은 제 줄을 차지하므로 흐르는 글이 지워지지 않는다. **`presence` 의
+  유일한 실제 생산자다**: 타이핑 중 `{idle_s: 0}` 을 1초에 최대 한 번, 침묵 30초마다 `{idle_s: n}` —
+  전달 상태기계의 타이핑 · 자리비움 분기(§8)는 구획 3부터 6까지 라이브 출처가 없었다. `tui.render(msg)`
+  가 렌더러 하나; `listen` 도 그것으로 찍는다. 고정 문구는 표 하나에 한국어 · 영어 나란히(D6, 설정
+  없음); 알림 글과 작업 목표는 `mcp.protocol.sanitize` 를 거친다. 터미널은 모든 경로에서 `finally` 로
+  복원된다.
+- **`llm/anthropic.py`**(§4; D2, D37): 실험적, 녹화 테스트만, 라이브로 돌리지 않음(D7).
+  `providers.<name>.api = "anthropic"` 이 고른다; 기존 설정은 전부 `openai` 로 풀린다.
+- **README.md / README.ko.md** 는 10분 경로(Homebrew 준비물, Ollama 계정, `git clone` + `pipx install .` —
+  Homebrew 의 Python 은 맨 `pip install` 을 거부한다, PEP 668 —,
+  `pathfinder init`, `pathfinder tui`)를 담고 모델 이름을 적지 않는다; 불변조건 테스트가 두 파일의 제목
+  수를 맞춘다. 이 구획의 출구 실측은 `m8` — 새 macOS 계정의 사람이 README 만으로 10분 안에 첫 대화에
+  닿는가 — HISTORY 에 적히고 구획 8 을 게이트한다.
+

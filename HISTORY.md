@@ -902,3 +902,122 @@ the contract adds about 300 (`init.py`, a new module with a 300-line ceiling in 
 test). Partition 7 has no entrance measurement; its exit measurement is `m8` - a person on a
 fresh macOS account reaching the first conversation from the README alone in ten minutes -
 which gates partition 8, not the commit.
+
+## 2026-09-25 — Partition 7: the installable form
+
+`pathfinder init`, `pathfinder service`, `pathfinder tui`, the daemon under launchd, the
+experimental Anthropic adapter, the README pair. 440 offline tests (389 before). Core 6,882 lines
+without `tui.py` (the blueprint puts the screen outside the core, like `mcp/`), 7,196 with it -
+against D34's 7,000 cap; `init.py` 297/300, `tui.py` 314/400, `daemon.py` 768/780, `installer.py`
+669 (700), `llm/anthropic.py` 144, `llm/__init__.py` 57, `__main__.py` 455. Research first
+(one researcher, ~30 calls): the suite passes under a real `python3.11`; macOS 26's own `python3`
+is 3.9.6, so the README never points at it; Homebrew's `python3` is 3.14; `ollama signin` is the
+account step and the local server must run for `/v1/models`; `launchctl bootout` unregisters the
+job so `KeepAlive` cannot respawn it (a bare SIGTERM would); a LaunchAgent inherits no shell
+`PATH`, so the plist carries a literal one; `docs/senses.md`'s Claude Code hook block is still the
+documented 2026 shape; the Anthropic streaming event list, `input_json_delta`, the version header
+and the 429/402/529 meanings were taken from the published docs for the recorded fixtures.
+
+### Live checks (temp `$HOME` and `$PATHFINDER_HOME`; the real home never touched)
+
+(2) `init` with piped answers: python ok, the machine's ten Ollama ids listed, the pick lands in
+`config.json` through `config.set`, six senses merged, `<home>/hooks/pathfinder.zsh` + one guarded
+line in `~/.zshrc` (backup taken), two hook entries in `~/.claude/settings.json`, the plist written
+and bootstrapped, the socket up inside the ten-second wait, `say` answered by a cloud model.
+A second `init` run with every answer yes changed none of the four derived files (md5-equal).
+(3) `config set model ...` + a fake stdio MCP server in `mcp_servers`, `service restart`: new pid,
+the fake server's child alive, `tools` lists it; `service stop`: no daemon, no fake-server orphan,
+socket unlinked; `service start`: back with the child. (4) `tui` through a pty against the live
+daemon: a Korean `say` reached the daemon, Ctrl-C 1.6 s in recorded `interrupted` +
+`turn_end cancelled`, the next question answered, `+` recorded `reaction up`, `/approvals` printed
+its bilingual line, `/quit` exited 0, `presence` rows appeared in the ledger for the first time
+since partition 3, and `attach {cwd}` pushed a `context` signal. (5) A `say` sent 0.4 s into a
+`claude_code` signal turn was recorded at that turn's `turn_end` timestamp with no `steer` flag
+and got its own `turn_start` - it waited in the lane (before partition 6's defect fix it was
+swallowed as a steer and the CLI hung). Both signal turns ended `gated` at step one: the model
+reaches for a write in a signal turn and D22 stops it - pre-existing, worth watching in the two
+weeks of use. (6) The adapter runs its recorded streams to a tool call and to `blocked`; no test
+opens a network socket. (7) Both READMEs carry the path and name no model; the invariant test
+keeps their headings equal. (1), the ten-minute check by a person on a fresh account, is the
+owner's part below and gates partition 8 as `m8`.
+
+### Defects found, by whom
+
+Live, by the lead: the TUI printed every delta through the "print above, redraw the input line"
+path, so a stream came out one chunk per line (fix: a stream is one paragraph between
+`turn.start` and `turn.end`; the input line comes back at `turn.end`); the key loop accepted
+printable ASCII only, so Hangul was dropped on the floor - D6 says both languages (fix: an
+incremental UTF-8 decoder, `isprintable()`); the plist had no `WorkingDirectory`, so under launchd
+(cwd `/`) `-m pathfinder` cannot resolve from a clone (fix: the package's parent); `init` printed a
+bare `ok` per check, useless to the person with the clock (fix: `python 3.14: ok`, `model: ...`,
+`home: ...`, `npx: ok`); `init` swallowed a failing `launchctl bootstrap` and printed the next
+step as if the daemon were up (fix: no socket after the wait -> the launchctl output, the log
+path, exit 1; a re-run still passes because the loaded agent answers). Implementer A1, by test: Ctrl-C never reached `close()` either - the old
+`serve()` had no `finally`, so every SIGINT orphaned the MCP children too, not only SIGTERM.
+Implementer B2, by repro: under cbreak the tty's `ISIG` swallows Ctrl-C before `read()` in every
+environment, so the byte path was dead code (fix: `ISIG` off; Ctrl-C is a byte). Implementer C:
+one pre-existing fake in `test_rules` lacked the `cancel`/`timeout` kwargs the dispatcher now
+forwards. Tests alone caught none of the five live defects; the review's three blockers were all reachable only from a real terminal, a real dotfile or a real Homebrew Python.
+
+Reviewer (opus, read-only, three repro scripts) - blockers 3: `serve()`'s `async with self.server`
+made SIGTERM (and Ctrl-C) hang whenever a client was attached - `wait_closed()` waits for the
+connections that only `close()` closes, so with the TUI attached all day `service stop` would
+have hit launchd's SIGKILL and orphaned the MCP children after all (fix: no `async with`;
+`close()` already closes conns then the server; the test now attaches a client first); the
+`~/.zshrc` append corrupted a last line without a trailing newline (`export FOO=1[ -f ...`,
+VS Code's default; fix: a newline first when the file does not end in one, plus a test); the
+README's `pip install .` fails on Homebrew's Python (PEP 668, `externally-managed-environment`),
+which would stop the ten-minute check at step two (fix: `pipx install .`, verified live - the
+command lands on PATH, which the shell and Claude Code hooks need; the `python -m` fallback that
+left it off PATH is gone). Should-fix 8, all taken: the sense lines `init` printed switched every
+other sense off when pasted (`config set` replaces; now the merged dict); a redraw mid-stream
+erased the streamed line and a `tool` line did the same in most tool turns (now: keys buffer
+silently during a stream, other lines take a line of their own, the buffer returns at
+`turn.end`); a second held notice replaced the first (a list); the idle `presence` had no ceiling
+(the daemon rejects > 86400); the installed zsh snippet never measured a duration
+(`$EPOCHSECONDS` is empty without `zmodload zsh/datetime`, so the shell sense's `seconds` rule
+could never fire - since partition 3) and overrode the user's own `precmd` (now `add-zsh-hook`;
+`docs/senses.md` updated and a test keeps the two identical); a malformed `settings.json`
+crashed `init` with a traceback and a stray backup (now a fix line; the backup is taken after
+`mutate` succeeds); the atomic write replaced a dotfile-repo symlink with a file and tightened
+0644 to 0600 (now writes the resolved target in the original mode - `~/.claude.json` had the same
+defect since partition 6); `/approvals` and `/jobs` listed only what the sitting saw (now the
+CLI's own lists from `state.db`). Nits taken: a second Ctrl-C quits, arrow keys are dropped,
+`render` never raises on a missing field, a reset socket prints the dropped line, an in-stream
+`rate_limit_error` is 429 (`blocked`), `listen` no longer doubles the newline, the config
+comment names the experimental adapter, the listen-shares-the-renderer test exists.
+
+### What changed against the plan
+
+The install is `pipx install .`, not `pip install .` (PEP 668 on Homebrew's Python). `say` during a non-user turn: implemented as one guard on `Session.origin`, set where `control`
+is set (user, resume, continue -> `user`; signal turn -> `signal`) - no new queue logic, the
+"no turn running" branch already queued. `service restart` is `kickstart -k` (one call), not
+bootout + bootstrap. The Claude Code idempotency marker is `'pathfinder','signal','claude_code'`
+(the argv list literal in `docs/senses.md`), not the spaced phrase the contract wrote. `init`
+passes one ledger to its three `config.set` calls, so the audit trail grows on every run; the
+idempotency test hashes the derived files, not `events/`. The reviewer's `test_say_during_user_
+turn_still_steers` already existed under another name and was not duplicated. The `implementer`
+agent definition's `isolation: worktree` made two units start in an empty worktree (the main
+checkout's bootstrap commit); both were relaunched without isolation - the fix is a `.claude/agents`
+change the owner decides.
+
+### Left open on purpose
+
+Reviewer nits not taken: `presence` every 30 s is about 2,880 ledger rows per idle day (the
+contract's number; a two-week measurement decides); `os.environ["HOME"]` unset crashes `init`
+after the config writes; the `.zshrc` marker matches a commented-out line; ANSI dim codes reach
+a pipe through `listen`; a second SIGTERM during `close()` kills outright (launchd sends one); a
+daemon started by hand next to the launchd agent makes `KeepAlive` respawn into "already
+serving" every ten seconds; an assistant message with neither text nor tool calls would send an
+empty `content` to the Anthropic API; the `bge` substring in the embed heuristic names a model
+family. `merge_json_file` backs up on every call, changed or not (pruned to three). Signal turns gate at the first step on this model. The interrupted-then-asked
+sequence made the model answer the earlier, cancelled request together with the new one (the
+dangling user message; D30's territory). `listen`'s gate line now says `/approve ID` - the TUI's
+verb, not the CLI's.
+
+### The owner's part
+
+`m8`: a fresh standard macOS account (System Settings -> Users), the README and nothing else, a
+clock; write the elapsed time, the Python and Ollama versions the account had, and every
+hesitation into HISTORY under `m8`. PR #1 -> #8 merge in order. The untracked `bench/` copy in the
+main checkout. Whether `.claude/agents/implementer.md` keeps `isolation: worktree`.

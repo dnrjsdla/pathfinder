@@ -3,7 +3,8 @@ approvals | approve ID | deny ID | interrupt |
 listen | signal SENSE JSON | react up|down [ID] | rules | tools |
 jobs | job stop ID | job steer ID TEXT |
 memory | memory run | memory undo [N] |
-install NAME | uninstall ID | search TEXT"""
+install NAME | uninstall ID | search TEXT |
+init | service start|stop|restart|status | tui"""
 from __future__ import annotations
 
 import asyncio
@@ -13,7 +14,8 @@ import sys
 import time
 from pathlib import Path
 
-from . import catalog, config, memory
+from . import catalog, config, memory, tui
+from . import init as init_mod
 from . import installer as installer_mod
 from .clock import format_local
 from .daemon import SOCKET, Daemon, is_serving
@@ -163,21 +165,15 @@ def listen(home):
         try:
             for line in f:
                 msg = json.loads(line)
-                if msg["type"] == "delta":
-                    print(msg["text"], end="", flush=True)
-                elif msg["type"] == "notice":
-                    print(f"\n[signal] {msg['text']}  ({msg['why']})", flush=True)  # a pipe is block-buffered
-                elif msg["type"] == "turn.end":
-                    print(flush=True)
-                elif msg["type"] == "job.start":
-                    print(f"\n[job] started {msg['id']}: {msg['goal']}", flush=True)
-                elif msg["type"] == "job.gate":
-                    print(f"\n[job] {msg['id']} waiting for approval on {msg['tool']} {json.dumps(msg['args'], ensure_ascii=False)} "
-                          f"(run `pathfinder approve {msg['approval']}` or `pathfinder deny {msg['approval']}`)", flush=True)
-                elif msg["type"] == "job.end":
-                    print(f"\n[job] {msg['id']} {msg['state']}", flush=True)
-                elif msg["type"] == "error":
-                    print(f"\npathfinder: {msg['message']}", file=sys.stderr)
+                text = tui.render(msg)  # one renderer for every server message (partition 7)
+                if text is None:
+                    continue
+                if msg["type"] == "error":
+                    print(text, file=sys.stderr)
+                elif msg["type"] in ("delta", "turn.end"):
+                    print(text, end="", flush=True)  # a pipe is block-buffered
+                else:
+                    print("\n" + text, flush=True)  # on its own line, even after a stream
         except KeyboardInterrupt:
             print()
     return 0
@@ -377,6 +373,10 @@ def memory_undo(home, n=1):
 def main(argv=None):
     args = sys.argv[1:] if argv is None else argv
     home = config.home()
+    if args == ["init"]:
+        return init_mod.run(home)
+    if len(args) == 2 and args[0] == "service" and args[1] in ("start", "stop", "restart", "status"):
+        return init_mod.service(home, args[1])
     if args == ["daemon"]:
         try:
             asyncio.run(Daemon(home).serve())
@@ -406,6 +406,8 @@ def main(argv=None):
         return decide(home, args[0], args[1])
     if args == ["interrupt"]:
         return interrupt(home)
+    if args == ["tui"]:
+        return tui.main(home)
     if args == ["listen"]:
         return listen(home)
     if len(args) == 3 and args[0] == "signal":

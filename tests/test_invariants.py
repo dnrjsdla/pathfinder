@@ -87,9 +87,31 @@ class SourceInvariants(unittest.TestCase):
         n = len(installer.read_text(encoding="utf-8").splitlines())
         self.assertLessEqual(n, 700, f"installer.py is {n} lines, over the partition-6 budget of 700")
 
+    def test_init_module_under_300_lines(self):
+        n = len((SRC / "init.py").read_text(encoding="utf-8").splitlines())
+        self.assertLessEqual(n, 300, f"init.py is {n} lines, over the partition-7 ceiling of 300")
+
     def test_mcp_attach_module_under_120_lines(self):
         n = len((SRC / "mcp" / "attach.py").read_text(encoding="utf-8").splitlines())
         self.assertLessEqual(n, 120, f"mcp/attach.py is {n} lines, over the partition-6 budget of 120")
+
+    def test_tui_module_under_400_lines(self):
+        n = len((SRC / "tui.py").read_text(encoding="utf-8").splitlines())
+        self.assertLessEqual(n, 400, f"tui.py is {n} lines, over the partition-7 budget of 400")
+
+    def test_readme_pair_has_equal_heading_counts(self):
+        """D6: README.md and README.ko.md are one document in two languages (same headings)."""
+        root = SRC.parent
+        en = [l for l in (root / "README.md").read_text(encoding="utf-8").splitlines() if l.startswith("#")]
+        ko = [l for l in (root / "README.ko.md").read_text(encoding="utf-8").splitlines() if l.startswith("#")]
+        self.assertEqual(len(en), len(ko), f"README headings: en {len(en)} vs ko {len(ko)}")
+
+    def test_presence_has_a_producer(self):
+        """The deliver state machine's typing/away branches had no live source from partition 3
+        to 6; `tui.py` is that source and must keep sending `presence`."""
+        src = (SRC / "tui.py").read_text(encoding="utf-8")
+        self.assertIn('{"type": "presence", "idle_s": 0}', src)
+        self.assertIn('"type": "presence", "idle_s": min(idle', src)  # capped at the daemon's ceiling
 
     def test_only_catalog_names_the_registry_url(self):
         """`catalog.REGISTRY` is the one place the registry URL is written (docs/spec/connection-v0.md)."""

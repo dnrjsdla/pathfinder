@@ -155,7 +155,7 @@ class JudgeTest(unittest.TestCase):
         cfg = {**self.CFG, "worker_model": "p:worker"}
         seen = {}
 
-        def fake_stream(endpoint, messages, tools=None):
+        def fake_stream(endpoint, messages, tools=None, cancel=None, timeout=120):
             seen["model"] = endpoint.model
             return iter([("text", '{"speak": false, "reason": "not urgent"}')])
 

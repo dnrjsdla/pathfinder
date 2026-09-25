@@ -6,7 +6,7 @@ streaming request); it yields between steps, so a user turn waits at most one jo
 import threading
 from contextlib import contextmanager
 
-from . import openai_compat
+from . import stream
 
 _cond = threading.Condition()
 _holder = None       # None | "user" | "job"
@@ -40,10 +40,10 @@ def slot(priority: str):
 
 
 def stream_step(endpoint, schemas, control, priority):
-    """A `step(messages)` for `loop.run`: `openai_compat.stream` on `endpoint`, wrapped in this
-    module's slot at `priority` for the whole request - shared by the daemon's own step factory
-    (priority "user") and a job's (priority "job")."""
+    """A `step(messages)` for `loop.run`: `llm.stream` on `endpoint` (picks the adapter by
+    `endpoint.api`), wrapped in this module's slot at `priority` for the whole request - shared
+    by the daemon's own step factory (priority "user") and a job's (priority "job")."""
     def step(messages):
         with slot(priority):
-            yield from openai_compat.stream(endpoint, messages, tools=schemas, cancel=control)
+            yield from stream(endpoint, messages, tools=schemas, cancel=control)
     return step

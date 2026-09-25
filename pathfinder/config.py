@@ -18,7 +18,7 @@ DEFAULTS = {
     "model": "",
     "worker_model": "",
     "embed_model": "",
-    "providers": {"ollama": {"base_url": "http://localhost:11434/v1", "api_key_env": ""}},
+    "providers": {"ollama": {"base_url": "http://localhost:11434/v1", "api_key_env": ""}},  # + optional "api": "openai" (default) | "anthropic" (experimental - never run live, D7/D37)
     "max_steps": 8,
     "session_resume_s": 7200,
     "grants": {},

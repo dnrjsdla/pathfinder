@@ -98,7 +98,7 @@ def settle(messages, call_tool, control=None):
         finally:
             if control is not None:
                 control.in_tool = False
-        messages.append({"role": "tool", "tool_call_id": tc_id, "content": json.dumps(result)})
+        messages.append({"role": "tool", "tool_call_id": tc_id, "content": json.dumps(result, ensure_ascii=False)})
 
 
 def run(step, messages, *, call_tool, emit, budget=8, control=None, resume=False, final_step=None):
@@ -162,7 +162,7 @@ def run(step, messages, *, call_tool, emit, budget=8, control=None, resume=False
         if tool_calls:
             assistant_msg["tool_calls"] = [
                 {"id": tc["id"], "type": "function",
-                 "function": {"name": tc["name"], "arguments": json.dumps(tc["arguments"])}}
+                 "function": {"name": tc["name"], "arguments": json.dumps(tc["arguments"], ensure_ascii=False)}}
                 for tc in tool_calls
             ]
         messages.append(assistant_msg)

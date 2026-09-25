@@ -5,7 +5,8 @@ a reminder. No update, delete, recurrence, alarms or priority - out of scope for
 
 Timestamps in and out are plain epoch floats (`time.time()`-comparable), not ISO strings - the
 callers already hold a `clock.parse_local` timestamp, so there is no second date format to keep
-in sync with EventKit's own.
+in sync with EventKit's own. A tool hands its result through `for_model()` first: a model
+misreads epochs (live, 2026-09-25: "no events this week" over a list that had three).
 
 PyObjC (`EventKit`, `Foundation`) is imported lazily inside each function that needs it, so
 importing this module never fails on a machine without it - only calling it does."""
@@ -39,19 +40,28 @@ def _from_nsdate(nsdate) -> float | None:
     return None if nsdate is None else nsdate.timeIntervalSince1970()
 
 
+def for_model(rec: dict) -> dict:
+    """A record as a tool returns it: times as local "YYYY-MM-DD HH:MM", the format the tools
+    take in, instead of epochs."""
+    return {k: clock.format_local(v) if k in ("start", "end", "due") and v is not None else v
+            for k, v in rec.items()}
+
+
 def ensure_access(entity: str) -> None:
     """entity 'event'|'reminder', full access - a write tool reads first (dedup, matching), so
     writeOnly is refused the same as denied (Mark.5's own note: a quiet empty list there reads
     as "nothing exists", not "can't look")."""
     from EventKit import EKEventStore
     ent_type = _ENTITY_EVENT if entity == "event" else _ENTITY_REMINDER
-    store = _get_store()
     status = EKEventStore.authorizationStatusForEntityType_(ent_type)
     if status == 3:  # authorized / fullAccess
         return
     if status != 0:  # restricted / denied / writeOnly - not recoverable here
         raise PermissionError(f"{entity} access is not authorized (status {status}); allow it in "
                               f"System Settings > Privacy & Security > {entity.capitalize()}s")
+    # Ask on a throwaway store: the shared one is only made once access is seen (a timed-out
+    # prompt the user allows later, or a Settings toggle, must not leave an empty one behind).
+    store = EKEventStore.alloc().init()
     done = threading.Event()
     box = {}
 
@@ -69,6 +79,8 @@ def ensure_access(entity: str) -> None:
         raise TimeoutError(f"{entity} access prompt timed out")
     if not box.get("granted"):
         raise PermissionError(f"{entity} access was denied")
+    global _store
+    _store = None  # a store made before the grant stays empty for its whole life - start over
 
 
 def list_events(start_ts: float, end_ts: float) -> list:

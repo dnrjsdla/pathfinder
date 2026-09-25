@@ -80,5 +80,83 @@ class ListEventsWindowCapTest(unittest.TestCase):
             self.assertIn("install pyobjc-framework-EventKit", str(cm.exception))
 
 
+class ToolResultTimesTest(unittest.TestCase):
+    """Live 2026-09-25: epochs in list_events made the model answer "no events this week" over
+    three - a tool result carries local "YYYY-MM-DD HH:MM", the format the tools take in."""
+
+    def test_list_events_returns_local_times(self):
+        from pathfinder import clock
+        start, _ = clock.parse_local("2026-09-25 00:00")
+        end, _ = clock.parse_local("2026-09-25 23:59")
+        ev = {"id": "e1", "title": "추석", "start": start, "end": end, "all_day": True, "notes": None}
+        with mock.patch.object(calendar_sense.ek, "list_events", return_value=[ev]):
+            out = calendar_sense._list_events(**{"from": "2026-09-25 00:00", "to": "2026-09-26 00:00"})
+        self.assertEqual(out, [{**ev, "start": "2026-09-25 00:00", "end": "2026-09-25 23:59"}])
+
+    def test_list_reminders_returns_local_due_and_keeps_none(self):
+        from pathfinder import clock
+        due, _ = clock.parse_local("2026-09-27 12:25")
+        rems = [{"id": "r1", "title": "버스", "due": due}, {"id": "r2", "title": "치약", "due": None}]
+        with mock.patch.object(reminders_sense.ek, "list_reminders", return_value=rems):
+            out = reminders_sense._list_reminders()
+        self.assertEqual([r["due"] for r in out], ["2026-09-27 12:25", None])
+
+    def test_poll_still_uses_epochs(self):
+        """The signal key and minutes_until are computed from the epoch - unchanged."""
+        rems = [{"id": "r1", "title": "버스", "due": 5000.0}]
+        with mock.patch.object(reminders_sense.ek, "list_reminders", return_value=rems):
+            sigs = reminders_sense.poll({}, 1000.0)
+        self.assertEqual(sigs[0].key, "reminder:r1:5000.0")
+
+
+class AccessGrantTest(unittest.TestCase):
+    def test_store_made_before_the_grant_is_dropped(self):
+        """Live 2026-09-25: the daemon that first asked for access kept a pre-grant store and
+        read an empty calendar until restarted."""
+        from pathfinder.senses import _eventkit as ek
+
+        class FakeStore:
+            @classmethod
+            def alloc(cls):
+                return cls()
+
+            def init(self):
+                return self
+
+            def requestFullAccessToEventsWithCompletion_(self, handler):
+                handler(True, None)
+
+        FakeStore.authorizationStatusForEntityType_ = staticmethod(lambda t: 0)  # not determined
+        fake = mock.Mock(EKEventStore=FakeStore)
+        with mock.patch.dict(sys.modules, {"EventKit": fake}), mock.patch.object(ek, "_store", None):
+            before = ek._get_store()  # e.g. made for reminders before the events grant
+            ek.ensure_access("event")
+            self.assertIsNot(ek._get_store(), before)
+
+    def test_timed_out_prompt_leaves_no_store_behind(self):
+        """Allowed after the prompt timed out (or later in System Settings): the next call sees
+        status 3 and returns early, so no pre-grant store may exist by then."""
+        from pathfinder.senses import _eventkit as ek
+
+        class FakeStore:
+            @classmethod
+            def alloc(cls):
+                return cls()
+
+            def init(self):
+                return self
+
+            def requestFullAccessToEventsWithCompletion_(self, handler):
+                pass  # the user has not answered yet
+
+        FakeStore.authorizationStatusForEntityType_ = staticmethod(lambda t: 0)
+        fake = mock.Mock(EKEventStore=FakeStore)
+        with mock.patch.dict(sys.modules, {"EventKit": fake}), mock.patch.object(ek, "_store", None), \
+                mock.patch.object(ek, "_ACCESS_TIMEOUT", 0.01):
+            with self.assertRaises(TimeoutError):
+                ek.ensure_access("event")
+            self.assertIsNone(ek._store)
+
+
 if __name__ == "__main__":
     unittest.main()

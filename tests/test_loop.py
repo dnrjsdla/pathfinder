@@ -43,6 +43,18 @@ class TestLoop(unittest.TestCase):
         self.assertEqual(len(tool_msgs), 1)
         self.assertEqual(tool_msgs[0]["tool_call_id"], "call_0")
 
+    def test_loop_keeps_hangul_readable_for_the_model(self):
+        """Live 2026-09-25: `\\uB5A1...` escapes in a tool result made gemma4 read "떡집" as
+        "respecting" - the model must see the characters, in results and in its echoed args."""
+        tool_call = {"id": "call_0", "name": "list_events", "arguments": {"q": "추석"}}
+        step = _make_step([[("tool_calls", [tool_call])], [("text", "ok")]])
+        messages = []
+        run(step, messages, call_tool=lambda id, n, a: {"ok": True, "result": [{"title": "떡집 들르기"}]},
+            emit=lambda k, p: None)
+        self.assertIn("떡집 들르기", [m for m in messages if m.get("role") == "tool"][0]["content"])
+        echoed = [m for m in messages if m.get("tool_calls")][0]["tool_calls"][0]["function"]["arguments"]
+        self.assertIn("추석", echoed)
+
     def test_loop_budget_exhausted(self):
         tool_call = {"id": "call_0", "name": "noop", "arguments": {}}
         step = _make_step([[("tool_calls", [tool_call])]] * 3)

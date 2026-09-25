@@ -46,7 +46,7 @@ def poll(options, now):
 
 def _list_reminders(control=None):
     try:
-        return ek.list_reminders()
+        return [ek.for_model(r) for r in ek.list_reminders()]
     except ImportError:
         raise RuntimeError(_OFF) from None
 
@@ -54,7 +54,7 @@ def _list_reminders(control=None):
 def _add_reminder(title, due, control=None):
     try:
         due_ts, _ = clock.parse_local(due)
-        return ek.add_reminder(title, due_ts)
+        return ek.for_model(ek.add_reminder(title, due_ts))
     except ImportError:
         raise RuntimeError(_OFF) from None
 

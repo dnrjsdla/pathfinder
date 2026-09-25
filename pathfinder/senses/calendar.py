@@ -56,7 +56,7 @@ def _list_events(control=None, **kw):
     if to_ts - from_ts > _MAX_WINDOW_S:
         raise ValueError("list_events window must not exceed 31 days")
     try:
-        return ek.list_events(from_ts, to_ts)
+        return [ek.for_model(ev) for ev in ek.list_events(from_ts, to_ts)]
     except ImportError:
         raise RuntimeError(_OFF) from None
 
@@ -67,7 +67,7 @@ def _add_event(title, start, end, control=None):
     if end_ts < start_ts:
         raise ValueError("end must not be before start")
     try:
-        return ek.add_event(title, start_ts, end_ts)
+        return ek.for_model(ek.add_event(title, start_ts, end_ts))
     except ImportError:
         raise RuntimeError(_OFF) from None
 

@@ -363,10 +363,11 @@ Daemon.run_signal_turn ── 신호마다 rules.decide 를 먼저(절대 안 �
   reversible=True`). `shell.py`: push 전용(`build(fields, now)`), `command_failed`(exit != 0) /
   `command_finished`(exit == 0), `exit_nonzero` 와 `duration_over` 를 등록한다; 중복 제거 열쇠에
   도착 시각이 들어가는데, 반복 자체가 `count_over` 가 보려는 것이기 때문이다.
-  `calendar.py`/`reminders.py`: 어댑터 하나(`_eventkit.py`, 158줄, PyObjC 의
+  `calendar.py`/`reminders.py`: 어댑터 하나(`_eventkit.py`, 170줄, PyObjC 의
   `EventKit`/`Foundation` 을 함수 안에서 그때그때 임포트 - Mark.5 의 `eventkit_bridge.py` 를
   목록/추가만 남기고 잘랐고, 시각은 평범한 epoch 부동소수라 `clock.py` 와 맞출 두 번째 날짜
-  형식이 없다)를 감각 둘이 나눠 쓴다; 나눈 이유는 `TRUST` 가 다르기 때문이다(일정은 남의
+  형식이 없다; 도구 결과는 `for_model()` 을 거쳐 로컬 `YYYY-MM-DD HH:MM` 으로 나간다 - 모델이
+  epoch 를 잘못 읽었기 때문이다)를 감각 둘이 나눠 쓴다; 나눈 이유는 `TRUST` 가 다르기 때문이다(일정은 남의
   초대일 수 있어 `third_party`, 미리 알림은 사용자 자신의 메모라 `user`) - 감각 모듈 하나에
   `TRUST` 문자열 하나뿐이라 한 파일에 같이 못 둔다. PyObjC 없이는 꺼짐: `poll` 이 한 번
   예외를 내면(`SenseLoop.on_error` 가 `error` 사건으로 적는다) 그다음부터는 조용히 `[]` 를

@@ -376,10 +376,11 @@ Daemon.run_signal_turn ── rules.decide per signal FIRST (never held, never s
   reversible=True`). `shell.py`: push-only (`build(fields, now)`), `command_failed` (exit != 0) /
   `command_finished` (exit == 0), registers `exit_nonzero` and `duration_over`; its dedupe key
   includes the arrival time, since a repeat is exactly what `count_over` needs to see.
-  `calendar.py`/`reminders.py`: two sense modules over one adapter, `_eventkit.py` (158 lines,
+  `calendar.py`/`reminders.py`: two sense modules over one adapter, `_eventkit.py` (170 lines,
   PyObjC's `EventKit`/`Foundation` imported lazily inside each function - trimmed from Mark.5's
   `eventkit_bridge.py` to list/add only, timestamps as plain epoch floats so no second date
-  format has to stay in sync with `clock.py`'s); split in two because their `TRUST` differs (an
+  format has to stay in sync with `clock.py`'s; a tool result leaves through `for_model()` as
+  local `YYYY-MM-DD HH:MM`, because the model misread epochs); split in two because their `TRUST` differs (an
   event may be someone else's invitation, `third_party`; a reminder is the user's own note,
   `user`) - one `TRUST` string per sense module is why they can't share a file. Off without
   PyObjC: `poll` raises once (`SenseLoop.on_error` logs it as an `error` event) and quietly

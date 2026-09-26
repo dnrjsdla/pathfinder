@@ -158,5 +158,75 @@ class AccessGrantTest(unittest.TestCase):
             self.assertIsNone(ek._store)
 
 
+
+class ReminderWriteTest(unittest.TestCase):
+    """D38: complete and delete by the id `list_reminders` returns, each asking first; an
+    unknown id (or an event's) fails instead of coming back as done (live 2026-09-26)."""
+
+    def setUp(self):
+        class EKReminder:
+            def __init__(self, title):
+                self._title, self.completed = title, False
+
+            def title(self):
+                return self._title
+
+            def setCompleted_(self, value):
+                self.completed = value
+
+        class Store:
+            items = {"r1": EKReminder("열차"), "e1": object()}
+            saved, removed = [], []
+
+            @classmethod
+            def alloc(cls):
+                return cls()
+
+            def init(self):
+                return self
+
+            @staticmethod
+            def authorizationStatusForEntityType_(t):
+                return 3
+
+            def calendarItemWithIdentifier_(self, rid):
+                return self.items.get(rid)
+
+            def saveReminder_commit_error_(self, rem, commit, err):
+                self.saved.append(rem)
+                return True, None
+
+            def removeReminder_commit_error_(self, rem, commit, err):
+                self.removed.append(rem)
+                return True, None
+
+        from pathfinder.senses import _eventkit as ek
+        self.ek, self.Store = ek, Store
+        fake = mock.Mock(EKEventStore=Store, EKReminder=EKReminder)
+        for patch in (mock.patch.dict(sys.modules, {"EventKit": fake}), mock.patch.object(ek, "_store", None)):
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def test_complete_then_delete(self):
+        rem = self.Store.items["r1"]
+        self.assertEqual(self.ek.complete_reminder("r1"), {"id": "r1", "title": "열차", "completed": True})
+        self.assertTrue(rem.completed)
+        self.assertEqual(self.Store.saved, [rem])
+        self.assertEqual(self.ek.delete_reminder("r1"), {"deleted": "r1", "title": "열차"})
+        self.assertEqual(self.Store.removed, [rem])
+
+    def test_unknown_or_event_id_fails(self):
+        for rid in ("nope", "e1"):
+            with self.assertRaises(LookupError):
+                self.ek.complete_reminder(rid)
+            with self.assertRaises(LookupError):
+                self.ek.delete_reminder(rid)
+        self.assertEqual((self.Store.saved, self.Store.removed), ([], []))
+
+    def test_both_ask_the_user_first(self):
+        from pathfinder import policy
+        for name in ("complete_reminder", "delete_reminder"):
+            self.assertEqual(policy.decide(reminders_sense.TOOLS[name], "user"), "ask")
+
 if __name__ == "__main__":
     unittest.main()

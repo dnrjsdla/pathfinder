@@ -81,14 +81,17 @@ def _list_schedules(control=None):
 def _remove_schedule(id, control=None):
     home = _require_home()
     with _LOCK:
-        rows = [r for r in config.load(home).get("schedules", []) if r["id"] != id]
-        config.set(home, "schedules", rows)
+        rows = config.load(home).get("schedules", [])
+        kept = [r for r in rows if r["id"] != id]
+        if len(kept) == len(rows):  # live 2026-09-26: a Reminders id came back "removed", three times
+            raise LookupError(f"no schedule with id {id!r}; ids come from list_schedules")
+        config.set(home, "schedules", kept)
     return {"removed": id}
 
 
 TOOLS = {
     "add_schedule": ToolSpec(
-        name="add_schedule", description="Add a scheduled reminder, once or on a repeat.",
+        name="add_schedule", description="Add a scheduled note PATHFINDER says at a time, once or on a repeat (not a Reminders item).",
         params={
             "at": {"type": "string", "format": "local_datetime", "description": "local time, YYYY-MM-DD HH:MM, no offset"},
             "text": {"type": "string", "description": "what to say when it fires"},
@@ -98,11 +101,11 @@ TOOLS = {
         write=True, reversible=True,
     ),
     "list_schedules": ToolSpec(
-        name="list_schedules", description="List scheduled reminders.",
+        name="list_schedules", description="List scheduled notes.",
         params={}, required=[], handler=_list_schedules,
     ),
     "remove_schedule": ToolSpec(
-        name="remove_schedule", description="Remove a scheduled reminder by id.",
+        name="remove_schedule", description="Remove a scheduled note by id.",
         params={"id": {"type": "string", "description": "the schedule's id, from list_schedules"}},
         required=["id"], handler=_remove_schedule, write=True, reversible=True,
     ),

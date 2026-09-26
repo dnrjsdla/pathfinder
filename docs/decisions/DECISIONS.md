@@ -265,3 +265,31 @@ reversal (a key appears -> m1 on that provider) needs the adapter to exist that 
 now also catches the loop's message shape drifting away from a second provider. It is the first
 unit dropped if the partition runs long. — *Reversed if* no key exists by the public release:
 then the adapter ships as a documented stub, not a promise.
+
+## 2026-09-26 — Live use, day two (owner's choices on three questions)
+
+**D38. Reminders get two write tools, `complete_reminder` and `delete_reminder`, and both ask
+first.** "I took the train" had no move but a false one: with list/add only, the model reached
+for `remove_schedule` with a Reminders id and reported it removed three times. Complete is the
+everyday move; delete is for a reminder that should never have existed. Both stay `write` (not
+D22's `reversible`): the owner asked to be asked, and an iCloud-synced reminder is not a config
+row PATHFINDER can put back. — *Reversed if* two weeks of `complete_reminder` approvals are all
+"approve": then a `grants` entry, not a code change.
+
+**D39. A memory pass the model never answered keeps its slice.** A pass that applied and
+proposed nothing and ended on an outage (`LLMError` status 0 - no connection -, 401, 402, 408,
+429 or 5xx) records `upto = since`, and the trigger waits 30 minutes before trying again. Any
+other 4xx (400, 413: the request the slice made) and an internal error still advance - retrying
+the same slice would fail the same way. On 2026-09-26 four offline passes advanced over the
+owner's own instruction ("ask me for approval") and the one about MCP; a network outage is not a
+property of the lines. — *Reversed if* an outage of days makes the retries themselves noise in
+the ledger: then the wait grows, and the slice is still kept.
+
+**D40. A server that needs a secret gets it from the Keychain before its sandboxed trial -
+planned into partition 8, not built now.** `easy-notion` exited at trial without its token; the
+Slack server passed only because it starts without one, so the check today admits exactly the
+servers that do not need what the owner would give them. The installer already reads
+`pathfinder-mcp-<id>` entries at install time; the trial simply runs first. OAuth remotes
+(`com.notion/mcp`, 403) stay outside v1 as ARCHITECTURE says. — *Reversed if* partition 8's
+survey finds that the servers the owner wants mostly need OAuth, not a token: then the step
+waits for an OAuth design instead of being built alone.

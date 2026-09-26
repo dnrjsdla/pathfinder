@@ -57,6 +57,17 @@ class ScheduleFiresTest(unittest.TestCase):
         # polling again right away must not fire again
         self.assertEqual(schedule.poll({"_home": self.home}, now), [])
 
+    def test_remove_schedule_unknown_id_fails(self):
+        """Live 2026-09-26: a Reminders id passed here came back "removed" and the model said so."""
+        schedule.HOME = self.home
+        self.addCleanup(setattr, schedule, "HOME", None)
+        row = schedule._add_schedule("2026-09-30 09:00", "planted", "none")
+        with self.assertRaises(LookupError):
+            schedule._remove_schedule("237225CD-0650-4BF2-8F3F-A80455526A61")
+        self.assertEqual(len(config.load(self.home)["schedules"]), 1)
+        self.assertEqual(schedule._remove_schedule(row["id"]), {"removed": row["id"]})
+        self.assertEqual(config.load(self.home)["schedules"], [])
+
     def test_schedule_tools_use_the_bound_home_not_config_home(self):
         """Should-fix 8: the sense's tools must use the ONE home `signals.load` bound, never a
         second answer from `config.home()` (which reads PATHFINDER_HOME) - they can legitimately

@@ -82,7 +82,7 @@ reaction, presence, memory_pass, memory_apply, session_summary`. `config_set` �
 감각 자신의 선언(`ledger.TRUST`)이지 데이터가 주장하는 값이 아니다. `decision` 은 `signal_key,
 action, why` 를 싣고, 알림까지 이어진 `speak` 에 한해 `notice_id, text, signal_keys` 도 싣는다
 (재시작 뒤 `Outbox` 가 이것으로 복구한다). `memory_pass {since, upto, read, steps, usage, applied,
-proposed}` 는 통합 패스마다 한 번 적힌다(`upto` 가 `state.memory_cursor` 가 됨, 오류가 나도);
+proposed}` 는 통합 패스마다 한 번 적힌다(`upto` 가 `state.memory_cursor` 가 됨; D39: 모델이 끝내 답하지 못한 패스는 `upto = since` 로 적는다);
 `memory_apply {target, op, old, new, evidence, approval?}` 는 적용된 볼트 수정 하나의 되돌리기
 기록 전부다; `session_summary {upto, text}` 는 세션의 앞부분을 접는다. origin 에 `memory` 가
 더해진다(패스 자신의 턴과 툴 사건).
@@ -363,9 +363,10 @@ Daemon.run_signal_turn ── 신호마다 rules.decide 를 먼저(절대 안 �
   reversible=True`). `shell.py`: push 전용(`build(fields, now)`), `command_failed`(exit != 0) /
   `command_finished`(exit == 0), `exit_nonzero` 와 `duration_over` 를 등록한다; 중복 제거 열쇠에
   도착 시각이 들어가는데, 반복 자체가 `count_over` 가 보려는 것이기 때문이다.
-  `calendar.py`/`reminders.py`: 어댑터 하나(`_eventkit.py`, 170줄, PyObjC 의
+  `calendar.py`/`reminders.py`: 어댑터 하나(`_eventkit.py`, 200줄, PyObjC 의
   `EventKit`/`Foundation` 을 함수 안에서 그때그때 임포트 - Mark.5 의 `eventkit_bridge.py` 를
-  목록/추가만 남기고 잘랐고, 시각은 평범한 epoch 부동소수라 `clock.py` 와 맞출 두 번째 날짜
+  목록/추가만 남기고 잘랐고, 미리 알림에는 완료/삭제를 더했다(D38: 둘 다 `write=True` 라 묻고
+  나서 하며, 미리 알림이 아닌 id 는 `LookupError`), 시각은 평범한 epoch 부동소수라 `clock.py` 와 맞출 두 번째 날짜
   형식이 없다; 도구 결과는 `for_model()` 을 거쳐 로컬 `YYYY-MM-DD HH:MM` 으로 나간다 - 모델이
   epoch 를 잘못 읽었기 때문이다)를 감각 둘이 나눠 쓴다; 나눈 이유는 `TRUST` 가 다르기 때문이다(일정은 남의
   초대일 수 있어 `third_party`, 미리 알림은 사용자 자신의 메모라 `user`) - 감각 모듈 하나에
@@ -494,8 +495,10 @@ Daemon.run_signal_turn ── 신호마다 rules.decide 를 먼저(절대 안 �
   read_ledger, edit_memory`); 예산 `consolidate_steps`. 마지막 답이 `session_summary {session,
   upto, text}` 가 된다, `upto` = 그 세션의 다섯 번째로 최신인 메시지의 seq(최근 넷은 그대로
   남는다). 그다음 `memory_pass {since, upto, read, steps, usage, applied, proposed}` -
-  **`LLMError` 가 나도 커서는 전진한다** - 파싱에 실패한 패스가 같은 줄을 영영 다시 읽지 않도록;
-  `proposed > 0` 이면 `memory_proposed` 를 push. 방아쇠(`Manager.tick`, 60초 스레드,
+  내부 오류는 커서를 전진시킨다 - 스텝을 깨는 조각이 영영 되풀이되지 않도록; **한 일 없이
+  장애로 끝난 패스는 커서를 그대로 둔다**(`LLMError` status 0 · 401 · 402 · 408 · 429 · 5xx;
+  `upto = since`, D39 - 오프라인에 대표 자신의 말이 빠졌다) 그리고 방아쇠는 30분 기다렸다 다시
+  해 본다, 그 밖의 4xx 는 전진한다; `proposed > 0` 이면 `memory_proposed` 를 push. 방아쇠(`Manager.tick`, 60초 스레드,
   `Daemon.start`/`close`)는 도는 턴이 없고 작업도 슬롯을 안 쥐고(`is_busy`), 최신 user 메시지가
   `consolidate_idle_min` 분보다 오래됐고, 안 읽은 줄이 `consolidate_min_events` 이상일 때 패스를
   시작한다; `pathfinder memory run` 이 소켓으로(`memory.run`) 하나를 강제하고 `run_pass` 자신의
@@ -594,7 +597,11 @@ Daemon.run_signal_turn ── 신호마다 rules.decide 를 먼저(절대 안 �
   `catalog.declined` 가 읽는 것이다.
 - **제안 상자**(`daemon.py`): `messages` 가 빈 행은 제안; `PROPOSALS = {"edit_memory",
   "accept_pins", "install_server"}` 가 툴 이름으로 핸들러를 고른다(동기든 await 든); messages
-  가 있는 행은 lane 게이트라 턴을 잇고, `job` 이 있는 행은 작업을 잇는다.
+  가 있는 행은 lane 게이트라 턴을 잇고, `job` 이 있는 행은 작업을 잇는다. 사용자 자신의
+  턴이 낸 제안(origin `user`)은 lane 게이트와 같은 `gate` 줄을 그 세션에 보낸다(`install_server`
+  는 `installer.brief` 한 줄로, 레지스트리 글이 터미널에 닿으니 제어 문자는 뺀다) - 문은
+  `Daemon.record` 하나; 패스나 attach 의 제안은 제 알림
+  뒤에 그대로 둔다.
 - **`state.py`**: `pin_accept`/`pin_revoke` 로 `pins(server, tool, hashes, params)`; 설치 사건
   넷으로 `installs(id, name, version, state, ts, detail)`(`detail` 은 백업 경로);
   `installed_names()`, `install(id)`, `context_cwds(since)`.
@@ -650,7 +657,7 @@ Daemon.run_signal_turn ── 신호마다 rules.decide 를 먼저(절대 안 �
 | 소켓이 `signal jobs ...` 를 거부함; `jobs.py` 는 350줄 이하 | `test_daemon.PushDoorValidationTest.test_socket_refuses_signal_jobs`, `test_invariants.test_jobs_module_under_350_lines` |
 | 볼트는 정확히 `USER.md`, `RULES.md`, `wiki/*.md` 뿐; 게이트는 볼트 밖 · 모르는 RULES.md 단어 · 정확히 안 맞는 `old` 를 거부; 패스의 USER.md 수정은 `origin: user` 근거가 필요 | `test_memory.test_vault_path_refuses_outside`, `test_vet_refuses_unknown_rule_word`, `test_vet_replace_needs_exactly_one_line`, `test_user_facts_need_user_origin` |
 | wiki 수정은 그 자리에서 적용됨; USER.md/RULES.md 는 사용자 턴 grant 가 허락하지 않는 한 승인 상자로 감; RULES.md 수정을 승인하면 `reload_rules` 가 불림; undo 는 역연산 | `test_memory.test_wiki_applies_at_once`, `test_user_and_rules_go_to_the_box`, `test_grants_allow_applies_user_turn_at_once`, `test_rules_apply_calls_on_rules_changed`, `test_undo_is_the_inverse_op` |
-| 패스는 제 조각만 읽고, 근거는 그 조각에서만 나와야 하며, 모델이 오류를 내도 커서는 전진함; 방아쇠는 유휴와 충분한 안 읽은 줄을 기다림; 사흘 침묵이면 `memory_stalled` 를 한 번만 올림 | `test_memory.test_pass_reads_slice_and_advances_cursor`, `test_pass_llm_error_still_advances`, `test_pass_evidence_must_be_from_its_slice`, `test_due_waits_for_idle_and_enough_lines`, `test_stalled_after_three_silent_days` |
+| 패스는 제 조각만 읽고, 근거는 그 조각에서만 나와야 하며, 내부 오류는 커서를 전진시키고 모델 오류(한 일 없음)는 그대로 둠; 방아쇠는 유휴와 충분한 안 읽은 줄을 기다림; 사흘 침묵이면 `memory_stalled` 를 한 번만 올림 | `test_memory.test_pass_reads_slice_and_advances_cursor`, `test_pass_llm_error_keeps_the_slice`, `test_pass_evidence_must_be_from_its_slice`, `test_due_waits_for_idle_and_enough_lines`, `test_stalled_after_three_silent_days` |
 | 옮겨온 말뭉치에서 하이브리드 검색이 D10 기준만큼 FTS 만보다 나음(아니면 벡터는 기본으로 꺼짐); 낡은 모델의 벡터는 절대 안 맞음; 세션 이력은 요약 뒤로 접힘; `state.db` 삭제는 페이지 · 요약 · 기억 커서를 복구함 | `bench/m4_retrieval.py`, `test_state.test_search_hybrid_rrf_order`, `test_search_ignores_vectors_of_another_model`, `test_history_folds_after_summary`, `test_reindex_restores_summaries_and_applies` |
 | `edit_memory` 승인은 세션 lane 이 아니라 기억 매니저로 감; RULES.md 는 승인된 수정이나 손 수정 뒤 재시작 없이 다시 읽히고, 파싱 오류면 옛 규칙을 지킴; 상주 문맥은 USER.md 본문과 wiki 지도를 턴의 두 번째 시스템 메시지에만 싣고 첫 메시지는 그대로임 | `test_daemon.MemoryDaemonTest.*` |
 | `memory_proposed`/`memory_stalled` 는 기본이 침묵이고 기본 RULES.md 는 둘 다 말함 | `test_senses.MemorySenseTest.test_memory_kinds_default_silence_and_shipped_rules_speak` |

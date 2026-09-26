@@ -93,7 +93,11 @@ def server_id(name: str, existing) -> str:
 
 def render_row(row: dict) -> str:
     """`pathfinder approvals`'s one line for an `install_server` proposal."""
-    c = row["args"]
+    return f"{row['id']}  install_server  {brief(row['args'])}"
+
+
+def brief(c: dict) -> str:
+    """A candidate in one line - the approvals row and the gate line both show this."""
     lic = c["verification"]["license"]
     install = c.get("install") or {}
     integrity = "ok" if install.get("integrity") else "missing"
@@ -108,7 +112,8 @@ def render_row(row: dict) -> str:
         parts.append("license warning")
     if install.get("runtime"):
         parts.append("command: " + " ".join([install["runtime"], *install.get("args", [])]))
-    return f"{row['id']}  install_server  {c['name']}@{c['version']}  " + " · ".join(parts)
+    line = f"{c['name']}@{c['version']}  " + " · ".join(parts)
+    return "".join(ch for ch in line if ch.isprintable())  # registry text: no escape sequences to a terminal
 
 
 def _npm_lookup(pkg: dict, run) -> tuple:

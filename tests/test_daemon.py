@@ -1649,6 +1649,33 @@ class InstallerDaemonTest(DaemonHarness):
         self.assertNotIn("search_tools", tools_mod.for_origin("signal"))
 
 
+class ProposalGateLineTest(DaemonHarness):
+    def test_user_turn_proposal_sends_a_gate_line(self):
+        """Live 2026-09-26: an install_server proposal from the owner's own turn never reached
+        the screen, so they typed "approve" into the chat and nothing was installed. A pass's
+        own proposal stays behind its `memory_proposed` notice (no line)."""
+        cand = {"name": "io.github.acme/widget", "version": "1.0.0",
+                "verification": {"license": {"spdx": "MIT", "verdict": "ok"},
+                                 "sandbox_trial": {"tools": [{"name": "echo", "read_only_hint": True}]}},
+                "install": {"integrity": "sha512-abc", "runtime": "npx", "args": ["widget@1.0.0"]}}
+
+        async def scenario(daemon):
+            c = await Client.open(self.home)
+            c.send({"type": "attach"})
+            sid = (await c.recv())["session"]
+            daemon.record("approval_pending", session=sid, origin="memory", id="m1", call_id="m1",
+                          tool="edit_memory", args={"target": "USER.md"}, messages=[])
+            daemon.record("approval_pending", session=sid, origin="user", id="a1", call_id="a1",
+                          tool="install_server", args=cand, messages=[])
+            line = await c.recv()
+            c.close()
+            return line
+
+        line = self.run_with(fake_model("ok"), scenario)
+        self.assertEqual((line["type"], line["id"], line["tool"]), ("gate", "a1", "install_server"))
+        self.assertTrue(line["args"].startswith("io.github.acme/widget@1.0.0  license MIT ok"), line["args"])
+
+
 class SigtermTest(DaemonHarness):
     """`serve()` runs a real Daemon (not through `run_with`, which owns start()/close() itself -
     the SIGTERM handler lives inside `serve()`)."""

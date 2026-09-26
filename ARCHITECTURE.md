@@ -87,7 +87,7 @@ box, not a gated turn). A `signal` event's `trust` is the sense's own declaratio
 never the data's own claim; `decision` carries `signal_key, action, why` and, only for a `speak`
 that made it into a notice, `notice_id, text, signal_keys` too (what `Outbox` rebuilds from after
 a restart). `memory_pass {since, upto, read, steps, usage, applied, proposed}` is recorded once per
-consolidation pass (`upto` becomes `state.memory_cursor`, even on an error); `memory_apply {target,
+consolidation pass (`upto` becomes `state.memory_cursor`; D39: a pass the model never answered records `upto = since`); `memory_apply {target,
 op, old, new, evidence, approval?}` is the whole undo record for one applied vault edit;
 `session_summary {upto, text}` folds a session's early messages. Origin gains `memory` (the pass's
 own turns and tool events).
@@ -376,9 +376,10 @@ Daemon.run_signal_turn ── rules.decide per signal FIRST (never held, never s
   reversible=True`). `shell.py`: push-only (`build(fields, now)`), `command_failed` (exit != 0) /
   `command_finished` (exit == 0), registers `exit_nonzero` and `duration_over`; its dedupe key
   includes the arrival time, since a repeat is exactly what `count_over` needs to see.
-  `calendar.py`/`reminders.py`: two sense modules over one adapter, `_eventkit.py` (170 lines,
+  `calendar.py`/`reminders.py`: two sense modules over one adapter, `_eventkit.py` (200 lines,
   PyObjC's `EventKit`/`Foundation` imported lazily inside each function - trimmed from Mark.5's
-  `eventkit_bridge.py` to list/add only, timestamps as plain epoch floats so no second date
+  `eventkit_bridge.py` to list/add, plus complete/delete for a reminder (D38: both `write=True`,
+  so they ask; an id that is not a reminder raises `LookupError`), timestamps as plain epoch floats so no second date
   format has to stay in sync with `clock.py`'s; a tool result leaves through `for_model()` as
   local `YYYY-MM-DD HH:MM`, because the model misread epochs); split in two because their `TRUST` differs (an
   event may be someone else's invitation, `third_party`; a reminder is the user's own note,
@@ -508,8 +509,10 @@ partition 3) and now `wiki/*.md` - no `vault/` directory: "inside the vault" is 
   read_memory, read_ledger, edit_memory`); budget `consolidate_steps`. A final answer becomes
   `session_summary {session, upto, text}`, `upto` = the seq of the session's fifth-newest message
   (the last four stay verbatim). Then `memory_pass {since, upto, read, steps, usage, applied,
-  proposed}` - **the cursor advances even on an `LLMError`**, so a pass that failed to parse never
-  re-reads the same lines forever; `proposed > 0` pushes `memory_proposed`. The trigger
+  proposed}` - an internal error still advances the cursor, so a slice that breaks the step
+  never loops; **a pass that did nothing and ended on an outage keeps it** (`LLMError` status 0,
+  401, 402, 408, 429 or 5xx; `upto = since`, D39 - offline, the owner's own words were skipped)
+  and the trigger waits 30 min before trying again, while any other 4xx advances; `proposed > 0` pushes `memory_proposed`. The trigger
   (`Manager.tick`, a 60 s thread, `Daemon.start`/`close`) starts a pass when no turn is running and
   no job holds the slot (`is_busy`), the last user message is `consolidate_idle_min` minutes old,
   and `consolidate_min_events` readable lines sit unread; `pathfinder memory run` forces one over
@@ -615,7 +618,11 @@ the next turn calls `mcp__<server>__<tool>`. Every hop is an event; `state.db` d
   (the registry's `runtimeArguments` are third-party text), and any version that is not exact. Denied rows are what `catalog.declined` reads.
 - **The proposal box** (`daemon.py`): a row with empty `messages` is a proposal; `PROPOSALS =
   {"edit_memory", "accept_pins", "install_server"}` names its handler by tool (sync or awaited);
-  a row with messages is a lane gate and resumes its turn; a row with `job` resumes its job.
+  a row with messages is a lane gate and resumes its turn; a row with `job` resumes its job. A
+  proposal from a user's own turn (origin `user`) sends that session the same `gate` line a lane
+  gate does (`install_server` as `installer.brief`, one line, control characters dropped since
+  registry text reaches a terminal) - `Daemon.record` is the one door;
+  a pass's or an attach's proposal stays behind its own notice.
 - **`state.py`**: `pins(server, tool, hashes, params)` from `pin_accept`/`pin_revoke`;
   `installs(id, name, version, state, ts, detail)` from the four install events (`detail` holds
   the backup path); `installed_names()`, `install(id)`, `context_cwds(since)`.
@@ -672,7 +679,7 @@ the next turn calls `mcp__<server>__<tool>`. Every hop is an event; `state.db` d
 | The socket refuses `signal jobs ...`; `jobs.py` <= 350 lines | `test_daemon.PushDoorValidationTest.test_socket_refuses_signal_jobs`, `test_invariants.test_jobs_module_under_350_lines` |
 | The vault is exactly `USER.md`, `RULES.md`, `wiki/*.md`; the gate refuses outside it, an unknown RULES.md word, and a non-exact `old` match; a USER.md edit from the pass needs `origin: user` evidence | `test_memory.test_vault_path_refuses_outside`, `test_vet_refuses_unknown_rule_word`, `test_vet_replace_needs_exactly_one_line`, `test_user_facts_need_user_origin` |
 | A wiki edit applies at once; USER.md/RULES.md go to the approval box unless a user-turn grant allows it; approving a RULES.md edit calls `reload_rules`; undo is the inverse op | `test_memory.test_wiki_applies_at_once`, `test_user_and_rules_go_to_the_box`, `test_grants_allow_applies_user_turn_at_once`, `test_rules_apply_calls_on_rules_changed`, `test_undo_is_the_inverse_op` |
-| A pass reads its own slice, its evidence must come from that slice, and the cursor advances even when the model errors; the trigger waits for idle and enough unread lines; three silent days raise `memory_stalled` once | `test_memory.test_pass_reads_slice_and_advances_cursor`, `test_pass_llm_error_still_advances`, `test_pass_evidence_must_be_from_its_slice`, `test_due_waits_for_idle_and_enough_lines`, `test_stalled_after_three_silent_days` |
+| A pass reads its own slice, its evidence must come from that slice, and an internal error advances the cursor and a model error (nothing done) keeps it; the trigger waits for idle and enough unread lines; three silent days raise `memory_stalled` once | `test_memory.test_pass_reads_slice_and_advances_cursor`, `test_pass_llm_error_keeps_the_slice`, `test_pass_evidence_must_be_from_its_slice`, `test_due_waits_for_idle_and_enough_lines`, `test_stalled_after_three_silent_days` |
 | Hybrid search beats FTS-only by D10's margin on the transplanted corpus, or vectors ship off by default; a stale-model vector is never a hit; a session's history folds after its summary; `state.db` deleted restores pages, summaries and the memory cursor | `bench/m4_retrieval.py`, `test_state.test_search_hybrid_rrf_order`, `test_search_ignores_vectors_of_another_model`, `test_history_folds_after_summary`, `test_reindex_restores_summaries_and_applies` |
 | An `edit_memory` approval routes to the memory manager, not a session lane; RULES.md reloads without a restart on an approved edit or a hand edit, keeping the old rules on a parse error; the resident context carries USER.md's body and the wiki map in the turn's second system message only, the first unchanged | `test_daemon.MemoryDaemonTest.*` |
 | `memory_proposed`/`memory_stalled` default to silence and the shipped RULES.md speaks both | `test_senses.MemorySenseTest.test_memory_kinds_default_silence_and_shipped_rules_speak` |

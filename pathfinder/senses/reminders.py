@@ -59,6 +59,22 @@ def _add_reminder(title, due, control=None):
         raise RuntimeError(_OFF) from None
 
 
+def _complete_reminder(id, control=None):
+    try:
+        return ek.complete_reminder(id)
+    except ImportError:
+        raise RuntimeError(_OFF) from None
+
+
+def _delete_reminder(id, control=None):
+    try:
+        return ek.delete_reminder(id)
+    except ImportError:
+        raise RuntimeError(_OFF) from None
+
+
+_ID = {"id": {"type": "string", "description": "the reminder's id, from list_reminders"}}
+
 TOOLS = {
     "list_reminders": ToolSpec(
         name="list_reminders", description="List incomplete reminders.",
@@ -72,5 +88,14 @@ TOOLS = {
         },
         required=["title", "due"], handler=_add_reminder,
         normalize=normalize_local_datetime("due"), write=True,  # not reversible: no config row to delete
+    ),
+    # D38: both ask the user first, like add_reminder (the owner: "ask me for approval")
+    "complete_reminder": ToolSpec(
+        name="complete_reminder", description="Mark a reminder done.",
+        params=_ID, required=["id"], handler=_complete_reminder, write=True,
+    ),
+    "delete_reminder": ToolSpec(
+        name="delete_reminder", description="Delete a reminder. To mark one done, use complete_reminder.",
+        params=_ID, required=["id"], handler=_delete_reminder, write=True,
     ),
 }

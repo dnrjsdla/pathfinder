@@ -1021,3 +1021,79 @@ verb, not the CLI's.
 clock; write the elapsed time, the Python and Ollama versions the account had, and every
 hesitation into HISTORY under `m8`. PR #1 -> #8 merge in order. The untracked `bench/` copy in the
 main checkout. Whether `.claude/agents/implementer.md` keeps `isolation: worktree`.
+
+## 2026-09-26 — Live use: the owner's first two days
+
+The installed daemon ran the owner's own sessions for two days. Read from the ledger afterwards;
+nothing below was staged.
+
+### Day one (fixed in `b5d3c84`)
+
+Every tool result went to the model through `json.dumps` with `ensure_ascii` on, so Korean
+arrived as `\uXXXX` and the model misread titles ("추석" became "초생"); EventKit results were
+epochs, and the model answered "no events this week" over a list of three; the first daemon to
+ask for calendar access kept a store made before the grant and read an empty calendar until
+restarted. The terminal that kept dying was Terminal.app itself (macOS 26: IME composition past
+a soft wrap corrupts its heap); the owner moved to iTerm2. The screen's two findings (too plain;
+Enter overwrites the question) wait for partition 8.
+
+### Day two: what the ledger showed
+
+- **An install proposal never reached the screen.** `propose_install` passed its check and
+  queued `install_server`, but only a broker Gate sent a `gate` line; the owner typed "approve"
+  into the chat, the model thanked them, and nothing was installed.
+- **The model did not know installed MCP tools were its own.** It wrote an unvetted Slack
+  server and the owner's token into another app's config file (approved at the gate), called
+  itself Claude Code, and said MCP only runs inside that app.
+- **A Slack user token pasted into the chat** now sits in the ledger, went to the cloud model
+  with every later turn, and was written into that config file. The owner revokes it.
+- **Reminders had no complete or delete**, and `remove_schedule` returned `{"removed": id}` for
+  any id; the model passed it a Reminders id and reported success three times.
+- **Four memory passes failed offline and still advanced the cursor**, over the owner's own
+  instruction ("don't say that, ask me for approval") and their statement of the MCP problem.
+- The model ended four turns on "I will do it now" with no tool call, and wrote LaTeX arrows
+  into its answers and into a real reminder's title.
+- Servers that need a credential fail the sandboxed trial (`easy-notion` exits without its
+  token; the official Notion remote answers 403 without OAuth).
+
+### Fixed now
+
+`Daemon.record` sends the same `gate` line for a proposal a user's own turn queued (an
+`install_server` row shows as `installer.brief`, the approvals line without its id); a pass's or
+an attach's proposal still waits behind its own notice. The system prompt gains three short
+paragraphs: act in the same turn or say you cannot; `mcp__` tools are yours, a server comes only
+through `propose_install` and `/approve`, never another app's config; plain text, no LaTeX.
+`remove_schedule` raises on an unknown id, and the schedule tools say "scheduled note" instead
+of "scheduled reminder". D38: `complete_reminder` and `delete_reminder`, both asking. D39: a
+pass that did nothing and ended on an outage keeps its slice and the trigger waits 30 minutes
+(a 400 still advances - the reviewer's case of a slice too large to ever send). D40 is a
+partition-8 item. `installer.brief` drops control characters: the reviewer found registry text
+reaching the terminal raw through `pathfinder say`'s gate line (and, already, `approvals`).
+
+### Live checks (the installed daemon; a clean temp home where a fresh session mattered)
+
+A fresh session answers that installed MCP tools are its own and that a server comes through
+`propose_install` then `/approve`, and declines to edit a config file directly. A USER.md edit
+and an `install_server` proposal (`ai.adeu/adeu`, from m5's list) from a user turn both printed
+the gate line; the model named `/approve <id>` itself; both were denied. On the owner's session
+the first answer still repeated the day's wrong "desktop app" claim from its own history. A test
+reminder was added, completed (gone from `list_reminders`) and deleted, each behind its gate; a
+second complete on the deleted id returned `no reminder with id ...` and the model said so.
+Asked "is it still there?" right after completing it, the model answered "yes" without calling
+`list_reminders` - asked to call it, it answered correctly. An arrow came out as `→`. D39 was
+not exercised live (no outage to hand); `test_pass_llm_error_keeps_the_slice` covers it. m3's
+injection bench reads `system.txt` and was not re-run (credits).
+
+### Left open on purpose
+
+A secret typed into the chat reaches the ledger and the model; there is no intake that keeps it
+out (partition 8, with D40). `events/*.jsonl` and `state.db` are 0644 while `config.json` is
+0600. An all-day event re-signals every poll (92 `upcoming_event` rows in one day, all silenced
+as seen) and fills the memory pass's slice. The shell sense announces `pathfinder tui` exiting,
+and every notice gets an English follow-up line that repeats it. A model that answers from its
+history instead of calling the tool it has. Registry metadata marked the Slack server's token
+variables `secret: false`, so the installer would not have asked the Keychain for them. The
+Homebrew-path TCC identity (a Python upgrade re-asks calendar access) is still unmeasured.
+Reviewer nits not taken: an `edit_memory` gate line shows the whole proposal, `evidence`
+included, unclipped (it is what is being approved); a forced `memory run` does not clear the
+30-minute wait.

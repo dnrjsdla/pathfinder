@@ -185,6 +185,14 @@ class InstallerTest(unittest.TestCase):
         self.assertIn("integrity ok", line)
         self.assertIn("trial ok, 1 tools (1 read-only)", line)
 
+    def test_proposal_line_drops_control_characters(self):
+        """Registry text reaches a terminal through `say`'s gate line and `approvals` - no ESC."""
+        row = {"id": "a1", "args": {**_candidate(name="io.github.acme/\x1b[2Jwidget"),
+                                    "verification": {"license": {"spdx": "MIT", "verdict": "ok"}}, "install": {}}}
+        line = render_row(row)
+        self.assertNotIn("\x1b", line)
+        self.assertIn("io.github.acme/[2Jwidget@1.0.0", line)
+
     def test_secret_missing_proposal_says_what_to_add(self):
         env = [{"name": "TOKEN", "secret": True, "required": True}]
         with mock.patch("pathfinder.installer.keychain.secret", return_value=None):

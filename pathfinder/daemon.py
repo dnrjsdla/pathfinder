@@ -156,6 +156,12 @@ class Daemon:
     def record(self, type, **fields):
         event = self.ledger.append(type, **fields)
         self.state.apply(event)
+        if type == "approval_pending" and fields.get("origin") == "user" and not fields.get("messages"):
+            # a proposal the user's own turn queued (install_server, edit_memory) owes the gate line
+            # a broker Gate sends (live 2026-09-26: unseen, so the owner typed "approve" into chat)
+            args = installer_mod.brief(fields["args"]) if fields["tool"] == "install_server" else fields["args"]
+            line = {"type": "gate", "id": fields["id"], "tool": fields["tool"], "args": args}
+            self.dispatch(lambda: self._send_to_session(fields.get("session"), line))
         return event
 
     def _job_record(self, type, **fields):

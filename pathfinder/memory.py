@@ -31,6 +31,7 @@ from .state import State
 from .tools import ToolSpec
 
 CONSOLIDATE_PROMPT = (Path(__file__).parent / "prompts" / "consolidate.txt").read_text(encoding="utf-8")
+_RETRY_S = 1800  # D39: after a pass the model never answered, the trigger waits this long to retry
 
 
 # -- the vault -------------------------------------------------------------------------------
@@ -261,6 +262,7 @@ class Manager:
         self._stop = threading.Event()
         self._thread = None
         self._stalled_key = None  # last pushed memory_stalled key - once per local day, not every tick
+        self._retry_at = 0.0  # D39: no pass before this after an LLMError
         # a deleted state.db loses the page index; a wiki with pages on disk and no index means
         # it was never rebuilt on this start - the CLI's `memory undo` message promises this.
         wiki_dir = self.home / "wiki"
@@ -610,15 +612,16 @@ class Manager:
         broker = Broker(mem_tools, "memory", {}, control=control, emit=self._emit(),
                         approved=None, denied=frozenset())
         step = self.step_factory(cfg, control, mem_tools)
-        out, error = None, None
+        out, error, kept = None, None, False
         try:
             out = loop.run(step, messages, call_tool=broker.call, emit=self._emit(),
                            budget=self.rules.consolidate_steps, control=control,
                            final_step=self.step_factory(cfg, control, {}))  # D30: the summary still comes
         except Gate as g:
             self.record("error", origin="memory", message=f"memory pass gated: {g.name}")
-        except LLMError as e:
-            error = e.message
+        except LLMError as e:  # an outage keeps the slice; a 4xx the request caused (400, 413) moves on
+            outage = e.status in (0, 401, 402, 408, 429) or e.status >= 500
+            error, kept = e.message, outage and not (p["applied"] or p["proposed"])
         except Exception as e:  # a bug in the step or a tool must not escape - the cursor still advances
             error = f"internal: {type(e).__name__}"
         else:
@@ -631,7 +634,13 @@ class Manager:
                  "usage": out.usage if out else None, "applied": p["applied"], "proposed": p["proposed"]}
         if error:
             fields["error"] = error
-        self.record("memory_pass", origin="memory", **fields)  # the cursor advances even on error
+        if kept:
+            # D39: the model never read the slice (offline, out of credit) - keep it for the next
+            # pass; live 2026-09-26 lost the owner's own instruction this way. An internal error
+            # still moves on (a slice that breaks the step would otherwise loop forever).
+            fields["upto"] = since
+            self._retry_at = time.time() + _RETRY_S
+        self.record("memory_pass", origin="memory", **fields)  # `upto` becomes the cursor
         if p["proposed"] > 0:
             self.push(Signal(
                 sense="memory", kind="memory_proposed", key=f"memory:proposed:{upto}",
@@ -649,7 +658,7 @@ class Manager:
         return len(days) == 3 and all(d["passes"] > 0 and d["read"] > 0 and d["applied"] == 0 for d in days)
 
     def _due(self) -> bool:
-        if self._pass_lock.locked() or self.is_busy():
+        if self._pass_lock.locked() or self.is_busy() or time.time() < self._retry_at:
             return False
         last = self.state.last_user_ts()
         if last is None or time.time() - last < self.rules.consolidate_idle_min * 60:

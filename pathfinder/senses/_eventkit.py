@@ -1,7 +1,7 @@
 """macOS calendar/reminders via EventKit (PyObjC) - trimmed from Mark.5's
 `brain/bridges/eventkit_bridge.py` to just what `calendar.py` and `reminders.py` need: list
-events in a window, add an event, list incomplete reminders (optionally due before a time), add
-a reminder. No update, delete, recurrence, alarms or priority - out of scope for this partition.
+events in a window, add an event, list incomplete reminders (optionally due before a time), add,
+complete and delete a reminder (D38). No event update or delete, recurrence, alarms or priority.
 
 Timestamps in and out are plain epoch floats (`time.time()`-comparable), not ISO strings - the
 callers already hold a `clock.parse_local` timestamp, so there is no second date format to keep
@@ -168,3 +168,33 @@ def add_reminder(title: str, due_ts: float) -> dict:
     if not ok:
         raise RuntimeError(f"could not save the reminder: {err}")
     return {"id": str(rem.calendarItemIdentifier() or ""), "title": str(title), "due": due_ts}
+
+
+def _reminder(store, rid: str):
+    from EventKit import EKReminder
+    item = store.calendarItemWithIdentifier_(rid)
+    if item is None or not isinstance(item, EKReminder):  # an event id resolves too
+        raise LookupError(f"no reminder with id {rid!r}; ids come from list_reminders")
+    return item
+
+
+def complete_reminder(rid: str) -> dict:
+    ensure_access("reminder")
+    store = _get_store()
+    rem = _reminder(store, rid)
+    rem.setCompleted_(True)
+    ok, err = store.saveReminder_commit_error_(rem, True, None)
+    if not ok:
+        raise RuntimeError(f"could not save the reminder: {err}")
+    return {"id": rid, "title": str(rem.title() or ""), "completed": True}
+
+
+def delete_reminder(rid: str) -> dict:
+    ensure_access("reminder")
+    store = _get_store()
+    rem = _reminder(store, rid)
+    title = str(rem.title() or "")
+    ok, err = store.removeReminder_commit_error_(rem, True, None)
+    if not ok:
+        raise RuntimeError(f"could not delete the reminder: {err}")
+    return {"deleted": rid, "title": title}

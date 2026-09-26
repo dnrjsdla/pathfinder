@@ -369,7 +369,9 @@ class PassTest(MemoryHarness):
         self.assertEqual(self.state.memory_cursor, last_seq)
         self.assertEqual([s.kind for s in self.pushed], ["memory_proposed"])
 
-    def test_pass_llm_error_still_advances(self):
+    def test_pass_llm_error_keeps_the_slice(self):
+        """D39 (live 2026-09-26: four offline passes skipped the owner's own instruction): a pass
+        the model never answered leaves the cursor where it was and waits before retrying."""
         self._seed_pass_events()
 
         def factory(cfg, control, tools):
@@ -383,7 +385,24 @@ class PassTest(MemoryHarness):
         passes = self.events("memory_pass")
         self.assertEqual(len(passes), 1)
         self.assertIn("error", passes[0])
+        self.assertEqual(passes[0]["upto"], passes[0]["since"])
+        self.assertEqual(self.state.memory_cursor, 0)
+        self.assertGreater(mgr._retry_at, time.time())
+
+    def test_pass_request_error_moves_on(self):
+        """A 400 the slice itself causes would fail the same way every retry - it advances."""
+        self._seed_pass_events()
+
+        def factory(cfg, control, tools):
+            def step(messages):
+                raise LLMError(400, "context too long")
+                yield  # pragma: no cover
+            return step
+
+        mgr = self.manager(step_factory=factory, rules=rules_mod.Rules(consolidate_min_events=1))
+        mgr.run_pass()
         self.assertGreater(self.state.memory_cursor, 0)
+        self.assertEqual(mgr._retry_at, 0.0)
 
     def test_pass_internal_error_still_advances(self):
         self._seed_pass_events()
@@ -410,8 +429,7 @@ class PassTest(MemoryHarness):
 
         def factory1(cfg, control, tools):
             def step(messages):
-                raise LLMError(402, "no credit")
-                yield  # pragma: no cover
+                return iter([("text", "done")])  # three messages: too few for a summary
             return step
 
         mgr1 = self.manager(step_factory=factory1, rules=rules_mod.Rules(consolidate_min_events=1))

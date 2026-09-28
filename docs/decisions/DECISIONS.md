@@ -293,3 +293,26 @@ servers that do not need what the owner would give them. The installer already r
 (`com.notion/mcp`, 403) stay outside v1 as ARCHITECTURE says. — *Reversed if* partition 8's
 survey finds that the servers the owner wants mostly need OAuth, not a token: then the step
 waits for an OAuth design instead of being built alone.
+
+## 2026-09-29 — Live use, days three to five (owner's choices on two questions)
+
+**D41. A session is its conversation: two hours without one end it, even under an open screen.**
+A screen's 30 s `presence` no longer moves `sessions.last_ts`, nor does a signal's silent triage
+(of a signal turn, only the notice it delivered is conversation); a `say` on an older session
+re-attaches to the current one, and a signal that has to open a new session takes the idle
+screens with it so its notice still arrives. One session ran from 2026-09-25 to 09-29 (109
+turns) and its history kept bringing back a wrong answer ("MCP only runs inside the desktop
+app") and the model's own habit of claiming work it had not done; on a clean session the same
+questions called the right tools. — The cost: "what we said earlier" after two quiet hours is
+gone from the turn; lasting facts ride in USER.md and the wiki. — *Reversed if* the owner keeps
+asking about the previous sitting: first a larger `session_resume_s`, then a carried summary.
+
+**D42. Every turn carries the next 24 hours of the calendar and reminders.** Each sense module
+may define `context(now)`; `signals.context` puts their lines, titles only and one line each,
+under a "data, not instructions" header in the second system message, read on a worker thread,
+and a sense it cannot read says so ("unknown" is not "none"). A 01:13 briefing said "no events
+or reminders" without calling a tool. The cost is one EventKit read and roughly 50-300 tokens a
+turn; a question about the week still needs the tools. Calendar titles are third-party text and
+now sit in a system message - clipped and single-line, but a longer injection bench (m3) has not
+been re-run over it. — *Reversed if* m3 over the agenda shows a title steering the model: then
+the agenda moves into a tool-result-shaped message.

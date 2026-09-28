@@ -1097,3 +1097,75 @@ Homebrew-path TCC identity (a Python upgrade re-asks calendar access) is still u
 Reviewer nits not taken: an `edit_memory` gate line shows the whole proposal, `evidence`
 included, unclipped (it is what is being approved); a forced `memory run` does not clear the
 30-minute wait.
+
+## 2026-09-29 — Live use, days three to five
+
+The owner kept using the installed daemon (commit `1797171`) from 2026-09-26 21:31 to 09-29 01:19.
+Read from the ledger afterwards.
+
+### What the ledger showed
+
+- **Claims without calls, again.** "Check my week" listed the calendar and said "reminders: none"
+  without calling `list_reminders`; "yes" to "shall I mark it done?" answered "done" with no tool
+  call; a 01:13 briefing said "no events or reminders" with no call at all; asked for Gmail servers
+  "with search_tools", the model named three that do not exist. Weather: "I have no tool for it",
+  although `curl wttr.in` through `run_command` had answered on 09-26.
+- **One session for four days.** `sessions.last_ts` moved on every event of the session,
+  including the open screen's `presence` every 30 s, so `session_resume_s` (2 h) never ended
+  it: 109 turns since 09-25 22:19. Asked to recall its MCP use, the model repeated the 09-26
+  "MCP only runs inside the desktop app" from that history. The same questions on a clean
+  session called `search_tools("gmail")` (real names) and `curl wttr.in`.
+- **`search_tools` failed on its own terms.** The registry matches a substring of the server
+  name, and names are hyphenated: "web search", "brave search", "google mail gmail" can never
+  match. It also scans until it has `limit` results: `gmail` took 21.7 s for 20 results (2.8 s
+  for 5), past the 20 s timeout, so three calls at 01:17-01:19 timed out while `ping` worked, and
+  the model diagnosed a registry outage and offered hand-edited config files.
+- **"From now on, check reminders with the calendar"** got "understood, from now on I will" and
+  nothing written; the one memory pass (read 79, applied 0) did not pick it up either.
+- An all-day holiday kept re-signalling `upcoming_event` every poll; the model wrote "01:47" and
+  "21:43" for times ten minutes off the `Local time now` line it had (model noise, left).
+
+### Fixed now
+
+D41 (session lifetime) and D42 (the resident agenda), the owner's choices. `search_tools`
+hyphenates spaces, asks for the ten it shows with a 60 s timeout and answers a sentence, not
+`[]`, when no name matches. `run_command`'s description says the network is open. The system
+prompt adds that the calendar, reminders, mail, files and the web are known from this turn's
+tools or the agenda - never from the conversation or its summary - that "done" needs this
+turn's tool result, and that an instruction for "from now on" goes to USER.md in the same turn.
+The calendar's `poll` skips events that already started.
+
+### Live checks
+
+The installed daemon echoed its second system message: the time line, then the agenda header,
+`- reminder 2026-09-30 00:00: 부산 여행 숙소 요금 결제일` and `- calendar, next 24 h: nothing`.
+A throwaway reminder was added, completed, the daemon restarted, and `list_reminders` in the new
+process no longer had it (completion persists); then deleted. So the 부산 reminder, completed
+on 09-26 21:33 and open again today, was reopened outside PATHFINDER (the owner had called that
+exchange a test) or by a sync - not by a lost write. `search_tools` with "web search" returned
+five `*-web-search` servers (28 s). In the owner's long session the model still invented Gmail
+server names and denied having a weather tool; in a clean temp-home session the same questions
+called `search_tools("gmail")` and `curl wttr.in`, and "from now on, check reminders too" became
+a USER.md proposal with its gate line in the same turn (denied there). A temp-home session aged
+three hours by hand moved the next `say` into a new session.
+
+### Defects found by the review (opus), taken
+
+A screen closed right after being moved kept its dead connection in the new session, so the next
+notice was recorded as delivered to nobody (blocker; a closing connection now leaves every
+session). Every silenced signal records a `decision` in the session, so Claude Code's hook
+signals alone would have kept one alive: triage no longer counts, a delivered notice does. With
+calendar access undetermined (first run, or a Python upgrade re-asking), each turn would have
+waited up to 2 x 60 s for the prompt before `turn.start`: the agenda now asks
+`authorized()` and never prompts. An event without a start broke the whole agenda line; an
+empty `search_tools` query listed the registry unfiltered.
+
+### Left open on purpose
+
+Right after a move the screen's `presence` row still sits on the old session until its next
+heartbeat (30 s), so a notice in that window skips the typing hold and reads the user as away; a
+job's gate and end lines go to the job's own session, which a moved screen no longer holds (its
+notice still arrives); the shared EventKit store is made without a lock (no failure seen).
+The model's wrong times. A briefing still does not look past 24 hours unless it calls the tools.
+m3 has not been run over the agenda (D42's reversal). The owner's current session ends only
+after two quiet hours; until then its history still carries the old answers.

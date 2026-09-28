@@ -15,6 +15,7 @@ KINDS = {"upcoming_event": ("always", "-", "silence", "no rule configured for th
 CADENCE_S = 300
 _WINDOW_S = 3600  # look one hour ahead; RULES.md's minutes_until_under does the real filtering
 _MAX_WINDOW_S = 31 * 86400  # list_events window cap - an unbounded range is an unbounded EventKit scan
+_AGENDA_S, _AGENDA_MAX = 86400, 10  # D42: what every turn carries
 _OFF = "calendar sense is off: install pyobjc-framework-EventKit"
 _off_logged = False
 
@@ -37,7 +38,7 @@ def poll(options, now):
         raise RuntimeError(_OFF) from None
     out = []
     for ev in events:
-        if ev["start"] is None:
+        if ev["start"] is None or ev["start"] < now:  # started: not upcoming (live: a holiday re-signalled 92 times a day)
             continue
         out.append(Signal(
             sense="calendar", kind="upcoming_event", key=f"event:{ev['id']}:{ev['start']}",
@@ -48,6 +49,18 @@ def poll(options, now):
                     "minutes_until": clock.minutes_until(ev["start"], now)},
             trust=TRUST))
     return out
+
+
+def context(now):
+    """D42: the next 24 h, titles only and one line each - an invitation is third-party text."""
+    if not ek.authorized("event"):
+        return ["- calendar: not readable (access not granted yet)"]
+    events = [ev for ev in ek.list_events(now, now + _AGENDA_S) if ev["start"] is not None]
+    lines = [f"- event {clock.format_local(ev['start'])}{' (all day)' if ev['all_day'] else ''}: "
+             f"{' '.join(ev['title'].split())[:80]}" for ev in events[:_AGENDA_MAX]]
+    if len(events) > _AGENDA_MAX:
+        lines.append(f"- {len(events) - _AGENDA_MAX} more events (list_events)")
+    return lines or ["- calendar, next 24 h: nothing"]
 
 
 def _list_events(control=None, **kw):

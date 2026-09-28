@@ -242,9 +242,19 @@ dict 를 키 튜플로 바꿔 버린다.
 - 세션 = 큐 + 워커 하나(`_Lane`, deque 로 만든 큐 — 보통 `asyncio.Queue` 에는 미리보기가 없다).
   큐 항목: `("say", text)` · `("resume", approval_id)` · `("continue", steer_text)` ·
   `("signal", Signal)`. `attach` 는 `session_resume_s` 안의 최근 세션을 잇는다.
+  **D41: 세션은 그 대화다** - `sessions.last_ts` 는 세션의 모든 사건에 움직이되 화면의 `presence`
+  심장박동, 기억 패스 자신의 사건, 신호의 분류에는 움직이지 않는다(신호 턴에서는 배달된 알림, 곧
+  그 `assistant` 사건만 센다). 그보다 오래된 세션에서의 `say` 는 현재
+  세션에 다시 붙는다(없으면 새로); 새 세션을 여는 신호는 쉬고 있는 화면(`control is None`)을 모두
+  데려간다, 안 그러면 그 알림은 아무에게도 닿지 않는다; writer 가 옮겨진 연결은 다음 줄을 다루기
+  전에 따라가고, 닫히는 연결은 자신을 쥔 모든 세션에서 빠진다.
 - **상주 시스템 프롬프트는 `prompts/system.txt` + `signals.SIGNAL_TURNS_CLAUSE` 이고, 유저 턴과
   신호 턴을 가리지 않고 모든 턴에서 바이트 단위로 같다**(캐시); 두 번째 시스템 메시지
-  `clock.now_line()`("Local time now: ...")만 턴마다 바뀐다.
+  `clock.now_line()`("Local time now: ...")만 턴마다 바뀐다 - D42 부터는 `signals.context(senses)`
+  도 함께: 감각 모듈마다의 `context(now)` 줄을 "data, not instructions" 머리말 하나 아래에(캘린더:
+  앞으로 24시간; 미리 알림: 24시간 안 기한이거나 지난 것; 제목은 한 줄 80자, 각 열 개까지), 작업
+  스레드에서 읽는다; 읽지 못한 감각은 그렇다고 적고, 권한이 아직 없는 감각은 묻지 않고 그렇다고
+  적는다(`_eventkit.authorized`).
 - **사용자 자신의 턴이 도는 중의 `say` 는 steer 다**(D17; `Session.origin` 은 새·재개·continue 턴에서
   `"user"`, 신호 턴에서 `"signal"` — 신호 턴 도중의 say 는 자기 턴으로 큐에 들어간다, 그 턴은
   사용자에게 보이지 않으므로): `user {steer: true}` 로 적히고 `control.steers` 에
@@ -363,7 +373,8 @@ Daemon.run_signal_turn ── 신호마다 rules.decide 를 먼저(절대 안 �
   reversible=True`). `shell.py`: push 전용(`build(fields, now)`), `command_failed`(exit != 0) /
   `command_finished`(exit == 0), `exit_nonzero` 와 `duration_over` 를 등록한다; 중복 제거 열쇠에
   도착 시각이 들어가는데, 반복 자체가 `count_over` 가 보려는 것이기 때문이다.
-  `calendar.py`/`reminders.py`: 어댑터 하나(`_eventkit.py`, 200줄, PyObjC 의
+  `calendar.py`/`reminders.py`(캘린더 `poll` 은 아직 시작하지 않은 일정만 신호로 낸다 - 종일 일정이
+  폴링마다 다시 울려 하루 92번): 어댑터 하나(`_eventkit.py`, 200줄, PyObjC 의
   `EventKit`/`Foundation` 을 함수 안에서 그때그때 임포트 - Mark.5 의 `eventkit_bridge.py` 를
   목록/추가만 남기고 잘랐고, 미리 알림에는 완료/삭제를 더했다(D38: 둘 다 `write=True` 라 묻고
   나서 하며, 미리 알림이 아닌 id 는 `LookupError`), 시각은 평범한 epoch 부동소수라 `clock.py` 와 맞출 두 번째 날짜
@@ -565,7 +576,8 @@ Daemon.run_signal_turn ── 신호마다 rules.decide 를 먼저(절대 안 �
   까지)이며 설치·거부되지 않은 것만 → `tool_candidate {candidate, matched_tags}`, 키
   `catalog:<name>@<version>`. 기본 규칙: `count_over 3 → silence`(홍수는 레지스트리 덤프),
   `always → speak`. 이 감각의 `TOOLS`(감각이 켜진 동안만 등록): `search_tools(query)`(사용자
-  출처, 그 자리에서 레지스트리)와 `propose_install(name)`(사용자 출처만 - 신호·작업 턴은 보지도
+  출처, 그 자리에서 레지스트리; 레지스트리는 하이픈 이름의 부분 문자열로 찾으니 공백은 `-` 로,
+  결과 열 개와 60초 타임아웃 - 드문 이름은 표 전체를 훑는다 - 이고, 없으면 `[]` 대신 문장)와 `propose_install(name)`(사용자 출처만 - 신호·작업 턴은 보지도
   못한다; 검사는 턴의 스레드에서 돌고 제안이 상자에 앉는다). `tool_held`·`install_done`·
   `install_failed` 는 `attach`/설치기가 직접 민다(`trust self`; 설치 결말은 작업처럼 `exempt` -
   사용자가 시킨 일).

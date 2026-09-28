@@ -47,6 +47,13 @@ def for_model(rec: dict) -> dict:
             for k, v in rec.items()}
 
 
+def authorized(entity: str) -> bool:
+    """Full access already granted - asks nothing, so a read that must not wait (D42's agenda)
+    can skip an undetermined entity and leave the prompt to `poll` and the tools."""
+    from EventKit import EKEventStore
+    return EKEventStore.authorizationStatusForEntityType_(_ENTITY_EVENT if entity == "event" else _ENTITY_REMINDER) == 3
+
+
 def ensure_access(entity: str) -> None:
     """entity 'event'|'reminder', full access - a write tool reads first (dedup, matching), so
     writeOnly is refused the same as denied (Mark.5's own note: a quiet empty list there reads

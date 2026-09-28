@@ -1676,6 +1676,109 @@ class ProposalGateLineTest(DaemonHarness):
         self.assertTrue(line["args"].startswith("io.github.acme/widget@1.0.0  license MIT ok"), line["args"])
 
 
+class SessionLifetimeTest(DaemonHarness):
+    """D41 (live 2026-09-29): an open screen's `presence` kept one session alive for four days,
+    and its old wrong answers kept coming back. Two hours without conversation end a session."""
+
+    def _age(self, daemon, sid, seconds):
+        daemon.state.db.execute("UPDATE sessions SET last_ts = last_ts - ? WHERE id = ?", (seconds, sid))
+
+    def test_presence_does_not_keep_a_session(self):
+        async def scenario(daemon):
+            c = await Client.open(self.home)
+            c.send({"type": "say", "text": "one"})
+            await c.until("turn.end")
+            first = next(iter(daemon.sessions))
+            self._age(daemon, first, 3 * 3600)
+            c.send({"type": "presence", "idle_s": 0})
+            await asyncio.sleep(0.05)
+            fresh = daemon.state.latest_session(7200)
+            c.send({"type": "say", "text": "two"})
+            await c.until("turn.end")
+            c.close()
+            return first, fresh
+
+        first, fresh = self.run_with(fake_model("ok"), scenario)
+        self.assertIsNone(fresh)
+        users = [e for e in self.events() if e["type"] == "user"]
+        self.assertEqual(users[0]["session"], first)
+        self.assertNotEqual(users[1]["session"], first)
+
+    def test_a_notice_after_the_gap_reaches_the_open_screen(self):
+        async def scenario(daemon):
+            _never_quiet(daemon)
+            c = await Client.open(self.home)
+            c.send({"type": "attach"})
+            first = (await c.recv())["session"]
+            self._age(daemon, first, 3 * 3600)
+            daemon.push_signal(Signal(sense="schedule", kind="schedule_due", key="gap-1",
+                                      summary="Scheduled note: train", fields={"id": "s1"}, trust="user"))
+            notice = (await c.until("notice"))[-1]
+            c.send({"type": "presence", "idle_s": 5})
+            await asyncio.sleep(0.05)
+            c.close()
+            return first, notice
+
+        first, notice = self.run_with(fake_model("ok"), scenario)
+        self.assertIn("Scheduled note: train", notice["text"])
+        delivery = next(e for e in self.events() if e["type"] == "delivery")
+        self.assertNotEqual(delivery["session"], first)  # the notice opened the new session
+        presence = [e for e in self.events() if e["type"] == "presence"]
+        self.assertEqual(presence[-1]["session"], delivery["session"])  # the screen followed it
+
+
+    def test_a_screen_closed_right_after_the_move_leaves(self):
+        """Review blocker: closed before its next line, the moved connection stayed in the new
+        session, and the next notice was recorded as delivered to nobody."""
+        async def scenario(daemon):
+            _never_quiet(daemon)
+            c = await Client.open(self.home)
+            c.send({"type": "attach"})
+            first = (await c.recv())["session"]
+            self._age(daemon, first, 3 * 3600)
+            daemon.push_signal(Signal(sense="schedule", kind="schedule_due", key="gap-2",
+                                      summary="Scheduled note: bus", fields={"id": "s2"}, trust="user"))
+            await c.until("notice")
+            c.close()
+            await asyncio.sleep(0.1)
+            return [len(x.conns) for x in daemon.sessions.values()]
+
+        self.assertEqual(self.run_with(fake_model("ok"), scenario), [0, 0])
+
+    def test_silent_triage_does_not_keep_a_session(self):
+        """Review: every silenced signal records a `decision` in the session; only a delivered
+        notice is conversation."""
+        async def scenario(daemon):
+            s = daemon._target_session()
+            self._age(daemon, s.id, 3 * 3600)
+            daemon.record("decision", session=s.id, origin="signal", signal_key="k", action="silence", why="seen")
+            after_triage = daemon.state.latest_session(7200)
+            daemon.record("assistant", session=s.id, origin="signal", text="a notice", final=True)
+            return s.id, after_triage, daemon.state.latest_session(7200)
+
+        sid, after_triage, after_notice = self.run_with(fake_model("ok"), scenario)
+        self.assertIsNone(after_triage)
+        self.assertEqual(after_notice, sid)
+
+
+class AgendaTest(DaemonHarness):
+    def test_every_turn_carries_the_agenda(self):
+        """D42 (live: a 01:13 briefing said "no reminders" without looking)."""
+        factory = fake_model("ok")
+
+        async def scenario(daemon):
+            c = await Client.open(self.home)
+            c.send({"type": "say", "text": "briefing"})
+            await c.until("turn.end")
+            c.close()
+
+        with mock.patch("pathfinder.signals.context", return_value="AGENDA-LINE"):
+            self.run_with(factory, scenario)
+        second = factory.seen[0][1]["content"]
+        self.assertTrue(second.startswith("Local time now:"))
+        self.assertIn("\n\nAGENDA-LINE", second)
+
+
 class SigtermTest(DaemonHarness):
     """`serve()` runs a real Daemon (not through `run_with`, which owns start()/close() itself -
     the SIGTERM handler lives inside `serve()`)."""

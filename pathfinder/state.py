@@ -239,7 +239,11 @@ class State:
                 (event["ts"], state_val, event.get("reason", ""), event["id"]))
         # a pass's own events (origin "memory") must not look like the user is still there -
         # they would keep the session alive forever and the pass would never see it go idle.
-        if session and event.get("origin") != "memory":
+        # Nor may a screen's 30 s `presence` heartbeat or a signal's silent triage (D41: live, one
+        # session ran four days) - of a signal turn, only the notice it delivered is conversation.
+        origin = event.get("origin")
+        if (session and origin != "memory" and event["type"] != "presence"
+                and (origin != "signal" or event["type"] == "assistant")):
             self.db.execute("UPDATE sessions SET last_ts = ? WHERE id = ?", (event["ts"], session))
         self.db.execute("UPDATE meta SET value = ? WHERE key = 'cursor'", (str(seq),))
 

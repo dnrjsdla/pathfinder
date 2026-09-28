@@ -17,6 +17,7 @@ KINDS = {
 CONDITIONS: dict = {}  # none beyond core (minutes_until_under, minutes_over)
 CADENCE_S = 300
 _WINDOW_S = 3600
+_AGENDA_S, _AGENDA_MAX = 86400, 10  # D42: what every turn carries
 _OFF = "reminders sense is off: install pyobjc-framework-EventKit"
 _off_logged = False
 
@@ -42,6 +43,18 @@ def poll(options, now):
                     "minutes_until": clock.minutes_until(r["due"], now)},
             trust=TRUST))
     return out
+
+
+def context(now):
+    """D42: open reminders due within 24 h or overdue, soonest first."""
+    if not ek.authorized("reminder"):
+        return ["- reminders: not readable (access not granted yet)"]
+    rems = sorted(ek.list_reminders(due_before_ts=now + _AGENDA_S), key=lambda r: r["due"])
+    lines = [f"- reminder {clock.format_local(r['due'])}{' (overdue)' if r['due'] < now else ''}: "
+             f"{' '.join(r['title'].split())[:80]}" for r in rems[:_AGENDA_MAX]]
+    if len(rems) > _AGENDA_MAX:
+        lines.append(f"- {len(rems) - _AGENDA_MAX} more reminders (list_reminders)")
+    return lines or ["- reminders due within 24 h or overdue: none"]
 
 
 def _list_reminders(control=None):

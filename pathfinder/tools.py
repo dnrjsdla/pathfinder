@@ -182,7 +182,7 @@ def _run_command(command, escalate=False, control=None):
 TOOLS = {
     "run_command": ToolSpec(
         name="run_command",
-        description="Run a shell command in a sandboxed workspace.",
+        description="Run a shell command in a sandboxed workspace; the network is open (curl works).",
         params={
             "command": {"type": "string", "description": "the shell command to run"},
             "escalate": {"type": "boolean", "description": "run outside the sandbox (needs the user's approval)"},

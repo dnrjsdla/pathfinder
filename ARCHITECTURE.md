@@ -253,9 +253,20 @@ words and leaves no dangling `user` message (D30).
 - A session is a queue plus one worker (`_Lane`, a deque-backed queue — plain `asyncio.Queue` has
   no peek). Lane items: `("say", text)`, `("resume", approval_id)`, `("continue", steer_text)`,
   `("signal", Signal)`. `attach` resumes the latest session younger than `session_resume_s`.
+  **D41: a session is its conversation** - `sessions.last_ts` moves on every session event except
+  a screen's `presence` heartbeat, a memory pass's own, and a signal's triage (of a signal turn only
+  the delivered notice, its `assistant` event, counts). A `say` on a session older than that
+  re-attaches to the current one (new if none); a signal that opens a new session takes every idle
+  screen (`control is None`) with it, or its notice would reach nobody; a connection whose writer
+  was moved follows it before handling its next line, and a closing connection leaves every
+  session that holds it.
 - **The resident system prompt is `prompts/system.txt` + `signals.SIGNAL_TURNS_CLAUSE`, byte-stable
   across every turn, user and signal alike** (cache); a second system message, `clock.now_line()`
-  ("Local time now: ..."), carries the only thing that changes turn to turn.
+  ("Local time now: ..."), carries the only thing that changes turn to turn - with, since D42,
+  `signals.context(senses)`: each sense module's `context(now)` lines under one "data, not
+  instructions" header (calendar: the next 24 h; reminders: due within 24 h or overdue; titles
+  single-line, 80 characters, ten each), read on a worker thread; a sense that fails says so, and
+  one whose access is not granted yet says that without prompting (`_eventkit.authorized`).
 - **A `say` while the user's own turn is running is a steer** (D17; `Session.origin` is `"user"`
   for a fresh, resumed or continued turn and `"signal"` for a signal turn - a say during a signal
   turn is queued as its own turn, because that turn is invisible to the user): recorded as `user {steer: true}`, appended
@@ -376,7 +387,8 @@ Daemon.run_signal_turn ── rules.decide per signal FIRST (never held, never s
   reversible=True`). `shell.py`: push-only (`build(fields, now)`), `command_failed` (exit != 0) /
   `command_finished` (exit == 0), registers `exit_nonzero` and `duration_over`; its dedupe key
   includes the arrival time, since a repeat is exactly what `count_over` needs to see.
-  `calendar.py`/`reminders.py`: two sense modules over one adapter, `_eventkit.py` (200 lines,
+  `calendar.py`/`reminders.py` (the calendar's `poll` signals only events not yet started - an
+  all-day event re-signalled every poll, 92 times in a day): two sense modules over one adapter, `_eventkit.py` (200 lines,
   PyObjC's `EventKit`/`Foundation` imported lazily inside each function - trimmed from Mark.5's
   `eventkit_bridge.py` to list/add, plus complete/delete for a reminder (D38: both `write=True`,
   so they ask; an id that is not a reminder raises `LookupError`), timestamps as plain epoch floats so no second date
@@ -585,7 +597,9 @@ the next turn calls `mcp__<server>__<tool>`. Every hop is an event; `state.db` d
   (at most ten lookups per poll), not installed, not declined -> `tool_candidate {candidate,
   matched_tags}` keyed `catalog:<name>@<version>`. Shipped rules: `count_over 3 -> silence` (a
   flood is a registry dump), `always -> speak`. Its `TOOLS` (registered only while the sense is on):
-  `search_tools(query)` (user origin, the registry on the spot) and `propose_install(name)` (user
+  `search_tools(query)` (user origin, the registry on the spot; the registry matches a substring
+  of the hyphenated name, so spaces become `-`, ten results with a 60 s timeout - a rare name scans
+  the whole table - and no match returns a sentence, not `[]`) and `propose_install(name)` (user
   origin only - a signal or job turn cannot even see it; runs the check on the turn's own thread and
   lands the proposal). `tool_held`, `install_done`, `install_failed` are pushed by `attach`/the
   installer (`trust self`; the install outcomes `exempt` like a job's - the user asked).

@@ -102,12 +102,21 @@ def _poll(options, now, state, home):
 
 
 def _search_tools(query, control=None):
+    # The registry matches a substring of the server NAME, and names are hyphenated: "web search"
+    # never matches, "web-search" does. It scans until `limit` results or the end - a rare name
+    # took 20-22 s live (2026-09-29), past the old 20 s timeout; ask only for what is shown.
+    query = "-".join(query.split())
+    if not query:
+        raise ValueError("search_tools needs one word of a server name")
     lines = []
-    for item in catalog.fetch(search=query, pages=1, limit=20, registry=REGISTRY_URL or catalog.REGISTRY):
+    for item in catalog.fetch(search=query, pages=1, limit=10, timeout=60,
+                              registry=REGISTRY_URL or catalog.REGISTRY):
         cand = catalog.candidate(item)
         pkg = cand["package"]
         lines.append(f"{cand['name']} - {cand['description'][:100]} ({pkg['registry_type']}, license not checked)")
-    return lines[:10]
+    # live: an empty list read as "the registry has no such server", and the model offered to
+    # edit config files by hand instead
+    return lines or f"no server name contains {query!r}; search one word of a name (gmail, brave, weather)"
 
 
 def _propose_install(name, control=None):
@@ -118,8 +127,8 @@ def _propose_install(name, control=None):
 TOOLS = {
     "search_tools": ToolSpec(
         name="search_tools",
-        description="Search the public MCP registry for tools by name (the user asks what tools exist for X).",
-        params={"query": {"type": "string", "description": "search text"}},
+        description="Search the public MCP registry for servers by name (the user asks what tools exist for X).",
+        params={"query": {"type": "string", "description": "one word or hyphenated part of a server name: gmail, brave, web-search"}},
         required=["query"], handler=_search_tools, origins=frozenset({"user"}), network=True,
     ),
     "propose_install": ToolSpec(

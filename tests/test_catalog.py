@@ -11,6 +11,7 @@ import unittest
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from unittest import mock
 
 from pathfinder import catalog, config
 from pathfinder.ledger import Ledger
@@ -348,6 +349,18 @@ class SearchToolsTest(_FakeRegistryTest):
     def tearDown(self):
         catalog.REGISTRY = self._patched_registry
         super().tearDown()
+
+    def test_search_tools_hyphenates_and_says_when_nothing_matched(self):
+        """Live 2026-09-29: "web search" matched no name (names are hyphenated) and a rare name
+        scanned past the 20 s timeout; an empty list read as "no such server"."""
+        with mock.patch.object(catalog_sense.catalog, "fetch", return_value=[]) as fetch:
+            out = catalog_sense._search_tools("web  search")
+        self.assertEqual(fetch.call_args.kwargs["search"], "web-search")
+        self.assertEqual((fetch.call_args.kwargs["limit"], fetch.call_args.kwargs["timeout"]), (10, 60))
+        self.assertIsInstance(out, str)
+        self.assertIn("'web-search'", out)
+        with self.assertRaises(ValueError):  # "" would list the registry unfiltered
+            catalog_sense._search_tools("   ")
 
     def test_search_tools_returns_lines(self):
         _RegistryHandler.items = [FIXTURE_NPM_ITEM, FIXTURE_REMOTE_ITEM]

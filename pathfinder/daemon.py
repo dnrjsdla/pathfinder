@@ -157,8 +157,7 @@ class Daemon:
         event = self.ledger.append(type, **fields)
         self.state.apply(event)
         if type == "approval_pending" and fields.get("origin") == "user" and not fields.get("messages"):
-            # a proposal the user's own turn queued (install_server, edit_memory) owes the gate line
-            # a broker Gate sends (live 2026-09-26: unseen, so the owner typed "approve" into chat)
+            # a proposal from the user's own turn owes a Gate's line (live: "approve" typed into chat)
             args = installer_mod.brief(fields["args"]) if fields["tool"] == "install_server" else fields["args"]
             line = {"type": "gate", "id": fields["id"], "tool": fields["tool"], "args": args}
             self.dispatch(lambda: self._send_to_session(fields.get("session"), line))
@@ -292,6 +291,8 @@ class Daemon:
                 except (ValueError, TypeError, KeyError):
                     _write(writer, {"type": "error", "message": "expected one JSON object per line with a \"type\""})
                     continue  # a bad line never costs the connection
+                if session is not None and writer not in session.conns:  # D41: moved into the current session
+                    session = next((x for x in self.sessions.values() if writer in x.conns), session)
                 if kind == "attach":
                     session = self.attach(writer, msg.get("session"), session, msg.get("cwd"))
                 elif kind == "say":
@@ -299,7 +300,9 @@ class Daemon:
                     if not isinstance(text, str) or not text.strip():
                         _write(writer, {"type": "error", "message": "say needs a non-empty \"text\""})
                         continue
-                    session = session or self.attach(writer, None, None)
+                    if session is None or (session.control is None and self.state.latest_session(
+                            config.load(self.home)["session_resume_s"]) != session.id):  # D41: over after 2 h quiet
+                        session = self.attach(writer, None, session)
                     if session.control is not None and session.origin == "user":
                         self.steer(session, text)  # the user's own turn is running: a mid-turn steer
                     else:  # no turn running, or a signal turn: queued as its own turn (D17)
@@ -420,8 +423,8 @@ class Daemon:
                 else:
                     _write(writer, {"type": "error", "message": f"unknown type: {kind!r}"})
         finally:
-            if session:
-                session.conns.discard(writer)
+            for x in self.sessions.values():  # D41: a move may have put it in another session
+                x.conns.discard(writer)
             writer.close()
 
     def _session(self, sid):
@@ -468,12 +471,11 @@ class Daemon:
         if not s.control.in_tool:  # the daemon does not cut a stream while a tool handler is running
             s.control.steer_cut.set()
 
-    def _second_system_message(self) -> str:
-        """`clock.now_line()` plus the resident memory context, when there is any - USER.md's
-        body and the wiki map (partition 5). Never part of `self.system_prompt`: that message
-        stays byte-stable across every turn (D20's cache), this one already changes turn to turn."""
-        ctx = memory.context(self.home, self.state)
-        return f"{clock.now_line()}\n\n{ctx}" if ctx else clock.now_line()
+    async def _second_system_message(self) -> str:
+        """`clock.now_line()`, the senses' agenda (D42), then USER.md's body and the wiki map when there
+        are any (partition 5) - never in `self.system_prompt`, which stays byte-stable (D20's cache)."""
+        agenda = await asyncio.to_thread(signals.context, list(self.senses.values()))
+        return "\n\n".join(p for p in (clock.now_line(), agenda, memory.context(self.home, self.state)) if p)
 
     # -- turns -------------------------------------------------------------------------
     async def lane(self, s):
@@ -525,7 +527,7 @@ class Daemon:
             self.record("user", session=s.id, turn=turn, origin="user", trust="user", text=text)
         self.record("turn_start", session=s.id, turn=turn, origin="user")
         messages = [{"role": "system", "content": self.system_prompt},
-                   {"role": "system", "content": self._second_system_message()}] + self.state.history(s.id)
+                   {"role": "system", "content": await self._second_system_message()}] + self.state.history(s.id)
         if trailing:
             messages.append({"role": "user", "content": trailing})
         return await self._run_turn(s, turn, messages, resume=False)
@@ -552,7 +554,10 @@ class Daemon:
         if sid is None:
             sid = uuid.uuid4().hex[:12]
             self.record("session_start", session=sid)
-        return self._session(sid)
+        s = self._session(sid)
+        for old in [x for x in self.sessions.values() if x is not s and x.control is None]:
+            s.conns, old.conns = s.conns | old.conns, set()  # D41: a screen left open follows the notice
+        return s
 
     async def run_signal_turn(self, s, bundle) -> None:
         """Triage the whole bundle through rules.decide (D8) FIRST, unconditionally: a
@@ -618,7 +623,7 @@ class Daemon:
         try:
             messages = [
                 {"role": "system", "content": self.system_prompt},
-                {"role": "system", "content": self._second_system_message()},
+                {"role": "system", "content": await self._second_system_message()},
                 {"role": "user", "content": signals.render_envelope(sigs)},  # never recorded as `user`
             ]
             cfg = config.load(self.home)

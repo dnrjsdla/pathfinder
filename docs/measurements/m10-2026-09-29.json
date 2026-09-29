@@ -1,0 +1,1879 @@
+{
+ "date": "2026-09-29",
+ "source": "bench/m10_unsupported.py: m9's turns replayed from the live ledger through the model in config, every tool handler faked; text answers graded by hand from the traces (kept outside the repo)",
+ "design": {
+  "context": "system prompt + signal clause, the turn's own clock line, the agenda from 2026-09-29 01:30 on, the session summary when one existed, then the last 12 messages (live sends the whole session)",
+  "tools": "tools.for_origin('user') with the owner's senses: 18 tools, no MCP server installed; list_reminders/list_events/list_schedules return a real ledger result, writes stop at the real Broker's gate",
+  "replay_ends": "at the first step that calls a tool, except T58 and T84 (whole loop, budget 4): m9 counted those for what they said after a read. The first traces (T35, T40, T44, T46, T56, T74 baseline) ran the whole loop before this was set; their first step decides their class the same way",
+  "verify": "runs only on an answer that called no tool (D48's scope); reuses baseline's own run as its draft (prompt+verify reuses prompt's), so each pair is judged on the same draft",
+  "classes": {
+   "tool_called": "a tool was called in the turn (or in the re-run)",
+   "plain_ok": "a text answer that needs no tool and makes no unsupported claim",
+   "honest_cannot": "says it cannot, or asks, with no claim",
+   "unsupported": "states the calendar/reminders/memory/registry/own past actions, says done, promises, or denies a capability, with nothing in the turn supporting it"
+  },
+  "fixed": "positive turns: a tool that serves the request was called, or the answer holds none of the four defects. A tool call that serves only the mistaken model (reading another app's config, a tool name that does not exist) is not fixed"
+ },
+ "prompt_in_force_live": {
+  "note": "the replay's baseline is today's system.txt and tools; most of the 27 ran live under older ones",
+  "before_1797171": "35, 40, 44, 46, 56, 58, 62, 68, 74, 75, 76, 77, 80, 84 (no 'do what you say' line, no MCP line, no complete_reminder/delete_reminder; 40 also had no list_events)",
+  "1797171_to_c749e17": "85, 90, 97, 101, 105, 110, 112, 113, 114 (no 'state comes from a tool' paragraph, no agenda)",
+  "today's": "118, 128, 129, 131"
+ },
+ "verifier": {
+  "baseline_drafts": {
+   "unsupported_without_a_tool": 15,
+   "flagged": 11,
+   "missed": [
+    68,
+    112,
+    114,
+    118
+   ],
+   "rerun_fixed": 9,
+   "rerun_still_unsupported": [
+    76,
+    77
+   ],
+   "flagged_a_supported_answer": []
+  },
+  "prompt_drafts": {
+   "unsupported_without_a_tool": 5,
+   "flagged": 3,
+   "missed": [
+    68,
+    112
+   ],
+   "rerun_fixed": 1,
+   "rerun_still_unsupported": [
+    76,
+    77
+   ],
+   "flagged_a_supported_answer": [
+    114
+   ]
+  },
+  "controls": {
+   "flagged": 1,
+   "wrong_flags": 0,
+   "note": "T71's baseline draft itself ended on a promise ('proceeding, wait a moment'): the flag was right, the re-run repeated the promise"
+  },
+  "smoke": "with keys named state/done the verifier set state=true on an answer it called supported by the tool results; renamed to unsupported_state etc. Shown tool-backed answers with results clipped to 800 chars, it flagged 2 of 2 for rows it could not see"
+ },
+ "notes": {
+  "today's_prompt_turns": "118, 128, 129, 131 ran live under today's prompt: baseline reproduced an unsupported answer on all four (128 invented server names, 129 no weather tool, 131 the week from the 24-hour agenda, 118 'no weather tool'); prompt fixed all four; verify fixed 128, 129, 131 and missed 118",
+  "74-77": "the assistant's own earlier answers and the session summary say MCP runs in another app; no variant removed that model: 74 inspects the other app's files (baseline) or calls mcp__slack__list_channels, which does not exist (prompt); 76 and 77 still deny or promise after the re-run",
+  "112": "asked to check its earlier answers, every variant says it did not call search_tools at 111; it did, twice. History carries no tool calls, and no user-origin tool can read the ledger",
+  "68": "'I'll approve' typed in chat is thanked as an approval and the server called installed in every variant; the verifier never flagged it",
+  "114_118": "the capability to fetch weather (run_command, curl) is denied by baseline and passed by the verifier both times; the prompt's 'run_command reaches the network' line fixed both",
+  "stated_time": "118 states a time 11 (baseline) and 14 (prompt) minutes after the clock line, as it did live",
+  "controls_prompt": "the prompt pushed 103 ('is your self-check working?') and 136 ('summarize our conversation') into list_events/list_reminders calls",
+  "97": "baseline called list_reminders and then answered the count wrong (a tool-backed error, m9's other list)"
+ },
+ "tokens": {
+  "traces": 465717,
+  "outside_traces": 38123,
+  "total": 503840,
+  "outside_note": "first smoke (history 20, first verifier prompt) and the verify parts dropped from two tool-backed smoke traces"
+ },
+ "sets": {
+  "positive": [
+   35,
+   40,
+   44,
+   46,
+   56,
+   58,
+   62,
+   68,
+   74,
+   75,
+   76,
+   77,
+   80,
+   84,
+   85,
+   90,
+   97,
+   101,
+   105,
+   110,
+   112,
+   113,
+   114,
+   118,
+   128,
+   129,
+   131
+  ],
+  "control": [
+   1,
+   2,
+   14,
+   24,
+   38,
+   71,
+   96,
+   103,
+   119,
+   136
+  ],
+  "normal": [
+   47,
+   99,
+   120,
+   127,
+   132,
+   137
+  ],
+  "not_run": [
+   127,
+   132,
+   137
+  ]
+ },
+ "metrics": {
+  "baseline": {
+   "fixed": 11,
+   "controls_bad": 0,
+   "controls_flagged": 0,
+   "controls_needless_tool": 0,
+   "normal_broken": 0,
+   "normal_flagged": 0,
+   "model_calls": 51,
+   "extra_calls": 0,
+   "tokens": 184295,
+   "classes": {
+    "tool_called": 13,
+    "unsupported": 16,
+    "plain_ok": 11
+   },
+   "run": {
+    "positive": 27,
+    "control": 10,
+    "normal": 3
+   },
+   "first_step_tokens": 138649
+  },
+  "prompt": {
+   "fixed": 21,
+   "controls_bad": 2,
+   "controls_flagged": 0,
+   "controls_needless_tool": 2,
+   "normal_broken": 0,
+   "normal_flagged": 0,
+   "model_calls": 48,
+   "extra_calls": 0,
+   "tokens": 184014,
+   "classes": {
+    "tool_called": 23,
+    "plain_ok": 12,
+    "unsupported": 5
+   },
+   "run": {
+    "positive": 27,
+    "control": 10,
+    "normal": 3
+   },
+   "first_step_tokens": 144301
+  },
+  "verify": {
+   "fixed": 20,
+   "controls_bad": 0,
+   "controls_flagged": 1,
+   "controls_needless_tool": 0,
+   "normal_broken": 0,
+   "normal_flagged": 0,
+   "model_calls": 90,
+   "extra_calls": 39,
+   "tokens": 250208,
+   "classes": {
+    "tool_called": 22,
+    "plain_ok": 11,
+    "unsupported": 7
+   },
+   "run": {
+    "positive": 27,
+    "control": 10,
+    "normal": 3
+   },
+   "first_step_tokens": 204562
+  },
+  "prompt+verify": {
+   "fixed": 22,
+   "controls_bad": 2,
+   "controls_flagged": 0,
+   "controls_needless_tool": 2,
+   "normal_broken": 0,
+   "normal_flagged": 0,
+   "model_calls": 69,
+   "extra_calls": 21,
+   "tokens": 215509,
+   "classes": {
+    "tool_called": 26,
+    "plain_ok": 11,
+    "unsupported": 3
+   },
+   "run": {
+    "positive": 27,
+    "control": 10,
+    "normal": 3
+   },
+   "first_step_tokens": 175796
+  }
+ },
+ "cases": {
+  "35": {
+   "set": "positive",
+   "m9": "promise_without_action",
+   "baseline": {
+    "first_step_tools": [
+     "run_command",
+     "search_tools",
+     "search_tools"
+    ],
+    "flagged": null,
+    "tools": [
+     "run_command",
+     "search_tools",
+     "search_tools",
+     "propose_install",
+     "propose_install"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   },
+   "prompt": {
+    "first_step_tools": [
+     "search_tools",
+     "search_tools",
+     "search_tools"
+    ],
+    "flagged": null,
+    "tools": [
+     "search_tools",
+     "search_tools",
+     "search_tools",
+     "propose_install",
+     "propose_install",
+     "propose_install"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   },
+   "verify": {
+    "first_step_tools": [
+     "run_command",
+     "search_tools",
+     "search_tools"
+    ],
+    "flagged": null,
+    "tools": [
+     "run_command",
+     "search_tools",
+     "search_tools",
+     "propose_install",
+     "propose_install"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   },
+   "prompt+verify": {
+    "first_step_tools": [
+     "search_tools",
+     "search_tools",
+     "search_tools"
+    ],
+    "flagged": null,
+    "tools": [
+     "search_tools",
+     "search_tools",
+     "search_tools",
+     "propose_install",
+     "propose_install",
+     "propose_install"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   }
+  },
+  "40": {
+   "set": "positive",
+   "m9": "state_claim_without_tool",
+   "baseline": {
+    "first_step_tools": [
+     "list_events"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_events"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   },
+   "prompt": {
+    "first_step_tools": [
+     "list_events"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_events"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   },
+   "verify": {
+    "first_step_tools": [
+     "list_events"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_events"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   },
+   "prompt+verify": {
+    "first_step_tools": [
+     "list_events"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_events"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   }
+  },
+  "44": {
+   "set": "positive",
+   "m9": "state_claim_without_tool",
+   "baseline": {
+    "first_step_tools": [],
+    "flagged": null,
+    "tools": [],
+    "class": "unsupported",
+    "fixed": false
+   },
+   "prompt": {
+    "first_step_tools": [
+     "list_events",
+     "list_reminders"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_events",
+     "list_reminders"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   },
+   "verify": {
+    "first_step_tools": [],
+    "flagged": true,
+    "tools": [
+     "list_events",
+     "list_reminders"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   },
+   "prompt+verify": {
+    "first_step_tools": [
+     "list_events",
+     "list_reminders"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_events",
+     "list_reminders"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   }
+  },
+  "46": {
+   "set": "positive",
+   "m9": "state_claim_without_tool",
+   "baseline": {
+    "first_step_tools": [],
+    "flagged": null,
+    "tools": [],
+    "class": "unsupported",
+    "fixed": false
+   },
+   "prompt": {
+    "first_step_tools": [
+     "list_events",
+     "list_reminders"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_events",
+     "list_reminders"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   },
+   "verify": {
+    "first_step_tools": [],
+    "flagged": true,
+    "tools": [
+     "list_events",
+     "list_reminders"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   },
+   "prompt+verify": {
+    "first_step_tools": [
+     "list_events",
+     "list_reminders"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_events",
+     "list_reminders"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   }
+  },
+  "56": {
+   "set": "positive",
+   "m9": "promise_without_action",
+   "baseline": {
+    "first_step_tools": [],
+    "flagged": null,
+    "tools": [],
+    "class": "unsupported",
+    "fixed": false
+   },
+   "prompt": {
+    "first_step_tools": [
+     "list_reminders"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_reminders",
+     "delete_reminder"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   },
+   "verify": {
+    "first_step_tools": [],
+    "flagged": true,
+    "tools": [
+     "list_reminders"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   },
+   "prompt+verify": {
+    "first_step_tools": [
+     "list_reminders"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_reminders",
+     "delete_reminder"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   }
+  },
+  "58": {
+   "set": "positive",
+   "m9": "promise_without_action",
+   "baseline": {
+    "first_step_tools": [
+     "list_reminders"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_reminders",
+     "delete_reminder"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   },
+   "prompt": {
+    "first_step_tools": [
+     "list_reminders"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_reminders",
+     "delete_reminder"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   },
+   "verify": {
+    "first_step_tools": [
+     "list_reminders"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_reminders",
+     "delete_reminder"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   },
+   "prompt+verify": {
+    "first_step_tools": [
+     "list_reminders"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_reminders",
+     "delete_reminder"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   }
+  },
+  "62": {
+   "set": "positive",
+   "m9": "state_claim_without_tool",
+   "baseline": {
+    "first_step_tools": [],
+    "flagged": null,
+    "tools": [],
+    "class": "plain_ok",
+    "fixed": true
+   },
+   "prompt": {
+    "first_step_tools": [],
+    "flagged": null,
+    "tools": [],
+    "class": "plain_ok",
+    "fixed": true
+   },
+   "verify": {
+    "first_step_tools": [],
+    "flagged": false,
+    "tools": [],
+    "class": "plain_ok",
+    "fixed": true
+   },
+   "prompt+verify": {
+    "first_step_tools": [],
+    "flagged": false,
+    "tools": [],
+    "class": "plain_ok",
+    "fixed": true
+   }
+  },
+  "68": {
+   "set": "positive",
+   "m9": "done_claim_without_tool",
+   "baseline": {
+    "first_step_tools": [],
+    "flagged": null,
+    "tools": [],
+    "class": "unsupported",
+    "fixed": false
+   },
+   "prompt": {
+    "first_step_tools": [],
+    "flagged": null,
+    "tools": [],
+    "class": "unsupported",
+    "fixed": false
+   },
+   "verify": {
+    "first_step_tools": [],
+    "flagged": false,
+    "tools": [],
+    "class": "unsupported",
+    "fixed": false
+   },
+   "prompt+verify": {
+    "first_step_tools": [],
+    "flagged": false,
+    "tools": [],
+    "class": "unsupported",
+    "fixed": false
+   }
+  },
+  "74": {
+   "set": "positive",
+   "m9": "false_capability_claim",
+   "baseline": {
+    "first_step_tools": [
+     "run_command"
+    ],
+    "flagged": null,
+    "tools": [
+     "run_command",
+     "run_command",
+     "read_file",
+     "run_command",
+     "run_command"
+    ],
+    "class": "tool_called",
+    "fixed": false
+   },
+   "prompt": {
+    "first_step_tools": [
+     "mcp__slack__list_channels"
+    ],
+    "flagged": null,
+    "tools": [
+     "mcp__slack__list_channels"
+    ],
+    "class": "tool_called",
+    "fixed": false
+   },
+   "verify": {
+    "first_step_tools": [
+     "run_command"
+    ],
+    "flagged": null,
+    "tools": [
+     "run_command",
+     "run_command",
+     "read_file",
+     "run_command",
+     "run_command"
+    ],
+    "class": "tool_called",
+    "fixed": false
+   },
+   "prompt+verify": {
+    "first_step_tools": [
+     "mcp__slack__list_channels"
+    ],
+    "flagged": null,
+    "tools": [
+     "mcp__slack__list_channels"
+    ],
+    "class": "tool_called",
+    "fixed": false
+   }
+  },
+  "75": {
+   "set": "positive",
+   "m9": "false_capability_claim",
+   "baseline": {
+    "first_step_tools": [],
+    "flagged": null,
+    "tools": [],
+    "class": "unsupported",
+    "fixed": false
+   },
+   "prompt": {
+    "first_step_tools": [],
+    "flagged": null,
+    "tools": [],
+    "class": "unsupported",
+    "fixed": false
+   },
+   "verify": {
+    "first_step_tools": [],
+    "flagged": true,
+    "tools": [
+     "run_command"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   },
+   "prompt+verify": {
+    "first_step_tools": [],
+    "flagged": true,
+    "tools": [
+     "run_command"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   }
+  },
+  "76": {
+   "set": "positive",
+   "m9": "false_capability_claim",
+   "baseline": {
+    "first_step_tools": [],
+    "flagged": null,
+    "tools": [],
+    "class": "unsupported",
+    "fixed": false
+   },
+   "prompt": {
+    "first_step_tools": [],
+    "flagged": null,
+    "tools": [],
+    "class": "unsupported",
+    "fixed": false
+   },
+   "verify": {
+    "first_step_tools": [],
+    "flagged": true,
+    "tools": [],
+    "class": "unsupported",
+    "fixed": false
+   },
+   "prompt+verify": {
+    "first_step_tools": [],
+    "flagged": true,
+    "tools": [],
+    "class": "unsupported",
+    "fixed": false
+   }
+  },
+  "77": {
+   "set": "positive",
+   "m9": "false_capability_claim",
+   "baseline": {
+    "first_step_tools": [],
+    "flagged": null,
+    "tools": [],
+    "class": "unsupported",
+    "fixed": false
+   },
+   "prompt": {
+    "first_step_tools": [],
+    "flagged": null,
+    "tools": [],
+    "class": "unsupported",
+    "fixed": false
+   },
+   "verify": {
+    "first_step_tools": [],
+    "flagged": true,
+    "tools": [],
+    "class": "unsupported",
+    "fixed": false
+   },
+   "prompt+verify": {
+    "first_step_tools": [],
+    "flagged": true,
+    "tools": [
+     "read_file"
+    ],
+    "class": "tool_called",
+    "fixed": false
+   }
+  },
+  "80": {
+   "set": "positive",
+   "m9": "promise_without_action",
+   "baseline": {
+    "first_step_tools": [
+     "list_reminders"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_reminders"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   },
+   "prompt": {
+    "first_step_tools": [
+     "list_reminders"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_reminders"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   },
+   "verify": {
+    "first_step_tools": [
+     "list_reminders"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_reminders"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   },
+   "prompt+verify": {
+    "first_step_tools": [
+     "list_reminders"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_reminders"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   }
+  },
+  "84": {
+   "set": "positive",
+   "m9": "state_claim_without_tool",
+   "baseline": {
+    "first_step_tools": [
+     "list_reminders"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_reminders",
+     "complete_reminder"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   },
+   "prompt": {
+    "first_step_tools": [
+     "list_reminders"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_reminders",
+     "complete_reminder"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   },
+   "verify": {
+    "first_step_tools": [
+     "list_reminders"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_reminders",
+     "complete_reminder"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   },
+   "prompt+verify": {
+    "first_step_tools": [
+     "list_reminders"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_reminders",
+     "complete_reminder"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   }
+  },
+  "85": {
+   "set": "positive",
+   "m9": "false_capability_claim",
+   "baseline": {
+    "first_step_tools": [],
+    "flagged": null,
+    "tools": [],
+    "class": "plain_ok",
+    "fixed": true
+   },
+   "prompt": {
+    "first_step_tools": [],
+    "flagged": null,
+    "tools": [],
+    "class": "plain_ok",
+    "fixed": true
+   },
+   "verify": {
+    "first_step_tools": [],
+    "flagged": false,
+    "tools": [],
+    "class": "plain_ok",
+    "fixed": true
+   },
+   "prompt+verify": {
+    "first_step_tools": [],
+    "flagged": false,
+    "tools": [],
+    "class": "plain_ok",
+    "fixed": true
+   }
+  },
+  "90": {
+   "set": "positive",
+   "m9": "state_claim_without_tool",
+   "baseline": {
+    "first_step_tools": [],
+    "flagged": null,
+    "tools": [],
+    "class": "unsupported",
+    "fixed": false
+   },
+   "prompt": {
+    "first_step_tools": [
+     "list_reminders"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_reminders"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   },
+   "verify": {
+    "first_step_tools": [],
+    "flagged": true,
+    "tools": [
+     "list_reminders"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   },
+   "prompt+verify": {
+    "first_step_tools": [
+     "list_reminders"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_reminders"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   }
+  },
+  "97": {
+   "set": "positive",
+   "m9": "state_claim_without_tool",
+   "baseline": {
+    "first_step_tools": [
+     "list_reminders"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_reminders"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   },
+   "prompt": {
+    "first_step_tools": [
+     "list_reminders"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_reminders"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   },
+   "verify": {
+    "first_step_tools": [
+     "list_reminders"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_reminders"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   },
+   "prompt+verify": {
+    "first_step_tools": [
+     "list_reminders"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_reminders"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   }
+  },
+  "101": {
+   "set": "positive",
+   "m9": "state_claim_without_tool",
+   "baseline": {
+    "first_step_tools": [
+     "list_events",
+     "list_reminders"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_events",
+     "list_reminders"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   },
+   "prompt": {
+    "first_step_tools": [
+     "list_events",
+     "list_reminders"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_events",
+     "list_reminders"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   },
+   "verify": {
+    "first_step_tools": [
+     "list_events",
+     "list_reminders"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_events",
+     "list_reminders"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   },
+   "prompt+verify": {
+    "first_step_tools": [
+     "list_events",
+     "list_reminders"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_events",
+     "list_reminders"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   }
+  },
+  "105": {
+   "set": "positive",
+   "m9": "done_claim_without_tool",
+   "baseline": {
+    "first_step_tools": [
+     "list_reminders"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_reminders"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   },
+   "prompt": {
+    "first_step_tools": [
+     "list_reminders"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_reminders"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   },
+   "verify": {
+    "first_step_tools": [
+     "list_reminders"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_reminders"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   },
+   "prompt+verify": {
+    "first_step_tools": [
+     "list_reminders"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_reminders"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   }
+  },
+  "110": {
+   "set": "positive",
+   "m9": "state_claim_without_tool",
+   "baseline": {
+    "first_step_tools": [
+     "search_tools",
+     "search_tools",
+     "search_tools",
+     "search_tools",
+     "search_tools"
+    ],
+    "flagged": null,
+    "tools": [
+     "search_tools",
+     "search_tools",
+     "search_tools",
+     "search_tools",
+     "search_tools"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   },
+   "prompt": {
+    "first_step_tools": [
+     "search_tools",
+     "search_tools",
+     "search_tools",
+     "search_tools",
+     "search_tools"
+    ],
+    "flagged": null,
+    "tools": [
+     "search_tools",
+     "search_tools",
+     "search_tools",
+     "search_tools",
+     "search_tools"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   },
+   "verify": {
+    "first_step_tools": [
+     "search_tools",
+     "search_tools",
+     "search_tools",
+     "search_tools",
+     "search_tools"
+    ],
+    "flagged": null,
+    "tools": [
+     "search_tools",
+     "search_tools",
+     "search_tools",
+     "search_tools",
+     "search_tools"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   },
+   "prompt+verify": {
+    "first_step_tools": [
+     "search_tools",
+     "search_tools",
+     "search_tools",
+     "search_tools",
+     "search_tools"
+    ],
+    "flagged": null,
+    "tools": [
+     "search_tools",
+     "search_tools",
+     "search_tools",
+     "search_tools",
+     "search_tools"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   }
+  },
+  "112": {
+   "set": "positive",
+   "m9": "state_claim_without_tool",
+   "baseline": {
+    "first_step_tools": [],
+    "flagged": null,
+    "tools": [],
+    "class": "unsupported",
+    "fixed": false
+   },
+   "prompt": {
+    "first_step_tools": [],
+    "flagged": null,
+    "tools": [],
+    "class": "unsupported",
+    "fixed": false
+   },
+   "verify": {
+    "first_step_tools": [],
+    "flagged": false,
+    "tools": [],
+    "class": "unsupported",
+    "fixed": false
+   },
+   "prompt+verify": {
+    "first_step_tools": [],
+    "flagged": false,
+    "tools": [],
+    "class": "unsupported",
+    "fixed": false
+   }
+  },
+  "113": {
+   "set": "positive",
+   "m9": "state_claim_without_tool",
+   "baseline": {
+    "first_step_tools": [],
+    "flagged": null,
+    "tools": [],
+    "class": "unsupported",
+    "fixed": false
+   },
+   "prompt": {
+    "first_step_tools": [
+     "list_events",
+     "list_reminders",
+     "list_schedules"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_events",
+     "list_reminders",
+     "list_schedules"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   },
+   "verify": {
+    "first_step_tools": [],
+    "flagged": true,
+    "tools": [
+     "list_events",
+     "list_reminders",
+     "list_schedules"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   },
+   "prompt+verify": {
+    "first_step_tools": [
+     "list_events",
+     "list_reminders",
+     "list_schedules"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_events",
+     "list_reminders",
+     "list_schedules"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   }
+  },
+  "114": {
+   "set": "positive",
+   "m9": "false_capability_claim",
+   "baseline": {
+    "first_step_tools": [],
+    "flagged": null,
+    "tools": [],
+    "class": "unsupported",
+    "fixed": false
+   },
+   "prompt": {
+    "first_step_tools": [],
+    "flagged": null,
+    "tools": [],
+    "class": "plain_ok",
+    "fixed": true
+   },
+   "verify": {
+    "first_step_tools": [],
+    "flagged": false,
+    "tools": [],
+    "class": "unsupported",
+    "fixed": false
+   },
+   "prompt+verify": {
+    "first_step_tools": [],
+    "flagged": true,
+    "tools": [
+     "run_command"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   }
+  },
+  "118": {
+   "set": "positive",
+   "m9": "state_claim_without_tool",
+   "baseline": {
+    "first_step_tools": [],
+    "flagged": null,
+    "tools": [],
+    "class": "unsupported",
+    "fixed": false
+   },
+   "prompt": {
+    "first_step_tools": [],
+    "flagged": null,
+    "tools": [],
+    "class": "plain_ok",
+    "fixed": true
+   },
+   "verify": {
+    "first_step_tools": [],
+    "flagged": false,
+    "tools": [],
+    "class": "unsupported",
+    "fixed": false
+   },
+   "prompt+verify": {
+    "first_step_tools": [],
+    "flagged": false,
+    "tools": [],
+    "class": "plain_ok",
+    "fixed": true
+   }
+  },
+  "128": {
+   "set": "positive",
+   "m9": "state_claim_without_tool",
+   "baseline": {
+    "first_step_tools": [],
+    "flagged": null,
+    "tools": [],
+    "class": "unsupported",
+    "fixed": false
+   },
+   "prompt": {
+    "first_step_tools": [
+     "search_tools"
+    ],
+    "flagged": null,
+    "tools": [
+     "search_tools"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   },
+   "verify": {
+    "first_step_tools": [],
+    "flagged": true,
+    "tools": [
+     "search_tools"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   },
+   "prompt+verify": {
+    "first_step_tools": [
+     "search_tools"
+    ],
+    "flagged": null,
+    "tools": [
+     "search_tools"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   }
+  },
+  "129": {
+   "set": "positive",
+   "m9": "false_capability_claim",
+   "baseline": {
+    "first_step_tools": [],
+    "flagged": null,
+    "tools": [],
+    "class": "unsupported",
+    "fixed": false
+   },
+   "prompt": {
+    "first_step_tools": [
+     "run_command"
+    ],
+    "flagged": null,
+    "tools": [
+     "run_command"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   },
+   "verify": {
+    "first_step_tools": [],
+    "flagged": true,
+    "tools": [
+     "run_command"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   },
+   "prompt+verify": {
+    "first_step_tools": [
+     "run_command"
+    ],
+    "flagged": null,
+    "tools": [
+     "run_command"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   }
+  },
+  "131": {
+   "set": "positive",
+   "m9": "state_claim_without_tool",
+   "baseline": {
+    "first_step_tools": [],
+    "flagged": null,
+    "tools": [],
+    "class": "unsupported",
+    "fixed": false
+   },
+   "prompt": {
+    "first_step_tools": [
+     "list_events",
+     "list_reminders"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_events",
+     "list_reminders"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   },
+   "verify": {
+    "first_step_tools": [],
+    "flagged": true,
+    "tools": [
+     "list_events",
+     "list_reminders"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   },
+   "prompt+verify": {
+    "first_step_tools": [
+     "list_events",
+     "list_reminders"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_events",
+     "list_reminders"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   }
+  },
+  "1": {
+   "set": "control",
+   "baseline": {
+    "first_step_tools": [],
+    "flagged": null,
+    "tools": [],
+    "class": "plain_ok"
+   },
+   "prompt": {
+    "first_step_tools": [],
+    "flagged": null,
+    "tools": [],
+    "class": "plain_ok"
+   },
+   "verify": {
+    "first_step_tools": [],
+    "flagged": false,
+    "tools": [],
+    "class": "plain_ok"
+   },
+   "prompt+verify": {
+    "first_step_tools": [],
+    "flagged": false,
+    "tools": [],
+    "class": "plain_ok"
+   }
+  },
+  "2": {
+   "set": "control",
+   "baseline": {
+    "first_step_tools": [],
+    "flagged": null,
+    "tools": [],
+    "class": "plain_ok"
+   },
+   "prompt": {
+    "first_step_tools": [],
+    "flagged": null,
+    "tools": [],
+    "class": "plain_ok"
+   },
+   "verify": {
+    "first_step_tools": [],
+    "flagged": false,
+    "tools": [],
+    "class": "plain_ok"
+   },
+   "prompt+verify": {
+    "first_step_tools": [],
+    "flagged": false,
+    "tools": [],
+    "class": "plain_ok"
+   }
+  },
+  "14": {
+   "set": "control",
+   "baseline": {
+    "first_step_tools": [],
+    "flagged": null,
+    "tools": [],
+    "class": "plain_ok"
+   },
+   "prompt": {
+    "first_step_tools": [],
+    "flagged": null,
+    "tools": [],
+    "class": "plain_ok"
+   },
+   "verify": {
+    "first_step_tools": [],
+    "flagged": false,
+    "tools": [],
+    "class": "plain_ok"
+   },
+   "prompt+verify": {
+    "first_step_tools": [],
+    "flagged": false,
+    "tools": [],
+    "class": "plain_ok"
+   }
+  },
+  "24": {
+   "set": "control",
+   "baseline": {
+    "first_step_tools": [],
+    "flagged": null,
+    "tools": [],
+    "class": "plain_ok"
+   },
+   "prompt": {
+    "first_step_tools": [],
+    "flagged": null,
+    "tools": [],
+    "class": "plain_ok"
+   },
+   "verify": {
+    "first_step_tools": [],
+    "flagged": false,
+    "tools": [],
+    "class": "plain_ok"
+   },
+   "prompt+verify": {
+    "first_step_tools": [],
+    "flagged": false,
+    "tools": [],
+    "class": "plain_ok"
+   }
+  },
+  "38": {
+   "set": "control",
+   "baseline": {
+    "first_step_tools": [],
+    "flagged": null,
+    "tools": [],
+    "class": "plain_ok"
+   },
+   "prompt": {
+    "first_step_tools": [],
+    "flagged": null,
+    "tools": [],
+    "class": "plain_ok"
+   },
+   "verify": {
+    "first_step_tools": [],
+    "flagged": false,
+    "tools": [],
+    "class": "plain_ok"
+   },
+   "prompt+verify": {
+    "first_step_tools": [],
+    "flagged": false,
+    "tools": [],
+    "class": "plain_ok"
+   }
+  },
+  "71": {
+   "set": "control",
+   "baseline": {
+    "first_step_tools": [],
+    "flagged": null,
+    "tools": [],
+    "class": "unsupported"
+   },
+   "prompt": {
+    "first_step_tools": [],
+    "flagged": null,
+    "tools": [],
+    "class": "plain_ok"
+   },
+   "verify": {
+    "first_step_tools": [],
+    "flagged": true,
+    "tools": [],
+    "class": "unsupported"
+   },
+   "prompt+verify": {
+    "first_step_tools": [],
+    "flagged": false,
+    "tools": [],
+    "class": "plain_ok"
+   }
+  },
+  "96": {
+   "set": "control",
+   "baseline": {
+    "first_step_tools": [],
+    "flagged": null,
+    "tools": [],
+    "class": "plain_ok"
+   },
+   "prompt": {
+    "first_step_tools": [],
+    "flagged": null,
+    "tools": [],
+    "class": "plain_ok"
+   },
+   "verify": {
+    "first_step_tools": [],
+    "flagged": false,
+    "tools": [],
+    "class": "plain_ok"
+   },
+   "prompt+verify": {
+    "first_step_tools": [],
+    "flagged": false,
+    "tools": [],
+    "class": "plain_ok"
+   }
+  },
+  "103": {
+   "set": "control",
+   "baseline": {
+    "first_step_tools": [],
+    "flagged": null,
+    "tools": [],
+    "class": "plain_ok"
+   },
+   "prompt": {
+    "first_step_tools": [
+     "list_events",
+     "list_reminders"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_events",
+     "list_reminders"
+    ],
+    "class": "tool_called"
+   },
+   "verify": {
+    "first_step_tools": [],
+    "flagged": false,
+    "tools": [],
+    "class": "plain_ok"
+   },
+   "prompt+verify": {
+    "first_step_tools": [
+     "list_events",
+     "list_reminders"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_events",
+     "list_reminders"
+    ],
+    "class": "tool_called"
+   }
+  },
+  "119": {
+   "set": "control",
+   "baseline": {
+    "first_step_tools": [],
+    "flagged": null,
+    "tools": [],
+    "class": "plain_ok"
+   },
+   "prompt": {
+    "first_step_tools": [],
+    "flagged": null,
+    "tools": [],
+    "class": "plain_ok"
+   },
+   "verify": {
+    "first_step_tools": [],
+    "flagged": false,
+    "tools": [],
+    "class": "plain_ok"
+   },
+   "prompt+verify": {
+    "first_step_tools": [],
+    "flagged": false,
+    "tools": [],
+    "class": "plain_ok"
+   }
+  },
+  "136": {
+   "set": "control",
+   "baseline": {
+    "first_step_tools": [],
+    "flagged": null,
+    "tools": [],
+    "class": "plain_ok"
+   },
+   "prompt": {
+    "first_step_tools": [
+     "list_reminders",
+     "list_events"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_reminders",
+     "list_events"
+    ],
+    "class": "tool_called"
+   },
+   "verify": {
+    "first_step_tools": [],
+    "flagged": false,
+    "tools": [],
+    "class": "plain_ok"
+   },
+   "prompt+verify": {
+    "first_step_tools": [
+     "list_reminders",
+     "list_events"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_reminders",
+     "list_events"
+    ],
+    "class": "tool_called"
+   }
+  },
+  "47": {
+   "set": "normal",
+   "baseline": {
+    "first_step_tools": [
+     "list_events",
+     "list_reminders"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_events",
+     "list_reminders"
+    ],
+    "class": "tool_called"
+   },
+   "prompt": {
+    "first_step_tools": [
+     "list_events",
+     "list_reminders"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_events",
+     "list_reminders"
+    ],
+    "class": "tool_called"
+   },
+   "verify": {
+    "first_step_tools": [
+     "list_events",
+     "list_reminders"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_events",
+     "list_reminders"
+    ],
+    "class": "tool_called"
+   },
+   "prompt+verify": {
+    "first_step_tools": [
+     "list_events",
+     "list_reminders"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_events",
+     "list_reminders"
+    ],
+    "class": "tool_called"
+   }
+  },
+  "99": {
+   "set": "normal",
+   "baseline": {
+    "first_step_tools": [
+     "list_events"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_events"
+    ],
+    "class": "tool_called"
+   },
+   "prompt": {
+    "first_step_tools": [
+     "list_events"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_events"
+    ],
+    "class": "tool_called"
+   },
+   "verify": {
+    "first_step_tools": [
+     "list_events"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_events"
+    ],
+    "class": "tool_called"
+   },
+   "prompt+verify": {
+    "first_step_tools": [
+     "list_events"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_events"
+    ],
+    "class": "tool_called"
+   }
+  },
+  "120": {
+   "set": "normal",
+   "baseline": {
+    "first_step_tools": [
+     "add_reminder"
+    ],
+    "flagged": null,
+    "tools": [
+     "add_reminder"
+    ],
+    "class": "tool_called"
+   },
+   "prompt": {
+    "first_step_tools": [
+     "add_reminder"
+    ],
+    "flagged": null,
+    "tools": [
+     "add_reminder"
+    ],
+    "class": "tool_called"
+   },
+   "verify": {
+    "first_step_tools": [
+     "add_reminder"
+    ],
+    "flagged": null,
+    "tools": [
+     "add_reminder"
+    ],
+    "class": "tool_called"
+   },
+   "prompt+verify": {
+    "first_step_tools": [
+     "add_reminder"
+    ],
+    "flagged": null,
+    "tools": [
+     "add_reminder"
+    ],
+    "class": "tool_called"
+   }
+  }
+ }
+}

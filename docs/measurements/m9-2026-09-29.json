@@ -1,0 +1,39 @@
+{
+  "date": "2026-09-29",
+  "source": "live ledger, 2026-09-25..29, user-origin turns; every answer read and classified by hand",
+  "turns": {"user_origin": 137, "answered": 118, "answered_without_a_tool_result": 60},
+  "unsupported": {
+    "state_claim_without_tool": [40, 44, 46, 62, 84, 90, 97, 101, 110, 112, 113, 118, 128, 131],
+    "done_claim_without_tool": [68, 105],
+    "promise_without_action": [35, 56, 58, 80],
+    "false_capability_claim": [74, 75, 76, 77, 85, 114, 129],
+    "total": 27,
+    "share_of_answered": 0.23
+  },
+  "tool_called_but_answer_wrong": {"turns": [23, 42, 43, 45, 57, 82], "total": 6,
+    "note": "42-45 epoch timestamps (fixed b5d3c84), 57 and 82 wrong tool (fixed D38), 23 a failed call read as an empty list"},
+  "after_c749e17": {
+    "long_session": {"answered": 9, "unsupported": [118, 128, 129]},
+    "new_session": {"answered": 5, "unsupported": [131],
+      "note": "131 answered a question about the week from the 24-hour agenda alone"}
+  },
+  "stated_time": {"off_by_minutes": {"99": 12, "118": 10}, "note": "both ahead of the turn's own clock line"},
+  "memory": {
+    "edit_memory_calls": 0,
+    "passes": {"total": 14, "ran": 9, "outage": 5, "applied": 0, "proposed": 0},
+    "standing_instructions_by_the_user": [81, 100, 109, 132],
+    "written_down": 0,
+    "replay": [
+      {"variant": "current", "since": 4882, "upto": 5087, "steps": 2, "calls": ["read_ledger"], "edits": 0, "tokens": 4039},
+      {"variant": "current", "since": 3194, "upto": 3641, "steps": 3, "calls": ["read_ledger", "search_memory"], "edits": 0, "tokens": 11313},
+      {"variant": "no_summary", "since": 4882, "upto": 5087, "steps": 3, "calls": ["read_ledger", "search_memory"], "edits": 0, "tokens": 6332},
+      {"variant": "no_summary", "since": 3194, "upto": 3641, "steps": 4, "calls": ["read_ledger", "search_memory", "edit_memory"], "edits": 1, "edit_targets": ["wiki"], "tokens": 15923}
+    ]
+  },
+  "registry": {
+    "tool_calls": 28, "failed_on_read_timeout": 10, "empty_result": 7,
+    "seconds": {"min": 1.2, "max": 24.5},
+    "same_queries_on_2026-09-29_afternoon_s": [0.9, 2.0],
+    "full_mirror": {"servers": 37181, "pages": 372, "megabytes": 33.6, "seconds": 462, "slowest_page_s": 2.3}
+  }
+}

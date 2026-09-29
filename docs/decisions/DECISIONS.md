@@ -316,3 +316,106 @@ turn; a question about the week still needs the tools. Calendar titles are third
 now sit in a system message - clipped and single-line, but a longer injection bench (m3) has not
 been re-run over it. — *Reversed if* m3 over the agenda shows a title steering the model: then
 the agenda moves into a tool-result-shaped message.
+
+## 2026-09-29 — Before partition 8 (owner's choices on six questions)
+
+**D43. Partition 8 is trust in the answer plus the security bundle; it starts with a measurement
+and nothing else.** The measurement reads the live ledger (no model credits): how often the
+assistant states what the calendar, reminders or memory hold, or that something is done, with no
+tool result in that turn; how far a stated time is from the turn's `now_line`; and why memory
+was never written. Five days of use (152 turns): `edit_memory` was called zero times, nine
+consolidation passes ran and applied and proposed nothing, no `wiki/` directory exists, and the
+owner's own standing instruction was written down by neither the turn nor the pass. The fix's
+scope is decided from the numbers. The secret-input path, D40 and ledger file modes are the
+security bundle; the ARCHITECTURE pair's stale opening and the small live defects ride in the
+same partition. The screen waits until the functions under it are steady (D35 stands). —
+*Reversed if* the measurement shows the unsupported statements come from one session's history
+and not from the model's habit: then D41 already fixed it and the partition is the security
+bundle alone.
+
+**D44. Tool discovery and verification move out of the assistant into a server; the sandboxed
+trial and the install stay local** (amends D14; D3's "built by a teammate" no longer holds - the
+owner's team builds it). The server indexes the MCP registry, ranked GitHub repositories and
+tool and skill repositories, and answers with connection-spec candidates whose license,
+malicious-scan and maintenance fields it filled. A verdict is the same for every user, so it is
+computed once; a trial needs the user's credentials and an install writes the user's files. All
+ten tool timeouts in five days of use were the official registry's own read timing out. —
+*Reversed if* the index cannot be kept fresh on the hardware available: then search alone moves
+and verification stays where it is.
+
+**D45. The server speaks MCP, is designed after partition 8 in its own repository, and runs on
+the owner's laptop first.** The assistant reaches it through the MCP client it already has, and
+the built-in `search_tools` is deleted when the server lands; any other assistant can attach the
+same way (D2). Hosting, the public address and who pays are open and decided with the design. —
+*Reversed if* the design session finds the approval flow needs a field MCP tool results cannot
+carry: then an HTTP API in the registry's shape, behind the `registry` option that exists.
+
+## 2026-09-29 — After m9 (owner's choices on three questions)
+
+**D46. `search_tools` and `propose_install` read a local mirror of the registry, searched by
+name and description; the catalog sense refreshes it in the background.** 10 of 28 registry
+calls timed out and 7 came back empty because the registry matches a substring of the name and
+answers in 1 to 25 seconds. The tool-call ceilings stay where they are: the ceiling was never
+the defect. The first sync is about eight minutes and 34 MB. — *Reversed when* the server of
+D44 lands: the mirror becomes its indexer and the assistant's copy is deleted.
+
+**D47. A consolidation pass is two calls - one that writes, then one that summarizes - and the
+writing prompt has a place for the owner's standing instructions.** In five days nothing was
+written; the replay made 0 edits with the shipped prompt and wrote once without its summary
+paragraph. — The cost is one more model call per pass. — *Reversed if* the split pass still
+writes nothing on the m9 slices: then the write moves into the turn itself, by the harness.
+
+**D48. An unsupported answer is fixed for the model in use, not by choosing another model: the
+prompt, and a second look by the same model at an answer that called no tool.** Any model above
+a bar must be usable, so the fix cannot depend on which one runs. The 27 answers of m9 are the
+replay set, with control turns where no tool was right; the candidates are compared on it
+before either is built into the turn. — *Reversed if* the second look flags more than one
+control turn in ten: then it is narrowed to answers about the calendar, reminders, memory and
+the registry.
+
+## 2026-09-29 — Partition 8 contract (owner's choices; the pasted-token question is still open)
+
+**D49. The core is counted by the blueprint's §6 rows** (ledger, state, daemon, loop, broker,
+policy, exec, tools, signals, rules, deliver, jobs, memory); the adapter layer (`llm/`,
+`senses/`, catalog, installer, the registry copy) and the unbudgeted infrastructure sit outside
+it. By that count the core is 3,762 lines; by partition 7's count it was 7,043, over D34's cap
+before partition 8 began. The per-module ceilings in `test_invariants.py` stay the gate. — What
+it throws away: partition 7's series is no longer comparable. — *Reversed if* a module outside
+the core rows grows past its own ceiling twice: then the adapter layer gets a total of its own.
+
+**D50. The Slack token written to the ledger on 2026-09-26 stays where it is.** The owner
+revoked it on 2026-09-29, so every copy is inert; the ledger stays append-only. — *Reversed if*
+a secret that cannot be revoked is ever written: then a one-time offline scrub by the owner's
+hand, from `scripts/`, never a product command.
+
+**D51. D48's fix is both: the rewritten prompt, and the second look by the same model at an
+answer that called no tool.** m10: the prompt fixed 21 of 27 and pushed 2 of 10 controls into a
+needless tool call; the second look fixed 20 and touched no control; together 22. The prompt's
+state paragraph is narrowed so a recap or a self-review question is exempt. The cost is one
+more model call on a turn that answers without a tool - about half of all turns. — *Reversed
+if* two weeks of live use show the second look flagging fewer than one answer in twenty: then
+it is removed and the prompt stands alone.
+
+**D52. History carries a record of the tool calls the assistant made, and an approval typed
+into chat while a gate is open is answered by the harness, not the model.** m10's unfixed
+answers: the model denied a call it had made, and took "I approve" in chat for an approval.
+Correcting a session summary that asserts something false is left for later (D41 already ends
+the session after two quiet hours). — *Reversed if* the tool record grows a turn's prompt by
+more than a fifth: then names only, without arguments.
+
+**D53. A secret reaches the Keychain without passing through the chat: the assistant asks
+through the harness and the screen takes it masked; a token pasted into the chat anyway is put
+in the Keychain and the text carries a handle.** The value goes screen -> daemon -> Keychain over
+the local socket and never reaches the ledger or the model. A pasted token-shaped string is
+stored under a temporary name for 24 hours and replaced by `[secret:pasted-N]` at the ledger
+door, so a false positive can be read back and a real token need not be typed twice. Encrypting
+the token for the model was considered and dropped: the model cannot use ciphertext, so it is a
+handle with a key to guard. — *Reversed if* the pattern misses a token in live use: the
+patterns grow; the handle stays.
+
+**D54. OAuth servers are inside partition 8.** Gmail and the calendar are what the owner asked
+for first; a partition that leaves them out does not make the assistant more useful where it
+was asked to be. The way in is designed from a survey and chosen by the owner before code.
+
+**D55. The live check of the secret path uses a server that costs nothing.** Brave search is
+paid; the check names a free token server the owner would use anyway.

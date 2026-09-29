@@ -1169,3 +1169,68 @@ notice still arrives); the shared EventKit store is made without a lock (no fail
 The model's wrong times. A briefing still does not look past 24 hours unless it calls the tools.
 m3 has not been run over the agenda (D42's reversal). The owner's current session ends only
 after two quiet hours; until then its history still carries the old answers.
+
+## 2026-09-29 — m9: what five days of answers rest on (partition 8's entrance)
+
+Read from the live ledger, every user-origin turn by hand; numbers in
+`docs/measurements/m9-2026-09-29.json` (turn numbers and counts, no ledger text). The memory
+replay is `bench/m9_memory_write.py`; it cost about 38,000 tokens.
+
+### What was measured
+
+- **27 of 118 answers (23%) state something nothing in the turn supports**: 14 say what the
+  calendar, reminders, memory or registry hold, or what the assistant itself just did, with no
+  tool result; 2 say "done" with no call; 4 end on "I will"; 7 deny a capability the assistant
+  has ("MCP only runs in the desktop app", "no weather tool"). Six more called a tool and
+  answered against it; five of those six are already fixed (b5d3c84, D38).
+- **It is not only the long session's history.** After c749e17 the long session gave 3
+  unsupported answers in 9, among them three server names invented for a request that said
+  "use search_tools". The new session gave 1 in 5 - a question about the week answered from the
+  24-hour agenda, with no tool call. D43's reversal condition is not met. The agenda (D42)
+  removed "nothing on the calendar" and made a new way to skip the tool.
+- **Two stated times were 10 and 12 minutes ahead** of the turn's own clock line. No other
+  wrong time after b5d3c84.
+- **Memory was never written.** `edit_memory`: 0 calls in 137 turns. 9 passes ran, 0 applied,
+  0 proposed. The owner gave four standing instructions ("ask me for approval", "check
+  reminders with events", "installed MCP tools are yours to call", "only what you checked");
+  none was written, by the turn or by a pass. The replay reproduces it: the shipped prompt made
+  0 edits on both slices (one `read_ledger`, then the summary). Without the closing summary
+  paragraph the same model searched memory on both and wrote one wiki page on one; it still
+  wrote no instruction down. One run each - a direction, not a rate.
+- **Registry.** 28 `search_tools`/`propose_install` calls: 10 failed on a 20 s read timeout, 7
+  came back empty (a name-substring search; "brave search", "google mail gmail"). The same
+  registry answered in 1-25 s within one hour. A full mirror is 37,181 servers, 33.6 MB, 462 s.
+
+### What it changes
+
+The timeout was never the defect: the registry's latency varies by 20x and its search reads
+names only. Raising the ceiling makes the owner wait longer for the same empty list. The pass
+has two jobs in one prompt and the model does the last one; `consolidate.txt` also has no place
+for "how to work from now on" (only `system.txt` names it). Both are for the owner's decision
+before code.
+
+## 2026-09-29 — m10: the 27 answers replayed against two fixes (D48)
+
+`bench/m10_unsupported.py`, numbers in `docs/measurements/m10-2026-09-29.json`; 503,840 tokens.
+One run per case per variant, graded by hand by one reader; three of the six normal-tool turns
+and five of the fifteen controls were not run, to stay inside the budget.
+
+| variant | fixed of 27 | controls pushed into a needless tool, of 10 | normal tool turns broken, of 3 | extra calls |
+|---|---|---|---|---|
+| shipped prompt | 11 | 0 | 0 | 0 |
+| rewritten prompt | 21 | 2 | 0 | 0 |
+| second look, same model | 20 | 0 | 0 | +39 |
+| both | 22 | 2 | 0 | +21 |
+
+- Today's shipped prompt and tools already fix 11 of the 27: 23 of them were first answered
+  under older prompts. On the four that ran live under today's prompt the shipped prompt fixes
+  none, the rewrite four, the second look three.
+- The second look flagged 11 of 15 unsupported drafts and no control wrongly; its re-run fixed
+  9. D48's reversal condition is not met. It reads no-tool answers only: shown a clipped tool
+  result, it flagged two supported answers in the smoke.
+- Five answers no variant fixed, and wording is not their cause: the session's own history and
+  summary assert a wrong picture of where MCP tools run (three); the model denies a tool call it
+  made, because history carries no tool calls and no user-turn tool reads the ledger (one); "I
+  approve" typed in chat is taken for an approval (one).
+- The rewrite is written against these cases; its two needless tool calls were on a recap and
+  a self-review question.

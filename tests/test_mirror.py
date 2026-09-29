@@ -104,6 +104,7 @@ class MirrorTest(unittest.TestCase):
         self.sync()
         since = float(self.meta()["since"])
         changed = _item("io.github.c/notes", "Notes, now with words")
+        changed["_meta"][OFFICIAL]["updatedAt"] = "2026-09-25T00:00:00Z"  # a real change moves updatedAt
         # the fake serves `changed` for updated_since requests: a second server carries it
         httpd, H, url = _serve(self.items, [changed])
         self.addCleanup(httpd.server_close)
@@ -295,6 +296,19 @@ class MirrorTest(unittest.TestCase):
         self.assertEqual(mirror.search(self.home, "notes")[0], [])
         self.assertEqual(len(mirror.find(self.home, "notes")), 1)
         self.assertEqual(len(mirror.changed_since(self.home, -1)), 4)  # the deprecated row is no candidate
+
+    def test_an_unchanged_row_fetched_again_is_not_new(self):
+        db = mirror._open(self.home)
+        item = _item("io.github.e/again")
+        mirror._put(db, complete=1)
+        mirror._upsert(db, item, 100)
+        mirror._upsert(db, item, 200)  # the overlap hour brings it back
+        self.assertEqual(mirror.changed_since(self.home, 150), [])
+        item["_meta"][OFFICIAL]["updatedAt"] = "2026-09-25T00:00:00Z"
+        mirror._upsert(db, item, 300)
+        self.assertEqual(len(mirror.changed_since(self.home, 250)), 1)
+        self.assertEqual(len(mirror.search(self.home, "again")[0]), 1)  # delete-then-insert kept the index right
+        db.close()
 
     def test_db_is_0600(self):
         self.sync()

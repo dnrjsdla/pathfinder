@@ -59,6 +59,9 @@ def _put(db, **kv) -> None:
 
 def _upsert(db, item, seen) -> None:
     server, meta = item["server"], (item.get("_meta") or {}).get("io.modelcontextprotocol.registry/official") or {}
+    old = db.execute("SELECT updated_at, seen FROM servers WHERE name = ?", (server["name"],)).fetchone()
+    if old and old[0] and old[0] == meta.get("updatedAt"):
+        seen = old[1]  # re-fetched in the sync's overlap hour, unchanged: not new
     db.execute("DELETE FROM servers WHERE name = ?", (server["name"],))
     if meta.get("status") != "deleted":  # an incremental sync delivers a deletion as a row
         db.execute("INSERT INTO servers (name, description, status, updated_at, seen, item) VALUES (?,?,?,?,?,?)",
@@ -117,7 +120,7 @@ def _sync(home, registry) -> None:
             if db is None:
                 db = _open(home)
             db.rollback()
-            _put(db, failed_at=time.time(), error=" ".join(str(e).split())[:200] or type(e).__name__)
+            _put(db, failed_at=time.time(), error=catalog.oneline(e, 200) or type(e).__name__)
         except Exception:
             pass  # nowhere to store it: the warning is all there is
     finally:

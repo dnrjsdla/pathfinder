@@ -9,12 +9,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+import shlex
 import socket
 import sys
 import time
 from pathlib import Path
 
-from . import catalog, config, memory, tui
+from . import catalog, config, memory, mirror, tui
 from . import init as init_mod
 from . import installer as installer_mod
 from .clock import format_local
@@ -261,11 +262,19 @@ def uninstall_cmd(home, id):
 
 
 def search_cmd(home, text):
-    """`pathfinder search TEXT`: the registry on the spot - no daemon needed."""
-    for item in catalog.fetch(search=text, pages=1):
-        cand = catalog.candidate(item)
-        pkg = cand["package"]
-        print(f"{cand['name']}  {cand['version']}  {pkg['registry_type']}  {cand['description'][:80]}")
+    """`pathfinder search TEXT`: the registry copy on disk - no daemon needed, and it never syncs or creates it."""
+    if not (Path(home) / "registry.db").exists():
+        senses = config.load(home).get("senses") or {}
+        print("no registry copy yet: the daemon fills it while the catalog sense is on"
+              + (" (it is on: the copy starts with the daemon's next poll)" if "catalog" in senses else
+                 f" - turn it on, keeping the others, with:\npathfinder config set senses "
+                 f"{shlex.quote(json.dumps({**senses, 'catalog': {}}))}"))
+        return 0
+    items, note = mirror.search(home, text)
+    for item in items:
+        print(f"{catalog.listing(item)}  {catalog.oneline(item['server'].get('version', ''), 40)}")
+    if note or not items:
+        print(note or "no server in the registry copy matches; search English words (gmail, brave search, weather)")
     return 0
 
 
@@ -422,8 +431,8 @@ def main(argv=None):
         return install_cmd(home, args[1])
     if len(args) == 2 and args[0] == "uninstall":
         return uninstall_cmd(home, args[1])
-    if len(args) == 2 and args[0] == "search":
-        return search_cmd(home, args[1])
+    if len(args) >= 2 and args[0] == "search":
+        return search_cmd(home, " ".join(args[1:]))
     if args == ["jobs"]:
         return jobs_list(home)
     if len(args) == 3 and args[0] == "job" and args[1] == "stop":

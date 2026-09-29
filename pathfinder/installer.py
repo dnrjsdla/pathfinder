@@ -29,7 +29,7 @@ import uuid
 from pathlib import Path
 from typing import Callable
 
-from . import catalog, config, keychain
+from . import catalog, config, keychain, mirror
 from . import exec as exec_mod
 from .mcp import pins as mcp_pins
 from .mcp.protocol import qualify
@@ -112,8 +112,7 @@ def brief(c: dict) -> str:
         parts.append("license warning")
     if install.get("runtime"):
         parts.append("command: " + " ".join([install["runtime"], *install.get("args", [])]))
-    line = f"{c['name']}@{c['version']}  " + " · ".join(parts)
-    return "".join(ch for ch in line if ch.isprintable())  # registry text: no escape sequences to a terminal
+    return f"{catalog.oneline(c['name'])}@{catalog.oneline(c['version'])}  " + catalog.oneline(" · ".join(parts))  # registry text: one clean line
 
 
 def _npm_lookup(pkg: dict, run) -> tuple:
@@ -190,7 +189,7 @@ class Installer:
         def fail(step, reason):
             candidate["outcome"] = "install_failed"
             verification["failed_step"] = step
-            verification["reason"] = reason
+            verification["reason"] = catalog.oneline(reason, 300)  # registry text can ride in a reason
             return candidate
 
         rtype, runtime = pkg["registry_type"], pkg["runtime"]
@@ -348,28 +347,35 @@ class Installer:
 
     def propose_by_name(self, name: str, origin: str = "user", session: str = "",
                         registry: str | None = None) -> dict:
+        items = mirror.find(self.home, name)
+        if not items and (item := catalog.latest(name, registry or catalog.REGISTRY)):
+            items = [item]  # newer than the last refresh, or the first sync still running
         matches = []
-        for item in catalog.fetch(search=name, pages=1, registry=registry or catalog.REGISTRY):
+        for item in items:
             try:
-                matches.append(catalog.candidate(item))
+                matches.append((catalog.candidate(item), item))
             except (KeyError, TypeError) as exc:
                 _log.warning("propose_by_name: skipping malformed registry item: %s", exc)
-        exact = [c for c in matches if c["name"] == name]
-        if exact:
-            cand = exact[0]
-        else:
-            suffixed = [c for c in matches if c["name"].endswith(f"/{name}")]
-            if len(suffixed) > 1:
-                return {"error": "ambiguous: " + ", ".join(c["name"] for c in suffixed)}
-            cand = suffixed[0] if suffixed else None
+        exact = [m for m in matches if m[0]["name"] == name]
+        suffixed = [m for m in matches if m[0]["name"].endswith(f"/{name}")]
+        if len(suffixed) > 1 and not exact:
+            more = len(suffixed) - 10
+            return {"error": "ambiguous: " + ", ".join(catalog.oneline(c["name"], 80) for c, _ in suffixed[:10])
+                    + (f"; {more} more, give the full name" if more > 0 else "")}
+        cand, item = (exact or suffixed or [(None, None)])[0]
         if cand is None:
             return {"error": "no such server; try search_tools"}
+        if cand["name"] != catalog.oneline(cand["name"], 200):  # what is shown must be what is installed
+            return {"error": "the registry name holds characters that cannot be shown; not proposed: "
+                    + catalog.oneline(cand["name"], 80)}
         cand = self.check(cand, explicit=True)
         if cand.get("outcome") == "install_failed":
             self.propose(cand, origin, session)
             return {"error": cand["verification"].get("reason", "check failed")}
         aid = self.propose(cand, origin, session)
-        return {"id": aid, "line": render_row({"id": aid, "args": cand})}
+        line = render_row({"id": aid, "args": cand})
+        status = ((item.get("_meta") or {}).get("io.modelcontextprotocol.registry/official") or {}).get("status")
+        return {"id": aid, "line": line + ("  deprecated in the registry" if status == "deprecated" else "")}
 
     # -- install / rollback --------------------------------------------------------------
     async def decide(self, approval_id: str, decision: str) -> None:

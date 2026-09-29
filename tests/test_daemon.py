@@ -1601,7 +1601,7 @@ class InstallerDaemonTest(DaemonHarness):
             "pathfinder.installer.subprocess.run",
             return_value=type("R", (), {"returncode": 0, "stdout": json.dumps(
                 {"dist.integrity": "sha512-abc", "dist.tarball": "https://x", "license": "MIT"})})())
-        fake_fetch = mock.patch("pathfinder.catalog.fetch", return_value=[{"server": {
+        fake_fetch = mock.patch("pathfinder.mirror.find", return_value=[{"server": {
             "name": "io.github.acme/widget", "version": "1.0.0", "description": "a widget server",
             "packages": [{"registryType": "npm", "identifier": "widget", "version": "1.0.0",
                          "runtimeHint": "npx"}]}}])

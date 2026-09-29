@@ -79,27 +79,30 @@ def latest(name: str, registry, timeout=20):
         raise
 
 
-def fetch(since=None, search=None, *, registry=REGISTRY, limit=100, pages=5, timeout=20) -> list:
-    """`GET {registry}/v0.1/servers`, cursor-paginated, at most `pages` requests. Raises on a
-    network error - the sense loop logs it and retries next cadence (`signals.SenseLoop`)."""
-    items = []
-    cursor = None
-    for _ in range(pages):
-        params = {"version": "latest", "limit": str(limit)}
-        if search:
-            params["search"] = search
-        if since is not None:
-            params["updated_since"] = rfc3339(since)
-        if cursor:
-            params["cursor"] = cursor
-        url = f"{registry}/v0.1/servers?{urllib.parse.urlencode(params)}"
-        with urllib.request.urlopen(url, timeout=timeout) as resp:
-            data = json.loads(resp.read())
-        items.extend(data.get("servers", []))
-        cursor = (data.get("metadata") or {}).get("nextCursor")
-        if not cursor:
-            break
-    return items
+_ANSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
+
+
+def oneline(text, n=None) -> str:
+    """Registry text (a name, a description, a version) is someone else's: whole ANSI sequences out, whitespace
+    to one space, every non-printable character (controls, bidi marks, zero-width) dropped, at most `n`
+    characters. Everything the copy hands the model or the screen goes through this."""
+    text = _ANSI_RE.sub("", str(text))
+    text = "".join(" " if ch.isspace() else ch for ch in text if ch.isspace() or ch.isprintable())
+    return " ".join(text.split())[:n]
+
+
+def listing(item) -> str:
+    """One search line for a registry row: name, description, and what tells one server from another - the kind
+    (a remote's host), "no source" for a package without a repository URL (most remotes have none), the month it was published."""
+    cand, server = candidate(item), item["server"]
+    pkg = cand["package"]
+    kind = pkg["registry_type"]
+    if kind == "remote":
+        kind += " " + oneline(urllib.parse.urlparse(pkg["identifier"]).hostname or "", 60)
+    published = re.match(r"\d{4}-\d\d", cand["verification"]["maintenance"]["last_publish_at"])
+    parts = [kind.strip(), *(["no source"] if pkg["registry_type"] != "remote" and not (server.get("repository") or {}).get("url") else []),
+             *([published[0]] if published else []), "license not checked"]
+    return f"{oneline(cand['name'], 80)} - {oneline(cand['description'], 100)} ({', '.join(parts)})"
 
 
 def _arg_str(arg) -> str:

@@ -31,6 +31,7 @@ from .state import State
 from .tools import ToolSpec
 
 CONSOLIDATE_PROMPT = (Path(__file__).parent / "prompts" / "consolidate.txt").read_text(encoding="utf-8")
+SUMMARIZE_PROMPT = (Path(__file__).parent / "prompts" / "summarize.txt").read_text(encoding="utf-8")
 _RETRY_S = 1800  # D39: after a pass the model never answered, the trigger waits this long to retry
 
 
@@ -431,6 +432,10 @@ class Manager:
 
     # -- routing and apply -------------------------------------------------------------------
     def edit(self, target, op, old, new, evidence, control):
+        with self._edit_lock:  # vet reads the shared connection; another thread's write must not interleave
+            return self._edit(target, op, old, new, evidence, control)
+
+    def _edit(self, target, op, old, new, evidence, control):
         p = getattr(control, "memory_pass", None)
         origin = "memory" if p else "user"
         session = getattr(control, "session", "") or ""
@@ -472,7 +477,7 @@ class Manager:
                     return "old no longer matches exactly one place"
                 idx = matches[0]
             after = _apply_edit(text, op, old, new, idx)
-            path.parent.mkdir(parents=True, exist_ok=True)
+            path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
             fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=".mem-", suffix=".tmp")
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 f.write(after)
@@ -587,16 +592,6 @@ class Manager:
                 "use read_ledger, paging with `after` until it returns nothing).\n"
                 f"RULES.md vocabulary — conditions: {', '.join(sorted(conditions))}; "
                 f"actions: speak, silence, defer, ask_model; kinds: {', '.join(sorted(kinds))}.\n")
-        goal += (f"Current session: {sid}. " + (f"Previous summary of its earlier part:\n{prev['text']}"
-                 if prev else "No previous summary.")) if sid else "No current session."
-        if sid:
-            # the lines this pass's own slice will not show: a summary skips ahead of `since`
-            # (D20's cache), so what sits between the last summary and `since` would otherwise
-            # never be read by anything (B2 - a pass with no summary must not lose them).
-            earlier = self.state.session_messages(sid, prev["upto"] if prev else 0, since)
-            earlier_lines = "\n".join(line for m in earlier if (line := render_line(m, self.state)) is not None)
-            if earlier_lines:
-                goal += "\nEarlier lines of this session not yet summarized:\n" + earlier_lines
         goal += "\n" + self.context()  # USER.md and the page list: edit what exists (live: three pages, one topic)
         pend = self.state.pending_memory()  # a proposal from an earlier pass is still in the box
         if pend:
@@ -612,34 +607,32 @@ class Manager:
         broker = Broker(mem_tools, "memory", {}, control=control, emit=self._emit(),
                         approved=None, denied=frozenset())
         step = self.step_factory(cfg, control, mem_tools)
-        out, error, kept = None, None, False
+        out, error, kept, steps, usage = None, None, False, 0, None
         try:
             out = loop.run(step, messages, call_tool=broker.call, emit=self._emit(),
-                           budget=self.rules.consolidate_steps, control=control,
-                           final_step=self.step_factory(cfg, control, {}))  # D30: the summary still comes
+                           budget=self.rules.consolidate_steps, control=control)  # D47: no final_step, the summary is its own call
+            steps, usage = out.steps, out.usage
+            if sid:
+                summed = self._summarize(sid, cfg, prev, control)
+                if summed:
+                    steps, usage = steps + summed.steps, loop._sum_usage(usage, summed.usage)
         except Gate as g:
             self.record("error", origin="memory", message=f"memory pass gated: {g.name}")
         except LLMError as e:  # an outage keeps the slice; a 4xx the request caused (400, 413) moves on
             outage = e.status in (0, 401, 402, 408, 429) or e.status >= 500
-            error, kept = e.message, outage and not (p["applied"] or p["proposed"])
+            error, kept = e.message, outage and not (p["applied"] or p["proposed"]) and out is None
         except Exception as e:  # a bug in the step or a tool must not escape - the cursor still advances
             error = f"internal: {type(e).__name__}"
-        else:
-            if out.kind == "answer" and out.text.strip() and sid:
-                upto_s = self.state.nth_newest_message_seq(sid, 5)
-                if upto_s is not None:
-                    self.record("session_summary", session=sid, origin="memory", upto=upto_s,
-                               text=out.text.strip())
-        fields = {"since": since, "upto": upto, "read": p["read"], "steps": out.steps if out else 0,
-                 "usage": out.usage if out else None, "applied": p["applied"], "proposed": p["proposed"]}
+        fields = {"since": since, "upto": upto, "read": p["read"], "steps": steps,
+                 "usage": usage, "applied": p["applied"], "proposed": p["proposed"]}
         if error:
             fields["error"] = error
+        self._retry_at = time.time() + _RETRY_S if kept else 0.0  # a pass that got an answer clears the wait
         if kept:
             # D39: the model never read the slice (offline, out of credit) - keep it for the next
             # pass; live 2026-09-26 lost the owner's own instruction this way. An internal error
             # still moves on (a slice that breaks the step would otherwise loop forever).
             fields["upto"] = since
-            self._retry_at = time.time() + _RETRY_S
         self.record("memory_pass", origin="memory", **fields)  # `upto` becomes the cursor
         if p["proposed"] > 0:
             self.push(Signal(
@@ -648,6 +641,28 @@ class Manager:
                 fields={"proposed": p["proposed"], "applied": p["applied"], "pages": p["pages"]}, trust="self"))
         report = f"read {p['read']}, applied {p['applied']}, proposed {p['proposed']}"
         return f"{report}, error: {error}" if error else report
+
+    def _summarize(self, sid, cfg, prev, control):
+        """D47: the session summary is its own request, no tools - the write call never sees it."""
+        after = prev["upto"] if prev else 0
+        upto_s = self.state.nth_newest_message_seq(sid, 5)
+        if upto_s is None or upto_s <= after:
+            return None
+        lines = "\n".join(line for m in self.state.session_messages(sid, after, upto_s)
+                          if (line := render_line(m, self.state)) is not None)
+        body = (f"Previous summary:\n{prev['text']}\n\n" if prev else "") + "Conversation since:\n" \
+            + tools_mod.clip(lines, 16000)
+        messages = [{"role": "system", "content": SUMMARIZE_PROMPT},
+                    {"role": "system", "content": clock.now_line()},
+                    {"role": "user", "content": body}]
+        def no_tools(*_):
+            raise LLMError(400, "summary: the model asked for a tool")
+
+        out = loop.run(self.step_factory(cfg, control, {}), messages, call_tool=no_tools,
+                       emit=self._emit(), budget=1, control=control)
+        if out.kind == "answer" and out.text.strip():
+            self.record("session_summary", session=sid, origin="memory", upto=upto_s, text=out.text.strip())
+        return out
 
     # -- the trigger ----------------------------------------------------------------------
     def stalled(self, now=None) -> bool:

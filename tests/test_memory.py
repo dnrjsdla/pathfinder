@@ -350,6 +350,7 @@ class PassTest(MemoryHarness):
             [("tool_calls", [{"id": "c3", "name": "edit_memory", "arguments": {
                 "target": "USER.md", "op": "add", "old": "", "new": "- likes coffee",
                 "evidence": [u3_seq]}}])],
+            [("text", "wrote two lines")],
             [("text", "Summary: talked about coffee.")],
         ]
         mgr = self.manager(step_factory=_steps(steps),
@@ -388,6 +389,106 @@ class PassTest(MemoryHarness):
         self.assertEqual(passes[0]["upto"], passes[0]["since"])
         self.assertEqual(self.state.memory_cursor, 0)
         self.assertGreater(mgr._retry_at, time.time())
+
+    def _recording(self, per_call):
+        """A step factory that logs (tools, messages) of every request; per_call[i] answers request i."""
+        log = []
+
+        def factory(cfg, control, tools):
+            def step(messages):
+                log.append((tools, list(messages)))
+                r = per_call[len(log) - 1]
+                if isinstance(r, Exception):
+                    raise r
+                return iter(r)
+            return step
+        return factory, log
+
+    def _session_of_six(self):
+        self._seed_pass_events()
+        return rules_mod.Rules(consolidate_min_events=1, consolidate_steps=3)
+
+    def test_pass_makes_a_write_call_then_a_summary_call(self):
+        rules = self._session_of_six()
+        factory, log = self._recording([[("text", "nothing"), ("usage", {"total_tokens": 5})],
+                                        [("text", "the summary"), ("usage", {"total_tokens": 7})]])
+        self.manager(step_factory=factory, rules=rules).run_pass()
+        self.assertEqual(len(log), 2)
+        self.assertTrue(log[0][0] and not log[1][0])  # the write call has tools, the summary none
+        self.assertIn(memory.SUMMARIZE_PROMPT, [m["content"] for m in log[1][1]])
+        self.assertEqual([e["text"] for e in self.events("session_summary")], ["the summary"])
+        p = self.events("memory_pass")[0]
+        self.assertEqual((p["steps"], p["usage"]["total_tokens"]), (2, 12))
+
+    def test_summary_is_recorded_when_the_write_call_wrote_nothing(self):
+        rules = self._session_of_six()
+        factory, log = self._recording([[("text", "nothing")], [("text", "the summary")]])
+        self.manager(step_factory=factory, rules=rules).run_pass()
+        self.assertEqual(self.events("memory_pass")[0]["applied"], 0)
+        self.assertEqual(len(self.events("session_summary")), 1)
+
+    def test_no_summary_call_without_new_messages(self):
+        rules = self._session_of_six()
+        self.record("session_summary", session="s1", origin="memory", upto=10**6, text="old")
+        factory, log = self._recording([[("text", "nothing")]])
+        self.manager(step_factory=factory, rules=rules).run_pass()
+        self.assertEqual(len(log), 1)
+
+    def test_write_call_has_no_final_step(self):
+        """D30's extra final request is gone: an exhausted write budget makes no tool-less call
+        of its own - the only tool-less request is the summary's."""
+        rules = self._session_of_six()
+        call = {"id": "c", "name": "read_ledger", "arguments": {"after": 0, "limit": 80}}
+        factory, log = self._recording([[("tool_calls", [call])]] * 3 + [[("text", "the summary")]])
+        self.manager(step_factory=factory, rules=rules).run_pass()
+        self.assertEqual(len(log), 4)  # three write steps, one summary; with a final_step there would be five
+        self.assertEqual([bool(t) for t, _ in log], [True, True, True, False])
+
+    def test_write_outage_keeps_the_slice_and_makes_no_summary_call(self):
+        rules = self._session_of_six()
+        factory, log = self._recording([LLMError(500, "down")])
+        mgr = self.manager(step_factory=factory, rules=rules)
+        mgr.run_pass()
+        self.assertEqual(len(log), 1)
+        self.assertEqual(self.state.memory_cursor, 0)
+        self.assertGreater(mgr._retry_at, time.time())
+
+    def test_summary_llm_error_does_not_keep_the_slice(self):
+        rules = self._session_of_six()
+        factory, log = self._recording([[("text", "nothing")], LLMError(500, "down")])
+        mgr = self.manager(step_factory=factory, rules=rules)
+        mgr.run_pass()
+        self.assertGreater(self.state.memory_cursor, 0)
+        self.assertEqual(mgr._retry_at, 0.0)
+        self.assertEqual(self.events("memory_pass")[0]["error"], "down")
+        self.assertEqual(len(self.events("session_summary")), 0)
+
+    def test_tool_call_in_the_summary_reply_is_an_honest_error(self):
+        rules = self._session_of_six()
+        call = {"id": "c", "name": "read_ledger", "arguments": {}}
+        factory, log = self._recording([[("text", "nothing")], [("tool_calls", [call])]])
+        self.manager(step_factory=factory, rules=rules).run_pass()
+        self.assertEqual(self.events("memory_pass")[0]["error"], "summary: the model asked for a tool")
+        self.assertEqual(len(self.events("session_summary")), 0)
+
+    def test_forced_pass_clears_the_retry_wait(self):
+        rules = self._session_of_six()
+        factory, log = self._recording([[("text", "nothing")], [("text", "the summary")]])
+        mgr = self.manager(step_factory=factory, rules=rules)
+        mgr._retry_at = time.time() + 1800  # an earlier outage
+        mgr.run_pass(force=True)
+        self.assertEqual(mgr._retry_at, 0.0)
+
+    def test_write_prompt_names_standing_instructions(self):
+        for word in ("in any language", "how to behave", "not a list", "You must add", "USER.md", "a rule the judgments call for", "none of the kinds above", "nothing"):
+            self.assertIn(word, " ".join(memory.CONSOLIDATE_PROMPT.split()))  # a line wrap is not a change
+        self.assertNotIn("summary", memory.CONSOLIDATE_PROMPT.lower())
+
+    def test_wiki_dir_0700(self):
+        mgr = self.manager()
+        mgr.apply({"target": "wiki/Coffee.md", "op": "add", "old": "", "new": "# Coffee\nGood.",
+                   "evidence": []}, origin="user")
+        self.assertEqual((self.home / "wiki").stat().st_mode & 0o777, 0o700)
 
     def test_pass_request_error_moves_on(self):
         """A 400 the slice itself causes would fail the same way every retry - it advances."""
@@ -450,7 +551,7 @@ class PassTest(MemoryHarness):
         mgr2 = self.manager(step_factory=factory2, rules=rules_mod.Rules(consolidate_min_events=1))
         mgr2.run_pass()
 
-        self.assertIn("Earlier lines of this session not yet summarized:", captured["goal"])
+        self.assertIn("Conversation since:", captured["goal"])  # the summary call reads them
         self.assertIn("early one", captured["goal"])
         self.assertIn("early two", captured["goal"])
         self.assertIn("early three", captured["goal"])

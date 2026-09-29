@@ -419,3 +419,35 @@ was asked to be. The way in is designed from a survey and chosen by the owner be
 
 **D55. The live check of the secret path uses a server that costs nothing.** Brave search is
 paid; the check names a free token server the owner would use anyway.
+
+**D56. `mirror.py`'s ceiling is 200 lines.** The contract's 150 was set before the review; the
+file is 188 after it, and every line added maps to a failure the review reproduced (an endless
+sync on a 4xx, a repeated cursor, a fresh database opened by several at once, a 2,000-word
+query). — *Reversed if* the file passes 200: it is cut, not the ceiling raised.
+
+## 2026-09-30 — The way in for Gmail, and skills (owner's choices)
+
+**D57. Gmail comes in through what already exists: the mail sense over IMAP with an app
+password, reading and searching; a local Google server that does its own OAuth is the fallback
+if the owner's account refuses an app password.** Google Calendar is left out: the owner does
+not use it. A generic MCP OAuth client is not built now - measured, it would reach one official
+remote (Notion), which a token server already reaches. — *Reversed if* the app password and
+the local server are both blocked by the account's administrator: then Gmail waits for the
+external server's design.
+
+**D58. Skills are a wiki of their own, apart from the memory wiki, and PATHFINDER ships with a
+default set that is there from the first run.** A skill is a checked procedure the assistant
+reads when asked to do that thing (connect Gmail), so it stops inventing one - on 2026-09-26 it
+invented a way to get a Slack token. This brings back what the blueprint cut (`skills/`); the
+blueprint is amended. Anything in a skill that involves a secret goes through the harness
+(D53), never through the page. — *Reversed if* two weeks of use show the assistant not opening
+a skill it has: then the matching skill's title rides in the turn, as the wiki map does.
+
+**D59. Mail is read and searched, not sent, for now.** The owner wants sending; it waits until
+the second look (D51) has been measured in live use. When it comes it is a write tool that asks
+every time, showing the recipient, the subject and the body.
+
+**The owner's direction for the server (D44/D45), recorded so it is not lost:** what the server
+is for is handing over tool PACKAGES that are useful as they arrive - not wiring services one by
+one. Partition 8 connects single services because the secret path and the registry copy need a
+real case; the server's design starts from the package.

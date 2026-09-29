@@ -1,8 +1,12 @@
 """Invariants that are properties of the source, not of one function (blueprint section 11)."""
 import importlib.util
 import re
+import tempfile
 import unittest
 from pathlib import Path
+
+from pathfinder.ledger import Ledger
+from pathfinder.state import State
 
 SRC = Path(__file__).resolve().parent.parent / "pathfinder"
 REPO_ROOT = SRC.parent
@@ -121,6 +125,22 @@ class SourceInvariants(unittest.TestCase):
                 continue
             self.assertNotIn(catalog.REGISTRY, text,
                              f"{name} hardcodes the registry URL; only catalog.py may")
+
+
+class HistoryInvariants(unittest.TestCase):
+    def test_no_tool_record_without_tool_call_events(self):
+        """A ledger with no tool_call/tool_result/approval_pending/approval - even an assistant
+        message copying a record line - gives a history with no record message."""
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger, state = Ledger(Path(tmp)), State(Path(tmp) / "state.db")
+            try:
+                for type, kw in [("session_start", {}),
+                                 ("user", {"origin": "user", "trust": "user", "text": "did you send it?"}),
+                                 ("assistant", {"final": True, "text": 'send_mail {"to":"a"} ok'})]:
+                    state.apply(ledger.append(type, session="s", turn="t", **kw))
+                self.assertEqual([m["role"] for m in state.history("s")], ["user", "assistant"])
+            finally:
+                state.close()
 
 
 class SignalEnvelopeInvariants(unittest.TestCase):

@@ -10,6 +10,7 @@ import os
 import re
 import subprocess
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -42,6 +43,42 @@ _EXACT_MARKERS = {
 _SEP_RE = re.compile(r"[/.\-_]")
 
 
+def rfc3339(ts: float) -> str:
+    """UTC, built with plain string formatting (test_invariants counts every date computation
+    outside clock.py/ledger.py, and this one call site is not worth a UTC escape hatch there)."""
+    t = time.gmtime(ts)
+    return "%04d-%02d-%02dT%02d:%02d:%02dZ" % (t.tm_year, t.tm_mon, t.tm_mday, t.tm_hour, t.tm_min, t.tm_sec)
+
+
+def _get(url: str, timeout: float) -> dict:
+    with urllib.request.urlopen(url, timeout=timeout) as resp:
+        return json.loads(resp.read())
+
+
+def page(registry, cursor=None, since=None, limit=100, timeout=30) -> tuple:
+    """One `GET {registry}/v0.1/servers?version=latest` page: `(items, next_cursor or None)`.
+    `since` is a timestamp (sent as `updated_since`, RFC3339 only). Raises on a network or HTTP
+    error - `mirror` decides what a failure means."""
+    params = {"version": "latest", "limit": str(limit)}
+    if since is not None:
+        params["updated_since"] = rfc3339(since)
+    if cursor:
+        params["cursor"] = cursor
+    data = _get(f"{registry}/v0.1/servers?{urllib.parse.urlencode(params)}", timeout)
+    return data.get("servers", []), (data.get("metadata") or {}).get("nextCursor") or None
+
+
+def latest(name: str, registry, timeout=20):
+    """The registry's latest version of exactly `name`, or None when it has none (404)."""
+    try:
+        return _get(f"{registry}/v0.1/servers/{urllib.parse.quote(name, safe='')}/versions/latest", timeout)
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            e.close()
+            return None
+        raise
+
+
 def fetch(since=None, search=None, *, registry=REGISTRY, limit=100, pages=5, timeout=20) -> list:
     """`GET {registry}/v0.1/servers`, cursor-paginated, at most `pages` requests. Raises on a
     network error - the sense loop logs it and retries next cadence (`signals.SenseLoop`)."""
@@ -52,12 +89,7 @@ def fetch(since=None, search=None, *, registry=REGISTRY, limit=100, pages=5, tim
         if search:
             params["search"] = search
         if since is not None:
-            # RFC3339 UTC, built with plain string formatting (test_invariants counts every date
-            # computation outside clock.py/ledger.py, and this one call site is not worth adding
-            # a UTC escape hatch there for).
-            t = time.gmtime(since)
-            params["updated_since"] = "%04d-%02d-%02dT%02d:%02d:%02dZ" % (
-                t.tm_year, t.tm_mon, t.tm_mday, t.tm_hour, t.tm_min, t.tm_sec)
+            params["updated_since"] = rfc3339(since)
         if cursor:
             params["cursor"] = cursor
         url = f"{registry}/v0.1/servers?{urllib.parse.urlencode(params)}"

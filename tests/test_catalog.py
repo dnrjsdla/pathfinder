@@ -88,6 +88,13 @@ class _RegistryHandler(BaseHTTPRequestHandler):
             cls.requests.append(urllib.parse.parse_qs(parsed.query))
             body = json.dumps({"servers": cls.items,
                               "metadata": {"count": len(cls.items), **cls.metadata_extra}}).encode()
+        elif parsed.path.startswith("/v0.1/servers/"):  # /<quoted name>/versions/latest
+            name = urllib.parse.unquote(parsed.path.split("/")[3])
+            if name != FIXTURE_NPM_ITEM["server"]["name"]:
+                self.send_response(404)
+                self.end_headers()
+                return
+            body = json.dumps(FIXTURE_NPM_ITEM).encode()
         else:
             parts = parsed.path.strip("/").split("/")
             lic = cls.pypi_licenses.get(tuple(parts[:2])) if len(parts) >= 2 else None
@@ -131,6 +138,24 @@ class FetchTest(_FakeRegistryTest):
         self.assertIn("updated_since", first)
         self.assertTrue(first["updated_since"][0].endswith("Z"))
         self.assertEqual(_RegistryHandler.requests[1]["cursor"], ["same-cursor-forever"])
+
+
+class PageTest(_FakeRegistryTest):
+    def test_page_returns_items_and_cursor(self):
+        _RegistryHandler.items = [FIXTURE_NPM_ITEM]
+        _RegistryHandler.metadata_extra = {"nextCursor": "n:1"}
+        items, nxt = catalog.page(self.base_url, cursor="a:0", since=1758000000.0)
+        self.assertEqual((items, nxt), ([FIXTURE_NPM_ITEM], "n:1"))
+        q = _RegistryHandler.requests[0]
+        self.assertEqual((q["version"], q["limit"], q["cursor"]), (["latest"], ["100"], ["a:0"]))
+        self.assertEqual(q["updated_since"], [catalog.rfc3339(1758000000.0)])
+        _RegistryHandler.metadata_extra = {}
+        self.assertIsNone(catalog.page(self.base_url)[1])
+        self.assertNotIn("updated_since", _RegistryHandler.requests[1])
+
+    def test_latest_by_exact_name(self):
+        self.assertEqual(catalog.latest("io.github.example/myapp-tool", self.base_url), FIXTURE_NPM_ITEM)
+        self.assertIsNone(catalog.latest("io.github.example/none", self.base_url))
 
 
 class CandidateTest(unittest.TestCase):

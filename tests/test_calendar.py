@@ -133,6 +133,59 @@ class AccessGrantTest(unittest.TestCase):
             ek.ensure_access("event")
             self.assertIsNot(ek._get_store(), before)
 
+    def test_reset_waits_for_a_build_in_flight(self):
+        import threading
+        from pathfinder.senses import _eventkit as ek
+
+        class FakeStore:
+            @classmethod
+            def alloc(cls):
+                return cls()
+
+            def init(self):
+                return self
+
+            def requestFullAccessToEventsWithCompletion_(self, handler):
+                handler(True, None)
+
+        FakeStore.authorizationStatusForEntityType_ = staticmethod(lambda t: 0)
+        fake = mock.Mock(EKEventStore=FakeStore)
+        with mock.patch.dict(sys.modules, {"EventKit": fake}), mock.patch.object(ek, "_store", None):
+            t = threading.Thread(target=ek.ensure_access, args=("event",))
+            with ek._store_lock:  # a build in flight holds it
+                t.start()
+                t.join(0.3)
+                self.assertTrue(t.is_alive(), "the reset ran while the lock was held")
+            t.join(5)
+            self.assertFalse(t.is_alive())
+
+    def test_threads_asking_at_once_share_one_store(self):
+        import threading
+        import time
+        from pathfinder.senses import _eventkit as ek
+        made = []
+
+        class FakeStore:
+            @classmethod
+            def alloc(cls):
+                return cls()
+
+            def init(self):
+                time.sleep(0.05)  # a slow constructor: without the lock every thread gets in
+                made.append(self)
+                return self
+
+        got = []
+        fake = mock.Mock(EKEventStore=FakeStore)
+        with mock.patch.dict(sys.modules, {"EventKit": fake}), mock.patch.object(ek, "_store", None):
+            threads = [threading.Thread(target=lambda: got.append(ek._get_store())) for _ in range(8)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+        self.assertEqual(len(made), 1)
+        self.assertEqual(len({id(s) for s in got}), 1)
+
     def test_timed_out_prompt_leaves_no_store_behind(self):
         """Allowed after the prompt timed out (or later in System Settings): the next call sees
         status 3 and returns early, so no pre-grant store may exist by then."""

@@ -21,14 +21,16 @@ _ACCESS_TIMEOUT = 60.0
 _FETCH_TIMEOUT = 30.0
 
 _store = None
+_store_lock = threading.Lock()  # the agenda thread, a poll and a tool call can all arrive first
 
 
 def _get_store():
     from EventKit import EKEventStore
     global _store
-    if _store is None:
-        _store = EKEventStore.alloc().init()
-    return _store
+    with _store_lock:
+        if _store is None:
+            _store = EKEventStore.alloc().init()
+        return _store
 
 
 def _to_nsdate(ts: float):
@@ -87,7 +89,8 @@ def ensure_access(entity: str) -> None:
     if not box.get("granted"):
         raise PermissionError(f"{entity} access was denied")
     global _store
-    _store = None  # a store made before the grant stays empty for its whole life - start over
+    with _store_lock:  # not held on this path; a build in flight finishes first
+        _store = None  # a store made before the grant stays empty for its whole life - start over
 
 
 def list_events(start_ts: float, end_ts: float) -> list:

@@ -1,96 +1,87 @@
-# Partition 8 — trust in the answer and the security bundle: the rewritten prompt and a second look, a record of what was done, the registry copy, the split memory pass, secrets only through the Keychain, a private home
+# Partition 8 — trust in the answer and the security bundle: the rewritten prompt and a second look, a record of what was done, the registry copy, the split memory pass, secrets only through the Keychain, a private home, Gmail, skills
 
-## Question for the owner (still open; the units that depend on it are marked [Q1])
+**Where this stands (2026-09-30).**
+- **Code:** branch `partition-8` (worktree `.claude/worktrees/partition-8`) at 429752d, with U0,
+  U1, U2, U5 (U5b folded in), U9 and U13 merged, each after review. 533 offline tests pass there.
+- **Everything else:** not started.
 
-**Q1. A token pasted into the chat anyway.**
+The unit table at the end is where the next session starts. Every row carries its state, its
+files, its size, what it waits for, and its tests.
 
-What already exists does not depend on Q1:
-- the intake (`/secret` in the screen, `pathfinder secret` in a shell);
-- D40's stop before the trial;
-- the system prompt's line that a secret never goes through the chat.
+**Deploy gate.** Nothing from partition 8 reaches the owner's daemon until both U15a and U21 have
+landed:
+- **U15a (the pasted-token handle at the ledger door).** The tool record (U5, merged) re-sends up
+  to 120 characters of every call's arguments to the cloud model on every later turn. A token
+  inside an argument would ride along each time until the handle replaces it at the door.
+- **U21 (the envelope filter).** Without it, third-party text reaches the model unfiltered and
+  unclipped through a signal's `fields`.
 
-Q1 is what happens when a token is pasted anyway (it was on 2026-09-26). Encrypting the token
-before the model sees it does not help. The model cannot use ciphertext, so ciphertext is only a
-longer handle, and the key would sit on the same machine as the Keychain it would stand in for.
-The real choices are these three.
+## The secret path (D53, decided)
 
-**(a) Redact at the ledger door.**
-- **Mechanism:** `ledger.append` writes `[redacted]` over a token-shaped substring and returns
-  the redacted event, so `state`, the history and every later turn see `[redacted]`.
-- **Lines:** `ledger.py` +4. The scanner's `api-key`/`private-key` patterns move into
-  `keychain.TOKEN_RE` (+5), and `scripts/scan_personal.py` imports it, so there is one
-  definition.
-- **What it throws away:**
-  - A false positive (a long string that only starts like a token) is rewritten in the truth for
-    good.
-  - A real token is gone too, so the owner enters it again through `/secret`.
-  - Within the same turn, the model still sees a steer, a signal envelope or a tool result raw,
-    because those reach it beside the ledger, not through it.
-- **What the owner sees:** their line on their own screen as typed. The answer refers to
-  `[redacted]`.
+A secret reaches the Keychain without passing through the chat. There are two paths.
 
-**(b) Vault and handle.**
-- **Mechanism:**
-  - At the same door, the substring goes into the Keychain as service `pathfinder-pasted`,
-    account `pasted-N`, and the text carries `[secret:pasted-N]` instead.
-  - `pathfinder secret <id> NAME --from pasted-N` and `/secret <id> NAME --from pasted-N` move the
-    value to `pathfinder-mcp-<id>`/`NAME` and delete the pasted item. D40's stop line offers a
-    handle when one exists.
-  - Expiry: an index `<home>/pasted.json` (0600) holds handles and creation times, never values.
-    Every new paste, and every daemon start, deletes pasted items older than 24 hours. Binding an
-    expired handle says "expired - enter it again with /secret".
-  - A failing Keychain write (a locked keychain, no `security` binary) falls back to (a)'s
-    redaction, so the append still lands.
-- **Lines:** `ledger.py` +8, `keychain.py` +~35 (vault, bind, sweep, index), `__main__` +4,
-  `tui.py` +3, plus the same pattern move.
-- **What it throws away:**
-  - The one ledger writer now calls a subprocess under its lock (about 50 ms, only for events
-    that hold a token).
-  - One more file under the home.
-  - A false positive can be read back (`security find-generic-password -s pathfinder-pasted -a pasted-N -w`)
-    for 24 hours only; after that it is gone.
-- **What the owner sees:** the answer says "you pasted a token; it is stored as pasted-1: bind it
-  with /secret <id> NAME --from pasted-1".
-
-**(c) The assistant asks through the harness,** with (a) or (b) as the backstop for a paste.
-- **Mechanism:**
-  - When D40's check stops on a missing required secret, `Daemon.record` sees
-    `install_failed {step: "secrets"}` and sends every attached screen
-    `secret.ask {server_id, name, server}`.
-  - The screen switches to the masked input `/secret` already uses:
-    "NOTION_TOKEN for easy-notion (hidden; stored in the Keychain, never shown to the
-    assistant)".
-  - Enter sends `secret {server_id, name, value}` over the 0600 socket. The daemon stores it with
-    `keychain.store` on a worker thread, writes no ledger event holding the value, answers
-    `secret.stored`, and runs `installer.propose_by_name(server)` again. The proposal's gate line
-    follows.
-  - Neither the model nor the ledger ever holds the value. `pathfinder say` has no screen and
-    gets the `/secret` line instead.
-- **Lines:** daemon +~9 (the `record` hook, the `secret` handler), `tui.py` +~12, `installer.py`
-  +~2, tests ~80, plus the backstop.
-- **What it throws away:**
+**The main path: the assistant asks through the harness** (U16).
+- **Trigger.** D40's check stops on a missing required secret. `Daemon.record` sees
+  `install_failed {step: "secrets"}` and sends every attached screen
+  `secret.ask {server_id, name, server}`.
+- **The prompt.** The screen switches to the masked input `/secret` uses: "NOTION_TOKEN for
+  easy-notion (hidden; stored in the Keychain, never shown to the assistant)".
+- **Enter** sends `secret {server_id, name, value}` over the 0600 socket. The daemon then:
+  - stores the value with `keychain.store` on a worker thread;
+  - writes no ledger event that holds the value;
+  - answers `secret.stored`;
+  - runs `installer.propose_by_name(server)` again, and the proposal's gate line follows.
+- **The value never reaches the ledger or the model.** `pathfinder say` has no screen, so it
+  gets the `/secret` line instead.
+- **Cost:** daemon +~9 (the `record` hook, the `secret` handler), `tui.py` +~12, `installer.py`
+  +~2, tests ~80.
+- **What it gives up:**
   - A secret value now crosses a daemon handler. A future bug that logs a message there would
-    leak it; `test_secret_value_never_reaches_ledger_or_state` guards it.
-  - Two new socket message types.
-- **What the owner sees:** "Notion needs a token", the prompt appearing right away, a paste into
-  it, then the proposal with `/approve`. No command to learn.
+    leak it, and `test_secret_value_never_reaches_ledger_or_state` guards against that.
+  - Three new socket message types.
+- **What the owner sees:** "Notion needs a token", the masked prompt at once, a paste into it,
+  then the proposal with `/approve`.
 
-**Recommended: (c) with (a) as the backstop.**
-- (c) turns the moment the owner would paste into a masked prompt, before the paste happens. That
-  is D8's one step ahead.
-- (a) catches what still slips, in four lines, at the one door every path passes through.
-- (b)'s only gain over (a) is keeping a pasted real token. With (c) that is one paste into a
-  masked prompt, and (b) makes the ledger writer depend on the Keychain and adds an index with an
-  expiry sweep.
+**The backstop: vault and handle, at the ledger door** (U15a, U15b).
+- **At `ledger.append`.** A token-shaped substring (`keychain.TOKEN_RE`) goes into the Keychain
+  as service `pathfinder-pasted`, account `pasted-N`. The text carries `[secret:pasted-N]`
+  instead, and the event `append` returns carries the handle, so `state`, history, the tool
+  record and every later turn see only the handle.
+- **One pattern.** The scanner's `api-key`/`private-key` patterns become `keychain.TOKEN_RE`, with
+  Notion's `ntn_` and `secret_` added. `scripts/scan_personal.py` imports it.
+- **Binding a handle.** `pathfinder secret <id> NAME --from pasted-N` and
+  `/secret <id> NAME --from pasted-N` move the value to `pathfinder-mcp-<id>`/`NAME` and delete
+  the pasted item. The masked prompt (U16) lists the live handles, so a pasted token can be
+  bound where the secret is asked for.
+- **Expiry.**
+  - An index `<home>/pasted.json` (0600) holds handles and creation times, never values.
+  - Every new paste, and every daemon start, deletes pasted items older than 24 hours.
+  - Binding an expired handle says "expired - enter it again with /secret".
+- **When the Keychain write fails** (a locked keychain, no `security` binary), the substring is
+  written as `[redacted]`, so the append still lands and the value still never reaches the
+  ledger.
+- **What it gives up:**
+  - The ledger writer calls a subprocess under its lock, about 50 ms, and only for an event that
+    holds a token.
+  - One more file under the home.
+  - A false positive can be read back for 24 hours, then it is gone.
+- **What the owner sees:** "you pasted a token; it is stored as pasted-1 - bind it with /secret
+  <id> NAME --from pasted-1".
+- **Within the same turn,** a steer, a signal envelope or a tool result still reaches the model
+  raw, because those travel beside the ledger, not through it. The handle protects every later
+  turn and the record.
+
+**Encryption was considered and dropped (D53).** The model cannot use ciphertext, so encrypting
+the token only produces a handle with a key to guard.
 
 ---
 
-**"It runs" =** each of the following is checked live. [Q1] marks a check that depends on Q1.
+**"It runs" =** each of the following is checked live.
 - (1) **The first sync.** A temp home with the catalog sense on. The socket answers `say` at
   once while the registry copy fills in the background. `search_tools` during the first sync
   answers from the partial copy with a line saying so. The first sync's time, row count and file
-  size go into HISTORY (m9: 462 s, 37,181 servers, 33.6 MB raw). A `service restart` mid-sync
-  resumes from the stored cursor. A `service stop` mid-sync returns inside launchd's timeout and
+  size go into HISTORY (so far: 462 s, 517 s, and 1,076 s under load; 54 MB for about 37,200
+  rows). A `service restart` mid-sync resumes from the stored cursor. A `service stop` mid-sync returns inside launchd's timeout and
   leaves no orphaned MCP child.
 - (2) **Search.** m9's failed and empty queries each answer in under a second with real server
   names: "brave search", "google mail gmail", "web search", "weather", "gmail". `propose_install`
@@ -103,14 +94,20 @@ The real choices are these three.
   receives nothing. No file under `events/` contains the value. `security find-generic-password`
   returns it. `pathfinder secret` does the same from a shell. Use a throwaway service and delete
   it after.
-- (5) **D40.** Use the Brave search server (npm, MIT, `BRAVE_API_KEY` required and secret), or
-  `easy-notion`. `propose_install` with the key missing answers with the `/secret` line, and no
-  trial ran. After the key is stored, the same request trials and proposes; approve, and
-  `pathfinder tools` lists the server enabled. [Q1 (c)]: the masked prompt appears unasked, and
-  the proposal follows once the value is entered.
-- (6) **[Q1] A token-shaped string typed at the prompt.** (a): `[redacted]` in the events file,
-  and the model never saw the value. (b): `[secret:pasted-1]` in the file, and the value sits in
-  the Keychain.
+- (5) **D40 and D53's main path, on a server that costs nothing (D55): `easy-notion`,** the
+  community Notion server U0 found, with a free internal-integration token.
+  - `propose_install` with the token missing: no trial runs, and the screen's masked prompt
+    appears unasked.
+  - Once the token is entered, the same server trials and proposes. Approve it, and
+    `pathfinder tools` lists it as enabled.
+  - Through `pathfinder say`, the same request answers with the `/secret` line instead.
+  - **What the owner does by hand, once:** on Notion's integrations page, create an internal
+    integration (free), then share one test page with it (the page's `...` menu, then
+    Connections), and paste the integration's token into the masked prompt when it appears.
+- (6) **A token-shaped string typed at the prompt.** The events file, `state.db` and the next
+  turn's history hold `[secret:pasted-1]`. The Keychain holds the value.
+  `pathfinder secret <id> NAME --from pasted-1` binds it, and the pasted item is gone afterwards.
+  An unbound handle is swept after 24 hours; test this with a back-dated index entry.
 - (7) **The private home.** Start the new daemon on a copy of a pre-partition home. Afterwards
   `find <home> -path <home>/workspace -prune -o -perm +077 -print` prints nothing. A partition
   file, `registry.db` and `state.db-wal` born during the run are 0600.
@@ -131,7 +128,8 @@ The real choices are these three.
     `check: failed`.
 - (11) **The record (D52).** After a turn that called `search_tools`, "did you call search_tools
   just now?" is answered yes, from the record line in history (m10's T112). No tool result text
-  appears in the history.
+  appears in the history. A call the owner denied shows as denied, and a gated one as waiting
+  for approval.
 - (12) **Approval typed in chat (D52).** With an install proposal open, typing "승인", "I'll
   approve" or "yes" gets the harness's `/approve <id>` line. The ledger shows the `user` line and
   the harness's `assistant` line, and no model request (no usage on that `turn_end`). The approval
@@ -143,9 +141,22 @@ The real choices are these three.
   first.
 - (14) **The docs.** The ARCHITECTURE pair opens with partition 8 and keeps line counts in §13
   only. The README pair names `/secret`.
+- (15) **Gmail (D57), on the owner's own account, after the check in the Gmail section passes.**
+  - `/secret mail` stores the app password masked.
+  - After `service restart`, "what's in my inbox?" calls `list_mail`.
+  - `search_mail` with a Gmail query (`from:<a sender> newer_than:30d`) and with a Korean word
+    returns headers only.
+  - Gmail's web page still shows those messages unread.
+  - A second restart announces no old unread mail.
+- (16) **Skills (D58),** if the owner confirms the proposal.
+  - On a fresh home, `read_skill`'s description lists `connect-gmail` from the first run.
+  - "Connect my Gmail" makes the model call `read_skill` and walk the steps.
+  - An `edit_memory` aimed at `skills/` from a signal, job or memory origin is refused.
+  - From a user turn the same edit goes to the approval box, even with `grants` allowing
+    `edit_memory`.
 
 Decisions this partition rests on:
-- D8: the exact-name fallback, the resumable sync, and the masked prompt of Q1 (c).
+- D8: the exact-name fallback, the resumable sync, and D53's masked prompt.
 - D16: a gate ends the turn, so a `say` after a gate is a new turn and not a steer.
 - D17: steers are never intercepted.
 - D25: the second look waits in the slot like any user request.
@@ -164,30 +175,50 @@ Decisions this partition rests on:
 - D50: the old token stays.
 - D51: the prompt and the second look.
 - D52: the record, and approvals typed in chat.
+- D53: the secret path. The harness asks, the screen takes the value masked, and a pasted token
+  becomes a handle.
+- D54: OAuth is inside this partition, and D57 chose its way in for Gmail.
+- D55: the live check (5) uses a free server.
+- D56: `mirror.py`'s ceiling is 200, and a file past it is cut, not raised.
+- D57: Gmail comes through the mail sense over IMAP with an app password, reading and searching.
+  A local Google server is the fallback. Google Calendar and a generic MCP OAuth client are out.
+- D58: skills are a wiki of their own, shipped with a default set (a proposal below; it amends
+  the blueprint).
+- D59: mail is read and searched, not sent.
+- The owner's direction for the server (D44/D45): the server hands over packages, not single
+  services. See the skills section.
 
 NOT in this partition:
 - **Correcting a session summary that asserts something false** (D52 leaves it for later; D41
   already ends a session after two quiet hours).
-- **Tool results in history.** The record keeps names and arguments only.
+- **Tool results in history.** The record keeps names, arguments and states only.
 - **A second look for signal turns, jobs and the memory pass.** Their text is not an answer to
   the owner.
 - **Buffering answers** so a draft is never seen: it would hide streaming for half of all turns.
+- **Google Calendar.** The owner does not use it (D57); the calendar sense reads macOS Calendar.
+- **Sending mail** (D59). It waits until the second look has been measured in live use. When it
+  comes, it is a write tool that asks every time, showing the recipient, the subject and the
+  body.
+- **A generic MCP OAuth client** (D57). Measured, it would reach one official remote (Notion),
+  which a token server already reaches.
+- **Header secrets of remote servers.** One of the owner's token services (news) is a remote
+  with a header key, and `catalog._package` reads no `remotes[].headers`. It waits.
+- **Skills from anyone but the owner and the package**, and a skill marketplace. The server
+  (D44/D45) is where packages come from later.
 - m3 re-run over the adopted prompt and the agenda (credits; the lead decides).
 - The discovery server (D44/D45).
-- **Google (Gmail, Google Calendar) and every OAuth remote.** Google has no static token, and the
-  official Notion and Slack remotes are OAuth too (U0). Notion and Slack arrive through their
-  token servers: community Notion servers, and Slack with a bot token. Header secrets of remote
-  servers are also out.
 - A live reload of an installed server after `/secret`: a restart does it.
-- `/secret` for the mail password.
 - A live registry search while the first sync runs.
 - The screen's redesign.
 - The shell sense announcing `pathfinder tui`.
 - The model's wrong times.
 - `presence` volume.
-- No new config key, sense option, RULES.md knob or ledger type. The ledger gains fields only:
-  `assistant.withdrawn`, `turn_end.check`. One new server→client line: `retract`. [Q1 (c)] adds
-  `secret.ask`, `secret` and `secret.stored`.
+- **Additions this partition makes to shared vocabularies.**
+  - No new config key, sense option, RULES.md knob or ledger type.
+  - The ledger gains two fields only: `assistant.withdrawn`, `turn_end.check`.
+  - New socket lines:
+    - `retract`, `secret.ask` and `secret.stored` (server to client);
+    - `secret` (client to server).
 
 The token of 2026-09-26 (D50): the owner revoked it on 2026-09-29, so every copy is inert. Those
 copies are the ledger, `state.db`, the other app's config file, backups, and what the cloud model
@@ -196,43 +227,58 @@ offline scrub by the owner's hand, from `scripts/`, never a product command.
 
 **Line budgets.**
 
-The count rule (D49): the core is the blueprint's §6 rows: ledger, state, daemon, loop, broker,
-policy, exec, tools, signals, rules, deliver, jobs, memory. That is **3,762 lines** today and
-**~3,880** after this partition. The adapter layer (`llm/`, `senses/`, catalog, installer, mirror)
-and the infrastructure (`config`, `clock`, `keychain`, `init`, `__main__`) sit outside it and keep
-their own ceilings.
+**The count rule (D49).** The core is the blueprint's §6 rows: ledger, state, daemon, loop,
+broker, policy, exec, tools, signals, rules, deliver, jobs, memory. It is **3,833 lines** on
+`partition-8` today (3,762 at c749e17) and about **3,955** after this plan. The adapter layer
+(`llm/`, `senses/`, catalog, installer, mirror) and the infrastructure (`config`, `clock`,
+`keychain`, `init`, `__main__`) sit outside it and keep their own ceilings.
 
-The gate is the per-module ceiling in `test_invariants.py`. Of the 13 core rows, only daemon,
-memory and jobs have one today, so U17 adds the 1.3x line for the other ten.
+**The gate** is the per-module ceiling in `test_invariants.py`. U17 adds the 1.3x line for the
+ten core rows that have none, D56's 200 for `mirror.py`, and 250 for the shared sense adapters
+(`senses/_*.py`).
 
-Counts are `splitlines()` at c749e17:
+Counts are `splitlines()` on `partition-8` at 939c831; "with U2" is the review worktree.
 
-| Module | Today | Ceiling | After this plan |
+| Module | Now | Ceiling | After this plan |
 |---|---|---|---|
-| `daemon.py` | **779** | 780 | **~759**; [Q1 c] ~768 |
-| `loop.py` | 197 | 520 (1.3 × 400, added) | ~242 |
-| `state.py` | 625 | 780 (1.3 × 600, added) | ~652 |
-| `broker.py` + `policy.py` | 84 + 57 | 455 (added) | ~110 + 57 |
-| `ledger.py` | 122 | 520 (added) | 122; [Q1 a] 126 / [Q1 b] 130 |
-| `memory.py` | 695 | 780 | ~715 |
-| `jobs.py` | 267 | 350 | ~282 |
-| `signals.py` + `rules.py` | 201 + 220 | 585 (added) | unchanged |
-| `exec.py`, `tools.py`, `deliver.py` | 217, 212, 86 | 390, 390, 325 (added) | unchanged |
-| `installer.py` | 674 | 700 | ~689; [Q1 c] ~691 |
-| `catalog.py` | 243 | 300 | ~248 |
-| `senses/catalog.py` | **141** | 150 | ≤ 145 |
-| `mirror.py` | new | 150 (new) | ~130 |
-| `tui.py` | 314 | 400 | ~342; [Q1 b/c] ~345-355 |
+| `daemon.py` | **779** | 780 | ~770 (U3 −21, U4 −10, U6 +7, U7a +6, U16 +9) |
+| `state.py` | 681 | 780 (added) | ~688 (U6 +6, U14a +1) |
+| `memory.py` | 710 | 780 | ~711 (U23) |
+| `loop.py` | 197 | 520 (added) | ~244 (U7a) |
+| `broker.py` + `policy.py` | 84 + 57 | 455 (added) | ~110 + 57 (U6) |
+| `ledger.py` | 122 | 520 (added) | ~142 (U24 +8, U15a +12) |
+| `tools.py` | 212 | 390 (added) | ~220 (U21: `oneline` moves here) |
+| `signals.py` + `rules.py` | 201 + 220 | 585 (added) | ~205 + 220 (U21) |
+| `jobs.py` | 267 | 350 | ~283 (U4 +15, U23 +1) |
+| `exec.py`, `deliver.py` | 217, 86 | 390, 325 (added) | unchanged |
+| `mirror.py` | 188; 191 with U2 | **200** (D56) | 191 |
+| `catalog.py` | 275; 278 with U2 | 300 | ~272 (U21 moves `oneline` out) |
+| `installer.py` | 674; 677 with U2 | **700** | ~698 (U3 +15, U10 +5, U16 +1; U22 net 0) |
+| `senses/catalog.py` | 141; 137 with U2 | 150 | 137 |
+| `senses/mail.py` | **148** | 150 | ~118 (U25 moves the IMAP code out) |
+| `senses/_imap.py` | new | 250 (adapters, U17) | ~65 (U25) |
+| `senses/_eventkit.py` | 210 | none today; 250 (U17) | 210 |
+| `mcp/tools.py` | 116 | `mcp/` 1,858 | ~119 (U22) |
+| `tui.py` | 314 | 400 | ~357 |
 | `init.py` | **297** | 300 | 297 |
-| `keychain.py`, `config.py`, `__main__.py` | 14, 169, 455 | none | ~41 [Q1 b ~76], ~179, ~472 |
+| `skills.py` | new | 120 (new, if D58's proposal is confirmed) | ~80 |
+| `keychain.py`, `config.py`, `__main__.py` | 14, 169, 455 (463 with U2) | none | ~82, ~179, ~490 |
 
-463 offline tests today.
+**`installer.py` lands at about 698/700.** If it crosses, the only movable block is D36's
+foreign-file helper (`backup_file`, `_atomic_write_json`, `merge_json_file`, about 40 lines).
+D36 keeps that helper in `installer.py` until a third caller appears, so moving it needs the
+owner's word ("disagree" 12).
 
 ## Entrance and exit measurements
 
-The entrances are m9 (D43) and m10 (D51, D52). There are two exits, both needing the lead's
-go-ahead for credits:
-- m10 re-run on the adopted prompt with the record and the second look: (13), about 215,000
+**The entrances** are m9 (D43) and m10 (D51, D52).
+
+**The first sync** has been measured three times: 462 s (m9), 517 s (U0) and 1,076 s (U1's
+review, under load). The duration depends on the registry and the machine, so no single figure
+is a fact to design against. The database is 54 MB for about 37,200 rows.
+
+**The two exits**, both needing the lead's go-ahead for credits:
+- m10 re-run on the adopted prompt, with the record and the second look: (13), about 215,000
   tokens.
 - m9's memory replay on the split pass: (8), about 40,000 tokens.
 
@@ -242,7 +288,8 @@ inherits that simplification.
 ## pathfinder/daemon.py — what moves out first (779/780)
 
 Three items want daemon lines: the second look's wiring (+4), approvals typed in chat (+7), and
-[Q1 c]'s `secret` handler (+9). Two moves come first. Each moves protocol code to the module that
+D53's `secret` handler (+9). A mid-stream model error's text (+2, see "disagree" 8) adds a
+fourth. Two moves come first. Each moves protocol code to the module that
 owns the protocol, the way `PROPOSALS` already routes approvals to their owners.
 
 **Move 1 (U3): `install`/`uninstall` to `Installer.handle(msg) -> reply`.**
@@ -268,8 +315,8 @@ owns the protocol, the way `PROPOSALS` already routes approvals to their owners.
 | Move 1 | −21 | 758 |
 | Move 2 | −10 | 748 |
 | D52's chat approval in `turn()` | +7 | 755 |
-| D51's wiring in `_run_turn` | +4 | 759 |
-| [Q1 c] | +9 | 768 |
+| D51's wiring in `_run_turn`, plus recording a mid-stream error's text | +4 +2 | 761 |
+| D53's `record` hook and `secret` handler | +9 | 770 |
 
 5a edits line 573 in place.
 
@@ -381,27 +428,103 @@ about +800 tokens per turn on first steps.
 **D51's reversal needs its denominator in the ledger:** `turn_end.check` (checked) and
 `assistant.withdrawn` (flagged).
 
-## History carries a record of the tool calls (D52, part 1)
+## The two amended principles — the invariant text (D51, D52)
 
-**What is kept per call.** Only calls that ran are kept. A call that ran is a `tool_call` event,
-which the broker emits only after policy allowed it or the owner approved it.
-- **The line:** `name {args}` then ` ok` or ` failed`, with `name`, the compact JSON of `args`
-  (`separators=(",", ":")`, `ensure_ascii=False`) clipped to 120 characters, and `ok` from the
-  `tool_result` that immediately follows.
-- **Never kept:** the result.
-- **Only user-origin turns** are kept. A signal turn's notice is its own record.
+Both replace wording in blueprint §11 and in ARCHITECTURE. The text below is binding. Each
+clause names the test that enforces it.
 
-**Where it is built: `state.py`, not the daemon.**
-- `_project` inserts a `messages` row with role `calls` on a user-origin `tool_call`. It appends
-  ` ok`/` failed` on the `tool_result`, updating the session's latest `calls` row; calls run one
-  at a time in `settle`.
-- `history()` folds consecutive `calls` rows into one `system` message before that turn's
-  answer: "Tools you called here (from the ledger; names and arguments, not results): ...".
-- A summary's `upto` drops old rows like any message.
-- `session_messages` and `nth_newest_message_seq` gain `role IN ('user', 'assistant')`, so the
-  summary input and its keep-the-last-four boundary do not move. `last_user_*` already filter.
-- `reindex` rebuilds the rows for the past too.
-- **~+20 lines.**
+**Invariant 1. History is what was said and what was called — nothing else.**
+
+> History, the messages a turn is built from, holds exactly two things:
+> 1. what the user and the assistant said: a `user` event with origin `user`, and an `assistant`
+>    event with `final` set;
+> 2. for each tool call the assistant made in a user turn, the tool's name, its arguments, and
+>    one state of four: succeeded, failed, denied, or waiting for approval.
+>
+> History never holds a tool's result text, a signal envelope, or a draft the second look
+> withdrew.
+>
+> The record of a call is projected only from the ledger's own events about that call:
+> `tool_call`, `tool_result`, `approval_pending` and `approval`. It is never built from anything
+> the model wrote. A call with no such event can never appear in it. That includes a call that
+> never ran, a call refused by policy before it ran, and a call the model only claims to have
+> made. An assistant message that describes a call stays an assistant message and never becomes
+> a record line.
+>
+> Arguments are compact JSON cut to 120 characters. They are taken from the event exactly as
+> the ledger door wrote it, so a pasted token appears only as its `[secret:pasted-N]` handle.
+
+| Clause | Test |
+|---|---|
+| Said, plus the record, and nothing else | `test_state.test_history_is_said_and_called_only`. It replaces `test_restore_said_only` and keeps its signal-envelope and non-final-assistant cases, adding a withdrawn draft and a tool result, and asserts the whole history list. |
+| Name, arguments, one of four states | `test_state.test_tool_record_states`: ok, failed, denied, waiting, then waiting → ok after an approve. |
+| Never a result's text | `test_state.test_tool_record_holds_no_result_text`: a marker string inside a `tool_result` never appears in history. |
+| Only from ledger events; a call that did not happen never appears | `test_invariants.test_no_tool_record_without_tool_call_events`. A ledger with no `tool_call`/`tool_result`/`approval_pending`/`approval` events, including an assistant message that copies the record line word for word, yields a history with no record message. `test_broker.test_refused_call_emits_nothing` covers a policy refusal. |
+| Clipped | `test_state.test_tool_record_clips_arguments` |
+| Through the secret door | `test_ledger.test_pasted_token_reaches_the_record_as_a_handle` (U15a) |
+
+**Invariant 2. Everything streamed is in the ledger; only a withdrawn draft stays out of
+history.**
+
+> Every piece of text streamed to the owner's screen is recorded in the ledger, whatever the
+> ending: an answer, a spent budget, an interrupt, a gate, a model error in mid-stream, or a
+> withdrawal.
+>
+> The only streamed text kept out of history is a draft the second look withdrew. It is
+> recorded as `assistant {final: false, withdrawn: {flags, why}}`: marked as withdrawn, with the
+> reason. Like every ledger line, it is never deleted or rewritten.
+
+| Clause | Test |
+|---|---|
+| Streamed means in the ledger, every ending | `test_daemon.test_every_streamed_delta_is_in_the_ledger`: scripted steps for answer, exhausted, interrupt, gate, `LLMError` mid-stream and withdrawal; the deltas the socket received are contained in the turn's `assistant` events. `test_exhausted_turn_still_records_what_was_said` stays. |
+| Only a withdrawn draft is out of history, marked with its reason | `test_daemon.test_withdrawn_draft_marked_with_reason_and_out_of_history` |
+| Never deleted | `test_invariants.test_single_writer` (unchanged: only `ledger.append` writes events). `test_state.test_withdrawn_draft_survives_rebuild`: after `rebuild`, the line is in the ledger and still not in history. |
+
+**Exactly which lines change** (at 32f7dda; the lead edits them in the docs commit):
+- **`docs/blueprint/pathfinder-blueprint.html`**
+  - **Line 313.** The §11 row `말한 것만 기억한다 · 재부착은 봉투를 되살리지 않는다 | 유지 | test_restore_said_only`
+    is replaced by:
+
+    `<tr><td>이력에는 두 가지만 실린다 — 사용자와 비서가 한 말(origin 이 user 인 user, final 인 assistant), 그리고 비서가 사용자 턴에서 부른 툴 호출마다 이름 · 인자 · 상태(성공 · 실패 · 거부 · 승인 대기). 툴 결과 본문 · 신호 봉투 · 두 번째 확인이 철회한 초안은 절대 실리지 않는다. 호출 기록은 장부에 적힌 그 호출의 사건(tool_call · tool_result · approval_pending · approval)에서만 만들어지고 모델이 자기에 대해 쓴 말에서는 절대 만들어지지 않는다 — 일어나지 않은 호출은 기록에 나타날 수 없다. 인자는 120자로 잘리고 다른 모든 글과 같은 비밀 손잡이 문을 지난 모습으로만 실린다</td><td><span class="tag new">개정 (D52)</span></td><td><code>test_history_is_said_and_called_only</code> · <code>test_no_tool_record_without_tool_call_events</code></td></tr>`
+  - **Inserted after it:**
+
+    `<tr><td>화면에 흘린 글은 어떤 결말이든(답 · 예산 소진 · 중단 · 게이트 · 스트림 도중 모델 오류 · 철회) 전부 장부에 남는다. 이력에서 빠지는 흘린 글은 두 번째 확인이 철회한 초안 하나뿐이며, 그것도 장부에 철회 표시와 이유를 달고 남고 지워지거나 고쳐지지 않는다</td><td><span class="tag new">새로 (D51)</span></td><td><code>test_every_streamed_delta_is_in_the_ledger</code> · <code>test_withdrawn_draft_marked_with_reason_and_out_of_history</code></td></tr>`
+- **`ARCHITECTURE.md`**
+  - **Lines 101-102** ("**Only what was said becomes history:** ..."): replaced by Invariant 1's
+    text and the record's projection.
+  - **Line 239** ("Every outcome carries all text streamed in the turn."): gains "- except a draft
+    the second look withdrew, which the daemon records as `assistant {final: false, withdrawn}`".
+  - **Line 657**, the §12 row "... only what was said is remembered | `test_state.*`": split into
+    the row "State is rebuildable, apply is idempotent, a turn is counted once by two processes"
+    and a row for Invariant 1 naming its tests.
+  - **Line 671**, the §12 row "What was streamed reaches history even when the budget runs out
+    ...": replaced by Invariant 2's row naming its tests.
+- **`ARCHITECTURE.ko.md`:** the same four places. Lines 96-97 ("**말한 것만 이력이 된다:** ..."),
+  line 228 ("어떤 결말이든 그 턴에 흘려보낸 텍스트를 전부 싣는다."), line 637 ("... 말한 것만 기억") and
+  line 647 ("예산이 바닥나도 흘려보낸 말은 이력에 남음 ...").
+- **Code comments that restate the old rule:**
+  - `pathfinder/state.py` line 127 ("only what was said is remembered") changes with the record
+    (U5/U5b).
+  - `pathfinder/loop.py` line 106 ("what was said must reach history") changes with the second
+    look (U7a).
+
+**Built:** U5 projects all four states (U5b was folded into it), and the two tests `test_history_is_said_and_called_only` and
+`test_no_tool_record_without_tool_call_events` exist on `partition-8`. The other tests named here land
+with U7a (Invariant 2), U15a (the handle) and U17.
+
+## History carries a record of the tool calls (D52, part 1) — built in U5
+
+**Built on `partition-8`** (U5, with U5b folded in).
+- `state._project` writes a `messages` row with role `calls` for a user-origin `tool_call`, and
+  marks it ` ok` or ` failed` from its `tool_result`.
+- A broker gate (`approval_pending`) writes the call as ` waiting for approval`. `approval
+  {denied}` marks it ` denied`, and the resumed call's own row takes over after an approve. The
+  row keeps its approval id in a `ref` column.
+- `history()` folds consecutive `calls` rows into one `system` message placed before that turn's
+  answer.
+- Arguments are compact JSON cut to 120 characters. No result text is ever kept.
+- `test_state.test_history_is_said_and_called_only` and
+  `test_invariants.test_no_tool_record_without_tool_call_events` exist.
 
 **Cost, measured on the live ledger** (2026-09-25..29: 137 user turns, 104 calls in 65 of them,
 median arguments 30 characters, p90 59). Taken at each user turn's start with summaries applied,
@@ -416,10 +539,12 @@ the record adds:
 That is under D52's one-fifth line. Names alone would be 2.7% / 4.9% / 5.4%: the reversal's
 fallback.
 
-**A caveat.** The Anthropic adapter (experimental) folds every `system` message into its
-top-level `system`, so there the record loses its position. The rerun note does too.
-
-**This changes a blueprint invariant** (see "disagree").
+**Caveats.**
+- The Anthropic adapter (experimental) folds every `system` message into its top-level `system`,
+  so there the record loses its position. The rerun note does too.
+- A handler that returns an error as a string still gets ` ok` in the record until U22 and U23
+  land.
+- A reindex is needed once after the upgrade ("known limits").
 
 ## An approval typed into chat is answered by the harness (D52, part 2)
 
@@ -459,7 +584,15 @@ top-level `system`, so there the record loses its position. The rerun note does 
 
 `state.open_approvals` is ~+6 lines.
 
-## pathfinder/mirror.py — the registry copy (new, <= 150 lines, D46)
+## pathfinder/mirror.py — the registry copy (D46; built in U1: 188 lines, ceiling 200 by D56)
+
+**Built as specified below.** The review added handling for four failures it reproduced (D56):
+- an endless sync on a 4xx;
+- a repeated cursor;
+- a fresh database opened by several readers at once;
+- a 2,000-word query.
+
+U2 brings the file to 191.
 
 **Where it lives.** `<home>/registry.db`, born 0600. It is not a table in `state.db`: that file
 is the ledger's projection, and this one is the registry's, which D46 deletes when the server
@@ -520,7 +653,7 @@ by bm25 with the name weighted over the description, `status = 'active'` only.
     idempotent, so this is safe.
 - **Another registry.** A different `registry` empties the copy (D45's reversal door).
 - **Shutdown.** The thread is a daemon thread that nothing waits for. Inside `SenseLoop`, a
-  462-second first sync would be awaited by `stop()`, which would hold `service stop` past
+  first sync of 8 to 18 minutes would be awaited by `stop()`, which would hold `service stop` past
   launchd's timeout: SIGKILL, and orphaned MCP children. A page cut off mid-transaction rolls
   back.
 - **The CLI** never syncs; it only reads.
@@ -528,7 +661,7 @@ by bm25 with the name weighted over the description, `status = 'active'` only.
 **Lifting it out (D44/D45).** This module is the server's indexer as it stands. `search_tools` is
 deleted (D45), and `find` becomes the server's lookup.
 
-## pathfinder/catalog.py (243 -> ~248) and senses/catalog.py (141 -> ≤ 145)
+## pathfinder/catalog.py (275 after U1; 278 with U2) and senses/catalog.py (139 with U2)
 
 **`catalog.fetch()`** loses its last caller. In its place:
 - `page(registry, cursor=None, since=None, limit=100, timeout=30) -> (items, next_cursor)`;
@@ -548,9 +681,11 @@ deleted (D45), and `find` becomes the server's lookup.
 - **Left as is:** `cadence_h` in `OPTIONS` sets only the first `since`, which predates this
   partition.
 
-## pathfinder/installer.py (674 -> ~689)
+## pathfinder/installer.py (674; 677 with U2; ~698/700 after this plan)
 
 - **`handle(msg)`** (+15): move 1 above.
+- **`propose_install_by_name` raises on an error** (U22, net 0), so a failed proposal is a failed
+  call.
 - **`propose_by_name`** (−6):
   - It uses `mirror.find(self.home, name)` with today's exact, suffix and ambiguous logic.
   - When nothing is found, it makes one `catalog.latest(name, registry)` call. That covers a
@@ -569,7 +704,7 @@ deleted (D45), and `find` becomes the server's lookup.
 - **A deprecated row found by name** is proposed with "deprecated in the registry" in the reply
   (+1).
 
-## The secret intake — `keychain.store`, `pathfinder secret`, `/secret` (independent of Q1)
+## The secret intake — `keychain.store`, `pathfinder secret`, `/secret`
 
 **`keychain.store(service, account, value, run=subprocess.run)`** (+15). U0 measured every rule
 below:
@@ -596,9 +731,10 @@ below:
 - Enter stores the value in the screen's own process. Ctrl-C cancels. Nothing goes on the socket.
 - The confirmation says an already-installed server picks the value up at the next
   `service restart`.
-- [Q1 c] reuses this masked mode for `secret.ask`.
+- D53's `secret.ask` (U16) reuses this masked mode. Its Enter sends the value to the daemon
+  instead of storing it locally, so the proposal can follow at once.
 
-## A private home (independent of Q1)
+## A private home
 
 **Born private:**
 - `ledger.py`: `events/` 0700, `.lock` 0600, and a partition file opened with
@@ -623,7 +759,10 @@ below:
   `daemon.log`.
 - 0755: `events/`, `hooks/`.
 
-## pathfinder/memory.py and prompts — the split pass (D47; 695 -> ~715)
+## pathfinder/memory.py and prompts — the split pass (D47; built in U9, 710 lines)
+
+**Built as specified below.** A known limit remains: the summary call's usage is lost when that
+call errors.
 
 **1. The write call.** `loop.run` with the memory tools and `consolidate_steps`.
 - **No `final_step`:** its words were only ever the summary, so D30's list loses the
@@ -657,29 +796,332 @@ below:
 
 ## Small live defects
 
-- **5a. Include:** `state.presence()` returns the newest row across sessions, because the owner
-  has one pair of hands.
-  - The `session` parameter leaves `presence` and `today`.
-  - The callers change in place: `deliver.hold`, and `daemon.py` line 573.
-- **5b. Include,** through move 2.
-- **5c. Include:** `_eventkit._get_store` takes a module lock (+2). The agenda thread, two polls
-  and the tools can race it.
-- **5d. Include, in `tui.render`:** `gate` and `job.gate` args are clipped at 300 characters with
-  an `...(clipped; /approvals)` tail (+2). That covers every gate; `json.dumps` already escapes
-  control characters.
-- **5e. Include,** in the memory unit.
-- **5f (U0). `keychain.secret` misreads a non-ASCII value: include, and fix the read.**
-  - `find-generic-password -w` prints a non-ASCII value as bare hex with no marker. Verified
-    2026-09-29: a throwaway `비밀abc` came back as `ebb984ebb080616263`. `secret()` returns that
-    hex as the password.
-  - Decoding any hex-looking output would corrupt a real all-hex token, which is a common key
-    shape.
-  - So when the `-w` output is even-length hex, one `-g` call decides. `password: 0x...` is the
-    hex form and is decoded as UTF-8; `password: "..."` means the `-w` output was the value
-    itself. The common path stays one call. ~+6 lines.
-  - **Why fix the read rather than refuse non-ASCII at `store`:** the same reader serves entries
-    the owner sets by hand. The mail password's README line is one, and a non-ASCII password is
-    plausible there. A store-side refusal would never see those entries.
+- **5a.** `state.presence()` returns the newest row across sessions, because the owner has one
+  pair of hands. The `session` parameter leaves `presence` and `today`, and the callers change in
+  place: `deliver.hold`, and `daemon.py` line 573. **U12, not started.**
+- **5b.** Job lines reach a moved screen, through move 2. **U4, not started.**
+- **5c.** One EventKit store, built and reset under a lock. **Done (U13).**
+- **5d.** `tui.render` clips `gate` and `job.gate` args at 300 characters with an
+  `...(clipped; /approvals)` tail. **U11, not started.**
+- **5e.** A forced pass that succeeds clears the retry wait. **Done (U9).**
+- **5f.** `keychain.secret` misreads a non-ASCII value. **U10, not started.**
+  - `find-generic-password -w` prints it as bare hex (a throwaway `비밀abc` came back as
+    `ebb984ebb080616263`).
+  - When the `-w` output is even-length hex, one `-g` call decides: `password: 0x...` is decoded
+    as UTF-8, and `password: "..."` means the output was the value. A real all-hex token stays
+    as it is.
+  - Why fix the read rather than refuse non-ASCII at `store`: the same reader serves entries the
+    owner sets by hand, which a store-side refusal never sees.
+
+## Found by the reviews: four units and the known limits
+
+**U21. The signal envelope filters third-party text.**
+- **The defect.** `signals.render_block` dumps a signal's `fields` with
+  `json.dumps(ensure_ascii=False)` and no clip, and passes `key` raw. Bidi marks, zero-width
+  characters, ANSI sequences and unlimited length reach the model in a signal turn. That holds
+  for every sense that carries someone else's text: catalog candidates, mail subjects and
+  senders, calendar titles, Claude Code hook messages.
+- **The fix** sits at that one place:
+  - `summary` passes `oneline(…, 1000)`, `key` passes `oneline(…, 200)`, and every string inside
+    `fields` passes `oneline(…, 300)`, recursively.
+  - The fields' JSON is then cut to 2,000 characters.
+  - `oneline` already turns a newline into a space, so a summary can still never forge a
+    `trust:` line.
+  - A clean single-line summary is unchanged, so the m3-measured shape holds.
+- **Where the filter lives.** `oneline` (U2 wrote it in `catalog.py`) moves to `tools.py`, next to
+  `clip`, the other text helper. `tools` imports only `clock` and `exec`, and `signals` already
+  imports `tools`, so there is no cycle. `catalog.py` imports it back
+  (`from .tools import oneline`), so every existing `catalog.oneline(...)` call keeps working.
+- **Files and size:** `tools.py` +8, `catalog.py` −6, `signals.py` +4.
+- **After:** U2.
+- **Tests:**
+  - `test_signals.test_envelope_strips_bidi_zero_width_and_ansi_from_fields`
+  - `test_envelope_clips_long_fields_and_summary`
+  - `test_single_line_summary_block_unchanged`
+  - `test_third_party_senses_pass_the_filter` (a mail, calendar, catalog and claude_code sample
+    each)
+
+**U22. An MCP error and a failed proposal are failed calls.**
+- **The defect.** `mcp/tools.flatten` returns an `isError: true` result as the string
+  `"tool error: ..."`. The handler therefore returns normally, the broker records `ok=True`, and
+  the tool record says "ok" for a 401.
+- **The same class:** `installer.propose_install_by_name` returns `"no such server; try
+  search_tools"` (and every other error) as a result string.
+- **The fix.** `flatten` raises `McpToolError(text)` on `isError`, and `propose_install_by_name`
+  raises `LookupError(result["error"])`. The broker already turns an exception into
+  `{"ok": false, "error": ...}` and `tool_result {ok: false}`, and the model reads the same text.
+- **Files and size:** `mcp/tools.py` +3, `installer.py` net 0.
+- **After:** U2.
+- **Tests:**
+  - `test_mcp_is_error_is_a_failed_call` (the record says `failed`)
+  - `test_propose_install_error_is_a_failed_call`
+
+**U23. Refusals are failed calls.**
+- **The defect.** Two more handlers return a refusal as a success: `memory.Manager.edit` returns
+  its vet reasons ("old does not match any line", ...), and `jobs.Manager.start` returns "a job
+  is already running" and "the day's job budget is spent".
+- Each would put "ok" in the record for something that did not happen, which Invariant 1
+  forbids.
+- **The fix.** Both raise `ValueError(reason)`. "Already queued for approval" stays a result: the
+  proposal exists.
+- **Files and size:** `memory.py` +1, `jobs.py` +1.
+- **After:** U4.
+- **Tests:**
+  - `test_edit_memory_refusal_is_a_failed_call`
+  - `test_start_job_refusal_is_a_failed_call`
+  - the existing tests that compared those strings become `assertRaises`
+
+**U24. A lone surrogate cannot stop the daemon.**
+- **The defect.** A lone surrogate (`"\ud83d"` from a JSON client or a model's tool arguments) is
+  written by `ledger.append` as a JSON escape. It is read back as a lone surrogate, and SQLite
+  refuses to bind it (`UnicodeEncodeError: surrogates not allowed`, reproduced 2026-09-30). The
+  projection raises, so `catch_up` at every daemon start, and `reindex`, fail on that line
+  forever.
+- **The fix** is at the ledger. One `_clean(value)` walks strings in the event and replaces a
+  lone surrogate with U+FFFD (`encode("utf-8", "surrogatepass").decode("utf-8", "replace")`). It
+  runs in `append`, before the line is written, and in `read`, after each line is parsed, so a
+  ledger written before the fix also catches up. A valid pair is untouched, because `json.loads`
+  already joins it into one character.
+- **Files and size:** `ledger.py` +8.
+- **After:** nothing. It goes first, before U14a and U15a touch `ledger.py`.
+- **Tests:**
+  - `test_lone_surrogate_replaced_at_append`
+  - `test_old_ledger_with_a_lone_surrogate_catches_up_and_reindexes`
+  - `test_astral_characters_untouched`
+
+**Known limits** (listed, not units):
+- **The summary call's usage is lost when it errors (U9).** `memory_pass`'s `usage` sums both
+  calls only when the summary call returns.
+- **A reindex is needed once after the upgrade.** The tool record (U5) is projected only from
+  events applied after it landed, so an existing `state.db` has no record for past turns until
+  `pathfinder reindex` runs with the daemon stopped. The README's upgrade note says so.
+- **`senses/_eventkit.py` (210 lines) is under no ceiling.** `test_sense_files_under_150_lines`
+  skips every `_` file. U17 should cover it: shared sense adapters get a ceiling of 250. That
+  matters more now that U25 adds `_imap.py`, so an underscore does not become the way around the
+  sense budget.
+
+## Gmail (D57, D59): the mail sense over IMAP, reading and searching
+
+**First, the owner's check. Everything below depends on it.**
+- Signed in to the university account, open `myaccount.google.com/apppasswords`.
+- If the page offers to create an app password, this section applies.
+- If it says the setting is not available for the account, go to the fallback section.
+  - App passwords need 2-Step Verification on.
+  - A Workspace administrator can switch off 2-Step Verification, app passwords, or IMAP itself.
+
+**What exists** (`senses/mail.py` on `partition-8`, 148 lines):
+- `poll`: every 180 s, `UNSEEN` headers only, through `BODY.PEEK` on a read-only `SELECT`.
+- `list_mail(limit)`: the newest headers.
+- `read_mail(id)`: one message's plain body by Message-ID, cut at 8,000 characters. The id is
+  checked before it enters a `SEARCH` string.
+- The password is read from the Keychain on each call (`pathfinder-mail`/`<user>`), never kept
+  in config.
+
+**What is added (U25):**
+- **`search_mail(query, limit=10)`.**
+  - **Parameters.** `query` is a string of at most 200 characters. On Gmail, it takes Gmail's
+    own search syntax: `from:`, `subject:`, `after:2026/09/01`, `newer_than:7d`, plain words.
+    `limit` is an integer from 1 to 20.
+  - **The IMAP command.** `UID SEARCH CHARSET UTF-8 X-GM-RAW <literal>` when the server
+    advertises `X-GM-EXT-1` (Gmail), else `UID SEARCH CHARSET UTF-8 TEXT <literal>`.
+  - **The query goes as an IMAP literal** (`conn.literal = query.encode("utf-8")`) and is never
+    interpolated into the command. There is no quoting to get wrong and no CRLF to inject, and a
+    Korean query works.
+  - **What it returns.** The newest `limit` matches, headers only (`BODY.PEEK[HEADER.FIELDS
+    (FROM SUBJECT DATE MESSAGE-ID)]`), as `[{id, from, subject, date}]`. The mailbox stays
+    read-only and nothing is marked read.
+  - **Known limit:** it searches the configured mailbox (`INBOX`). Mail archived out of the inbox
+    is found only when the `mailbox` option names Gmail's All Mail folder, whose name is
+    localized.
+- **Third-party text passes the same filter as U21.** `from`, `subject` and `date` in
+  `list_mail`, `read_mail` and `search_mail` pass `oneline(…, 300)`. A body keeps its newlines
+  but loses controls, bidi and zero-width characters, and is still cut at 8,000.
+- **The tools read the sense's bound `HOME`,** as `schedule.py`'s do. Today `list_mail` and
+  `read_mail` call `config.home()`, which `signals.load` says a sense must not do.
+- **The process-local defect** (`_last_uid`, noted in `mail.py`).
+  - The watermark lives in the process, so every restart re-announces all `UNSEEN` mail older
+    than the 24-hour dedupe.
+  - A Gmail inbox with a thousand unread messages would put a thousand `new_mail` signals in
+    the ledger, and in the memory pass's slice, on every restart.
+  - Fix: a process's first poll of a `(host, user, mailbox, UIDVALIDITY)` takes the current
+    highest UID as its watermark and announces nothing. Mail that arrived while the daemon was
+    down is found with `list_mail`/`search_mail`, not announced. +2 lines.
+- **The 150-line ceiling.** `mail.py` is at 148, and search, the filter and the watermark add
+  about 30.
+  - The IMAP plumbing moves to `senses/_imap.py`, an adapter like `_eventkit.py`: `_decode`,
+    `_connect`, `_logout`, `_fetch`, `_message_id` and the new search helper, about 65 lines,
+    under U17's 250 for adapters.
+  - `mail.py` keeps `poll`, the three tools and their specs, about 118 lines.
+
+**The app password reaches the Keychain without the chat (D53) (U26):**
+- **Commands.** `/secret mail` in the screen, `pathfinder secret mail` in a shell. The masked
+  input and `keychain.store` are the ones U10 and U11 build.
+- **One argument means the mail password.** An MCP secret always names a variable
+  (`<id> NAME`), so arity tells the two apart, and an MCP server whose id happens to be `mail`
+  is not shadowed.
+- **One function resolves the target:** `keychain.target(home, id, name=None)`. With no `name`
+  it returns the mail sense's `keychain_service` and `user`; otherwise
+  `("pathfinder-mcp-" + id, name)`. If the mail sense is not configured, it says "turn the mail
+  sense on first".
+- **The assistant asks in words, from the skill's step.** The harness takes the value masked,
+  and the value never passes through the chat, the ledger or the model. The installer's harness
+  ask (U16) is for MCP servers; a model-callable ask for any procedure is later work
+  ("disagree" 11).
+
+**What the owner does by hand: 7 steps, 3 of them on Google's pages.**
+1. The check above (`myaccount.google.com/apppasswords`).
+2. 2-Step Verification on, if it is not.
+3. Create an app password named PATHFINDER, and keep the 16 characters on screen.
+4. `pathfinder config set senses '...'`. This is the merged `senses` object with
+   `"mail": {"host": "imap.gmail.com", "user": "<the address>"}` added. `config set` replaces the
+   whole object, so the line must carry the existing senses too; `init` prints that merged line.
+5. `/secret mail`, then paste the app password.
+6. `pathfinder service restart`: senses load at start.
+7. "What's in my inbox?" A login refusal here means IMAP is off for the account.
+
+The shipped skill `connect-gmail` walks these steps (the skills section).
+
+**Units.**
+- **U25:** `senses/_imap.py` (new) and `senses/mail.py`: search, the filter, `HOME`, the
+  watermark, the move. About 65 + (−30) lines. After U21. Tests:
+  - `test_search_mail_uses_x_gm_raw_on_gmail_and_text_elsewhere`
+  - `test_query_goes_as_a_literal_utf8`
+  - `test_search_never_marks_read`
+  - `test_headers_pass_the_filter`
+  - `test_first_poll_takes_the_watermark_silently`
+  - `test_mail_tools_use_the_bound_home`
+  - `test_mail_under_150`
+- **U26:** `keychain.target`, `tui.py` (`/secret mail`) and `__main__` (`secret mail`), about
+  +12. After U15b. Tests:
+  - `test_secret_mail_resolves_service_and_user`
+  - `test_secret_mail_unconfigured_says_so`
+  - `test_mcp_server_named_mail_is_not_shadowed`
+
+## Gmail's fallback: a local Google server with its own OAuth (only if the check fails)
+
+This is designed only if the owner's account refuses an app password. The path is a registry MCP
+server for Gmail that runs Google's OAuth itself, installed through the tool path (D3). What it
+costs:
+- **A Google Cloud project, made by hand.** Enable the Gmail API, configure the OAuth consent
+  screen, create a desktop OAuth client, download its JSON, and point the server at it. That is
+  about ten steps in Google's console.
+- **A refresh token that expires every 7 days** while the consent screen is in "testing" status,
+  so consent is repeated weekly. Leaving testing needs Google's verification for Gmail's
+  restricted scopes.
+- **The server keeps its tokens in a plain file outside the Keychain,** against D53 and the
+  "secrets in the Keychain" rule, unless the chosen server supports a keyring.
+- **The administrator can block this too.** A Workspace administrator can refuse third-party
+  OAuth clients. Then D57's reversal applies: Gmail waits for the external server's design.
+
+## Skills (D58) — a proposal for the next session to confirm with the owner
+
+This amends the blueprint, which cut `skills/`: §12 and lines 86, 92 and 338 of
+`docs/blueprint/pathfinder-blueprint.html` list it among the things taken out. Nothing here is
+built until the owner confirms it and answers the three questions below.
+
+**What a skill is.** A procedure the owner has checked, which the assistant reads when asked to
+do that thing, so it stops inventing one. On 2026-09-26 it invented a way to get a Slack token.
+A skill is an instruction, so it is trusted in a way a wiki page (knowledge, data) is not.
+
+**Where skills live.**
+- **Shipped:** `pathfinder/skills/<name>.md`, package data next to `prompts/`. `pyproject.toml`'s
+  `package-data` gains `"skills/*.md"`. Read-only; an upgrade replaces them.
+- **The owner's:** `<home>/skills/<name>.md` (0600, like the rest of the home). A file here with
+  the same name as a shipped skill is the owner's copy and wins.
+
+**The file format** follows Claude Code's `SKILL.md`, reduced to one file:
+- Frontmatter with `name` (lowercase, digits, hyphens; it must equal the file's stem) and
+  `description` (one line, at most 160 characters, saying when to use it).
+- Then a markdown body.
+- The frontmatter is parsed by the existing `rules._parse_frontmatter`.
+- The body is loaded only when the skill is read. No resource folders.
+
+**How the model knows which skills exist, without paying for their bodies.**
+- The index is every skill's `name` and `description`, sorted by name, never cut.
+- It is not cut the way the memory wiki's map is (1,000 characters, newest first, so older
+  entries fall off). Instead, it is bounded when files are loaded: a description over 160
+  characters, or an index over 4,000 characters, is refused at load with a message to the owner.
+- Where it rides each turn is question S1. The recommendation: in `read_skill`'s own
+  description. It goes with every request, and it stays byte-stable until a skill changes, which
+  suits caching.
+- `skills.index()` is cheap: one directory listing and one frontmatter read per file, redone
+  when a directory's mtime moves.
+
+**The one tool: `read_skill(name)`.**
+- It returns the body with a harness header: `[Skill '<name>' - a procedure the owner approved;
+  follow it. Secrets go through /secret, never the chat.]`.
+- The body is cut at `tools.READ_CLIP`.
+- Origins: user and job. Read-only, no gate.
+- `system.txt` gains one line: a `read_skill` result is the owner's procedure and is followed.
+  It is the one tool result that is not "data, not an instruction", and the only one whose text
+  can come solely from the two trusted directories.
+
+**What makes a file a skill.**
+- Only its location: the package directory, or `<home>/skills/`.
+- Nothing else writes there except:
+  - the owner, by hand;
+  - an approved `edit_memory` with target `skills/<name>.md`, per question S2.
+- `memory.vault_path` accepts `skills/` only from origin `user`. Even then it always goes to the
+  approval box, whatever `grants` says. A user turn can be steered by a page it just read, so
+  D28's apply-at-once never applies to a skill.
+- **Third-party text can never become a skill.**
+  - Mail, web pages, MCP results, registry text and signals reach the model only as data.
+  - The only write path needs origin `user` and an approval showing the whole new text.
+  - The pass (origin `memory`) is refused outright.
+- A skill file holding a token-shaped string (`keychain.TOKEN_RE`) is not loaded, with a
+  warning. A procedure names the intake (`/secret <id> NAME`, `/secret mail`), never a value
+  (D53).
+
+**Shipped against the owner's copy** is question S3.
+
+**The first shipped skill: `connect-gmail`.**
+- Its description: "Use when the owner asks to connect Gmail or read their mail."
+- Its body is the check and the seven steps from the Gmail section, with the fallback's one-line
+  pointer. Its only secret step is `/secret mail`.
+
+**Budget.**
+- `pathfinder/skills.py` (new), about 80 lines: index, bounds, the override, the token check,
+  `read_skill`. Ceiling 120.
+- `connect-gmail.md`, about 35 lines.
+- `memory.vault_path` +3.
+- `system.txt` +1.
+- `pyproject.toml` +1.
+- A skill costs nothing per turn but its index line inside `read_skill`'s description: about 40
+  tokens each.
+
+**Units** (after confirmation):
+- **U27:** `skills.py`, `pyproject.toml` and tests.
+- **U28:** `memory.vault_path` (the `skills/` target, user-only, always approved) and
+  `system.txt`, plus tests.
+- **U29:** `skills/connect-gmail.md`, after U25 and U26.
+
+**Tie to the owner's direction for the server (D44/D45).** A package the server hands over is
+tools plus the skill that uses them. This file format is what the server would deliver beside
+the connection spec: installing a package would place its skill in `<home>/skills/` under the
+same one approval as the install (D3), with its source named in the frontmatter. The server's
+design starts from that pair and is not designed here.
+
+**Questions for the owner** (at most three, each with its cost):
+- **S1. Where the index rides each turn.**
+  - (a) In `read_skill`'s description. It is sent with every request and cache-stable, and it
+    costs about 40 tokens per skill. **Recommended.**
+  - (b) Only behind a `list_skills` call. It costs nothing per turn, but the model must think to
+    look, which is exactly the failure D58's reversal names.
+  - (c) In the per-turn second system message, as the wiki map is. It is uncached every turn,
+    and it is what D58's reversal keeps for the case where (a) fails.
+- **S2. Who writes a skill.**
+  - (a) The owner by hand only. Zero write code, but the assistant cannot keep a procedure it
+    just worked out.
+  - (b) Also the assistant, by proposal from a user turn: always the approval box, never
+    `grants`, never the memory pass. +3 lines in `vault_path`. **Recommended.**
+  - (c) The memory pass may propose too. That puts third-party-read slices one approval away
+    from trusted text.
+- **S3. A shipped skill the owner has edited, when an upgrade changes it.**
+  - (a) The owner's copy wins, silently. Zero code, but the owner never learns of the fix.
+  - (b) The owner's copy wins, and the index marks it "(a newer shipped version exists)". This
+    uses a `shipped_sha` field the copy keeps from the version it was made from, for +6 lines.
+    **Recommended.**
+  - (c) The shipped version wins. The owner's edits are lost on upgrade.
 
 ## ARCHITECTURE.md / ARCHITECTURE.ko.md, README pair (doc debt)
 
@@ -696,43 +1138,70 @@ paragraph covering 1-8.
 **New and changed content:**
 - **§1:** `registry.db`; the Keychain row, written by `/secret` and `pathfinder secret`, never
   chat; the home's modes.
-- **§2:** the modes, and the Q1 backstop.
+- **§2:** the modes, the vault-and-handle door, and Invariant 2.
 - **§6:** the second look.
-- **§3/§7:** the tool record, and approvals typed in chat.
+- **§3/§7:** the tool record (Invariant 1), approvals typed in chat, and D53's `secret.ask` /
+  `secret`.
 - **§10:** the two calls.
 - **§11:** the copy and D40.
-- **§12:** the new invariants.
+- **§12:** the new invariants: the rows listed under "the invariant text" above, plus the others.
+- **§11:** also the OAuth way in, once decided.
 - **§14:** `secret`, and `search` reading the copy.
 
-Both languages, one commit. **The README pair:** `/secret` replaces the `security` line for MCP
-servers.
+- **§8:** `search_mail`, the filter, `/secret mail`, and `_imap.py`.
+- **§1 and a new section:** `<home>/skills/`, and the shipped skills (if D58's proposal is
+  confirmed).
+
+Both languages, one commit.
+
+**The README pair:** `/secret` replaces the `security` line for MCP servers, and `/secret mail`
+replaces it for the mail password. `docs/senses.md` lines 96-102 change the same way. The
+README's upgrade note says to run `pathfinder reindex` once.
 
 ## Where the decisions and the code disagree
 
 1. **D40.** It says "the trial simply runs first", but `check` already reads the Keychain before
-   the trial (step 4, then `resolved_env` into step 5). What blocks a token server is different:
+   the trial. What blocks a token server is different:
    - there is no way in for the secret;
    - a missing required secret does not stop the check;
    - a required variable marked `isSecret: false` is never resolved.
 
-   The fix is the intake plus a stop. The survey that D40's reversal names (U0) keeps D40: 4 of
-   the owner's 7 services take a static token, 1 needs nothing, and 2 (Google) need OAuth.
-2. **D49** names the per-module ceilings in `test_invariants.py` as the gate. Only daemon, memory
-   and jobs of the 13 core rows have one; `state.py` (625, row 600) has none. U17 adds the 1.3x
-   line for the other ten.
-3. **D52 against blueprint §11,** "말한 것만 기억한다" ("only what was said is remembered"), and
-   `test_state.test_restore_said_only`. History now carries the names and arguments of what was
-   done. The invariant becomes "what was said and what was called; never a tool result or an
-   envelope". The test is extended, not dropped.
-4. **D51 against `loop.run`'s rule** that everything streamed reaches history (`said`). A
-   withdrawn draft was streamed but stays out of history by design. The ledger keeps it as
-   `assistant {final: false, withdrawn}`.
-5. **D30** lists the consolidation pass. D47's split takes it out of the write call. The second
-   look also needs a step left, so a draft at the last step stands.
-6. **HISTORY's forced-`memory run` defect.** A forced run already ignores the wait. What persists
-   is the wait after a forced run succeeded.
+   The fix is the intake plus a stop (U10). U0's survey keeps D40: 4 of the owner's 7 services
+   take a static token.
+2. **D49** names the per-module ceilings in `test_invariants.py` as the gate. Several have no
+   test:
+   - 10 of the 13 core rows;
+   - `mirror.py`'s 200 (D56);
+   - `senses/_eventkit.py` (210 lines; the sense test skips `_` files).
+
+   U17 adds all of them.
+3. **D52 against blueprint §11,** "only what was said is remembered". Amended to Invariant 1.
+   Built in U5, which replaced `test_restore_said_only`.
+4. **D51 against `loop.run`'s rule** that everything streamed reaches history. Amended to
+   Invariant 2. The code lands in U7a.
+5. **D30** lists the consolidation pass. D47's split took it out of the write call (U9). The
+   second look needs a step left, so a draft at the last step stands.
+6. **HISTORY's forced-`memory run` defect** was the wait after a successful forced run. Fixed in
+   U9.
 7. **m10** replayed the last 12 messages, while live sends the whole session. The exit re-run
    inherits this.
+8. **Invariant 2's "always" is not true today.** A model error in the middle of a stream drops
+   the text already streamed. U7a attaches `said` to the error and records it.
+9. **Invariant 1's record says "ok" for a call that failed or refused.** Four handlers return an
+   error or a refusal as a result string: MCP `isError`, `propose_install`, `edit_memory`'s vet,
+   and `start_job`'s refusals. U22 and U23 fix them.
+10. **D58 against the blueprint,** which cut `skills/` (lines 86, 92 and 338 of
+    `pathfinder-blueprint.html`). The skills section is a proposal that amends those lines once
+    the owner confirms it.
+11. **D53 against the mail password.** D53's main path is the harness asking. For mail, the
+    assistant asks in words for `/secret mail`, from the skill's step, and the harness takes the
+    value masked. The value never touches the chat, but the ask itself is not the harness's. A
+    model-callable ask that any procedure could use would close this. It is later work.
+12. **D36 against `installer.py`'s ceiling.** This plan lands the installer at about 698/700. The
+    only block large enough to move is D36's foreign-file helper, which D36 keeps in the
+    installer until a third caller appears. Moving it needs the owner's word.
+13. **The mail tools against `signals.load`'s rule.** `list_mail` and `read_mail` read
+    `config.home()`, where the rule says a sense uses the home it was loaded with. U25 fixes it.
 
 ## Tests that must exist
 
@@ -762,7 +1231,6 @@ servers.
   - `test_tool_record_has_no_results_and_clips_args`
   - `test_record_skips_signal_and_job_calls`
   - `test_summary_boundary_ignores_record_rows`
-  - `test_restore_said_only` (extended)
   - `test_open_approvals`
   - `test_presence_is_the_newest_row_across_sessions`
   - `test_db_wal_shm_born_0600`
@@ -805,11 +1273,23 @@ servers.
   - `test_gate_args_clipped`
   - `test_retract_rendered`
   - `test_cli_secret_uses_getpass_and_store`
-- **[Q1]** (a): `test_token_redacted_in_file_and_returned_event`, `test_scanner_uses_the_package_pattern`.
-  (b): `test_paste_vaulted_and_bound`, `test_unbound_paste_expires`,
-  `test_keychain_failure_falls_back_to_redaction`. (c): `test_secret_ask_sent_on_missing_secret`,
-  `test_secret_value_never_reaches_ledger_or_state`, `test_secret_stored_reproposes`. Token-shaped
-  strings are built by concatenation.
+- **D53's backstop** (vault and handle):
+  - `test_paste_vaulted_and_handle_returned` (the file, the returned event and history hold the
+    handle)
+  - `test_bind_moves_and_deletes_the_pasted_item`
+  - `test_unbound_paste_expires_after_24h`
+  - `test_expired_handle_says_so`
+  - `test_keychain_failure_falls_back_to_redaction`
+  - `test_scanner_uses_the_package_pattern`
+  - `test_pasted_token_reaches_the_record_as_a_handle`
+- **D53's main path:**
+  - `test_secret_ask_sent_on_missing_secret`
+  - `test_secret_value_never_reaches_ledger_or_state`
+  - `test_secret_stored_reproposes`
+  - `test_say_client_gets_the_slash_secret_line`
+- Token-shaped strings are built by concatenation.
+- **The invariant tests:** every test named under "the invariant text", with
+  `test_restore_said_only` replaced.
 - **File modes:**
   - `test_partition_and_lock_born_0600_dir_0700`
   - `test_make_private_drops_group_other_keeps_owner_x_skips_symlinks_and_workspace`
@@ -823,42 +1303,80 @@ servers.
   - `test_wiki_dir_0700`
 - **`test_invariants`:**
   - the 1.3x ceiling for every §6 row
-  - `mirror.py` <= 150
+  - `mirror.py` <= 200 (D56)
   - `test_second_look_matches_the_bench`: `VERIFIER_PROMPT`, `RERUN_NOTE` and `FLAG_WORDS`
     byte-identical to `bench/m10_unsupported.py`, and `verifier_input` equal to the bench's for a
     fixture turn
   - `test_home_stays_private`
   - no new ledger type
   - only `catalog.py` names the registry URL
+- **U21 (envelope):**
+  - `test_envelope_strips_bidi_zero_width_and_ansi_from_fields`
+  - `test_envelope_clips_long_fields_and_summary`
+  - `test_single_line_summary_block_unchanged`
+  - `test_third_party_senses_pass_the_filter`
+- **U22, U23 (failed calls):**
+  - `test_mcp_is_error_is_a_failed_call`
+  - `test_propose_install_error_is_a_failed_call`
+  - `test_edit_memory_refusal_is_a_failed_call`
+  - `test_start_job_refusal_is_a_failed_call`
+- **U24 (surrogates):**
+  - `test_lone_surrogate_replaced_at_append`
+  - `test_old_ledger_with_a_lone_surrogate_catches_up_and_reindexes`
+  - `test_astral_characters_untouched`
+- **U25, U26 (Gmail):** as listed in the Gmail section.
+- **U27-U29 (skills, if confirmed):**
+  - `test_index_lists_shipped_and_owner_skills_sorted_and_uncut`
+  - `test_index_over_bound_is_refused_at_load`
+  - `test_owner_copy_wins_and_marks_a_newer_shipped_version`
+  - `test_read_skill_header_and_clip`
+  - `test_skill_with_a_token_is_not_loaded`
+  - `test_skills_target_user_only_and_always_approved`
+  - `test_connect_gmail_is_shipped_and_parses`
+- **U17 (the ceilings):**
+  - 1.3x for every §6 row
+  - `mirror.py` <= 200
+  - `senses/_*.py` <= 250
+  - `skills.py` <= 120, if built
+  - plus the invariant tests listed above
 
 ## Units and build order
 
-Each unit is one implementer call: 1-3 files plus their tests. Briefs are files in the session
-scratchpad. Units sharing a file run in the order given; the rest run in parallel.
+Each unit is one implementer call: 1-3 files plus their tests, briefed from a file in the session
+scratchpad. Units that share a file run one after another, in table order; the rest may run in
+parallel. **Deploy gate: U15a and U21.**
 
-| # | Unit | Files | Size | After |
-|---|---|---|---|---|
-| U0 | **Completed.** D40's survey: 4 of 7 services take a token, 2 need OAuth (Google). Required variables not marked secret: 54 of 3,660. Required variables with a `default`: 81 of 6,131. Deletions arrive through `updated_since`. Paging facts. `security -i`'s escaping and exit codes. The `-w` hex defect (5f). All folded into the sections above | — | done | — |
-| U1 | The registry copy | `mirror.py`, `catalog.py` | medium: ~140 lines | — |
-| U2 | Readers of the copy | `senses/catalog.py`, `installer.propose_by_name`, `__main__.search_cmd` | small: −15 net | U1 |
-| U3 | Move 1 | `installer.handle`, `daemon.py` | small: daemon −21 | U2 |
-| U4 | Move 2, 5b | `jobs.py`, `daemon.py` | small: daemon −10 | U3 |
-| U5 | The tool record (D52-1) | `state.py` | small-medium: ~+20 | — |
-| U6 | Approvals typed in chat (D52-2) | `broker.py`, `state.open_approvals`, `daemon.turn` | small: daemon +7 | U4, U5 |
-| U7a | The second look (D51) | `loop.py`, `daemon._run_turn` | medium: loop +45, daemon +4 | U6 |
-| U7b | The `retract` line | `tui.render`, `__main__._stream` | small | U7a |
-| U8 | The adopted prompt | `prompts/system.txt` | small | anytime before U18 |
-| U9 | The split pass, 5e | `memory.py`, `consolidate.txt`, `summarize.txt` | medium: ~+20 lines + prompts | — |
-| U10 | The intake, D40, 5f | `keychain.py` (`store`, the fixed `secret` read), `installer.check` step 4, `__main__ secret` | small: ~+36 | U3 |
-| U11 | `/secret`, 5d | `tui.py` | small | U7b, U10 |
-| U12 | 5a | `state.py`, `deliver.py`, `daemon.py` line 573 | small | U6 |
-| U13 | 5c | `_eventkit.py` | tiny | — |
-| U14a | Modes, born private | `ledger.py`, `state.py` (0600 db) | small | U12 |
-| U14b | Modes, existing files | `config.make_private`, `__main__` daemon branch, `init.py` literals | small | U10 |
-| U15 [Q1] | The backstop at the ledger door, (a) or (b) | `ledger.py`, `keychain.py` (`TOKEN_RE`; b: vault/bind/sweep), `scripts/scan_personal.py` | small (a) / medium (b) | U14a, U10 |
-| U16 [Q1 c] | The harness-asked secret | `daemon.py` (record hook, `secret` handler), `tui.py` (`secret.ask`), `installer.py` (event fields) | small-medium | U11, U15 |
-| U17 | Ceilings | `tests/test_invariants.py` | small | any time; lands last |
-| U18 | Exit runs | `bench/m9_memory_write.py`: `current` = the shipped write prompt, `no_summary` dropped, USER.md edits recorded, then (8) at ~40k tokens. `bench/m10_unsupported.py`: `baseline` = the adopted prompt, verify riding on it, the record present through `State.history`, then (13) at ~215k tokens. Both need the lead's go-ahead | — | U5, U7a, U8, U9 |
-| Lead | Live (1)-(14); both doc pairs; HISTORY ("Before partition 8" with the owner's answers, "Partition 8"); the reviewer (opus, read-only). Defect classes: secrets reaching the ledger, the withdrawn draft and history, file modes, the sync thread at shutdown, FTS upserts, the chat-approval match. Then the scan and the commit on `build` | — | — | — |
-
-Q1's answer is needed only by U15 and U16. Everything else builds without it.
+| # | State | Unit | Files | Size | After | Key tests |
+|---|---|---|---|---|---|---|
+| U0 | **done** | Survey: D40 kept (4 of 7 services take a token), secret-or-required, deletions arrive through `updated_since`, paging facts, `security -i` escaping, the `-w` hex defect | — | — | — | — |
+| U1 | **done, merged** | The registry copy | `mirror.py`, `catalog.py` | 188 + 275 | — | `test_mirror.*`, `test_catalog.*` |
+| U5 | **done, merged** (U5b in it) | The tool record, four states | `state.py` | 681 | — | `test_history_is_said_and_called_only`, `test_no_tool_record_without_tool_call_events` |
+| U9 | **done, merged** | The split pass, 5e | `memory.py`, `consolidate.txt`, `summarize.txt` | 710 | — | `test_memory.*` |
+| U13 | **done, merged** | 5c: one EventKit store under a lock | `senses/_eventkit.py` | 210 | — | `test_calendar.*` |
+| U2 | **done**, merged at 429752d | Readers of the copy | `senses/catalog.py`, `installer.propose_by_name`, `__main__.search_cmd` (and `mirror.py`/`catalog.py` touches) | mirror 191, catalog 278, installer 680, sense 139 | U1 | `test_catalog.*`, `test_installer.*` |
+| U24 | not started | Lone surrogates | `ledger.py` | +8 | — | `test_old_ledger_with_a_lone_surrogate_catches_up_and_reindexes` |
+| U21 | not started | The envelope filter (**deploy gate**) | `tools.py`, `catalog.py`, `signals.py` | +6 net | U2 | `test_envelope_strips_bidi_zero_width_and_ansi_from_fields` |
+| U22 | not started | MCP error and failed proposal as failed calls | `mcp/tools.py`, `installer.py` | +3 | U2 | `test_mcp_is_error_is_a_failed_call` |
+| U3 | not started | Move 1: `install`/`uninstall` into the installer | `installer.py`, `daemon.py` | daemon −21, installer +15 | U22 | `test_handle_install_and_uninstall_replies` |
+| U4 | not started | Move 2, 5b | `jobs.py`, `daemon.py` | daemon −10, jobs +15 | U3 | `test_job_lines_reach_a_moved_screen` |
+| U23 | not started | Refusals as failed calls | `memory.py`, `jobs.py` | +2 | U4 | `test_start_job_refusal_is_a_failed_call` |
+| U6 | not started | Approvals typed in chat (D52-2) | `broker.py`, `state.py` (`open_approvals`), `daemon.py` (`turn`) | daemon +7, broker +26, state +6 | U4 | `test_chat_approval_answered_without_a_model_call` |
+| U7a | not started | The second look (D51), plus a mid-stream error's text | `loop.py`, `daemon.py` (`_run_turn`) | loop +47, daemon +6 | U6 | `test_flagged_draft_is_withdrawn_and_rerun_once`, `test_every_streamed_delta_is_in_the_ledger` |
+| U7b | not started | The `retract` line | `tui.py` (`render`), `__main__.py` (`_stream`) | +4 | U7a | `test_retract_rendered` |
+| U8 | not started | The adopted prompt | `prompts/system.txt` | — | before U18 | `test_second_look_matches_the_bench` (in U17) |
+| U10 | not started | Intake, D40, 5f | `keychain.py` (`store`, fixed `secret`), `installer.py` (`check` step 4), `__main__.py` (`secret`) | +36 | U3, U7b | `test_store_escapes_backslash_then_quote`, `test_missing_required_secret_stops_before_the_trial` |
+| U11 | not started | `/secret`, 5d | `tui.py` | +22 | U7b, U10 | `test_slash_secret_masks_and_never_touches_the_socket` |
+| U12 | not started | 5a | `state.py`, `deliver.py`, `daemon.py` line 573 | ~0 | U6 | `test_presence_is_the_newest_row_across_sessions` |
+| U14a | not started | Born private | `ledger.py`, `state.py` | +1 | U12, U24 | `test_partition_and_lock_born_0600_dir_0700` |
+| U14b | not started | Existing files private | `config.py` (`make_private`), `__main__.py` (daemon branch), `init.py` (literals) | +11 | U10 | `test_make_private_drops_group_other_keeps_owner_x_skips_symlinks_and_workspace` |
+| U15a | not started | D53's backstop: the vault at the ledger door (**deploy gate**) | `ledger.py`, `keychain.py` (`TOKEN_RE`, vault, sweep, index), `scripts/scan_personal.py` | +45 | U14a, U10 | `test_paste_vaulted_and_handle_returned`, `test_pasted_token_reaches_the_record_as_a_handle` |
+| U15b | not started | Binding a handle | `__main__.py` (`secret --from`), `tui.py` (`/secret --from`; the masked prompt lists live handles) | +7 | U15a, U11, U14b | `test_bind_moves_and_deletes_the_pasted_item` |
+| U16 | not started | D53's main path: the harness asks | `daemon.py` (`record` hook, `secret` handler), `tui.py` (`secret.ask`), `installer.py` (event fields) | daemon +9, tui +12, installer +1 | U15b | `test_secret_value_never_reaches_ledger_or_state` |
+| U25 | not started | Gmail: `search_mail`, the filter, `HOME`, the watermark, the IMAP move | `senses/_imap.py` (new), `senses/mail.py` | +65 / −30 | U21 | `test_query_goes_as_a_literal_utf8`, `test_first_poll_takes_the_watermark_silently` |
+| U26 | not started | The mail password intake | `keychain.py` (`target`), `tui.py`, `__main__.py` | +12 | U16, U15b | `test_secret_mail_resolves_service_and_user` |
+| U27 | **proposal**: the owner confirms D58's design first | Skills: index, `read_skill` | `skills.py` (new), `pyproject.toml` | ~80 | confirmation | `test_index_lists_shipped_and_owner_skills_sorted_and_uncut` |
+| U28 | **proposal** | Skills: the write path | `memory.py` (`vault_path`), `prompts/system.txt` | +4 | U27, U8 | `test_skills_target_user_only_and_always_approved` |
+| U29 | **proposal** | The first shipped skill | `pathfinder/skills/connect-gmail.md` | ~35 | U27, U25, U26 | `test_connect_gmail_is_shipped_and_parses` |
+| U17 | not started | Ceilings and invariant tests | `tests/test_invariants.py` | — | last | the U17 list above |
+| U18 | not started | Exit runs: m9 on the split pass (~40k tokens), m10 on the adopted prompt with the record and the second look (~215k tokens), each with the lead's go-ahead | `bench/m9_memory_write.py`, `bench/m10_unsupported.py` | — | U5, U7a, U8, U9 | — |
+| Lead | — | Live (1)-(16); both doc pairs, `docs/senses.md`; HISTORY; the reviewer (opus, read-only); the scan; the commit on `build`; deploy only past the gate | — | — | all | — |

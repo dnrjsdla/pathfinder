@@ -41,6 +41,11 @@ class BrokerTest(unittest.TestCase):
         result = b.call("c3", "write_thing", {})  # deny
         self.assertEqual(result, {"ok": False, "denied": True, "error": policy.DENIED_TEXT})
 
+    def test_refused_call_emits_nothing(self):
+        b, emitted = self._broker(origin="system")
+        self.assertTrue(b.call("c1", "write_thing", {})["denied"])  # policy refuses a write here
+        self.assertEqual(emitted, [])  # no tool_call: the record can never show a call that did not run
+
     def test_broker_approved_skips_policy(self):
         b, emitted = self._broker(approved={"c1": ("write_thing", {})})
         result = b.call("c1", "write_thing", {})

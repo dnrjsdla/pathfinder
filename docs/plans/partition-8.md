@@ -941,6 +941,35 @@ call errors.
 - **Reversal (D62):** a character a tool's legitimate output needs is allowed back in `clean`,
   in one place.
 
+**U32. Only the owner's activity keeps a session alive (D63); a notice is clean; the approval
+line says how to get past it.**
+- **The defect (D63).** `state.apply` moves a session's `last_ts` for every event with a session
+  except origin `memory`, `presence`, and a signal event that is not `assistant`. Job events
+  (origin `job`) and the approval of a job's gate are not excepted, so a job revives a session
+  D41 had ended. Reproduced with the real daemon: session A aged three hours, its job emits
+  `approval_pending` or `job_done`, and the next `say` lands in A with A's whole history.
+- **The fix:**
+  - `state.apply`: an event of origin `job`, or one that carries a `job`, does not move
+    `last_ts`. The `approval` events for a job's gate (`daemon.py` and `jobs.py`) carry `job`.
+  - `state.open_approvals(session)` also returns a pending job gate from any session, so a
+    phrase typed in the screen's session gets the harness line (D52) and never reaches a model
+    that knows nothing of the job.
+  - **The notice text** (`daemon.py`, where a `Notice` is built from a signal's summary) passes
+    `tools.clean` (D62): every sense's summary reaches the owner's screen, and until now only
+    the model's side was filtered. Found at U25's review.
+  - **The approval line** (U6) ends with the way past it, decided 2026-09-30: `... - if you
+    meant something else, say it again · 다른 뜻이었다면 다시 말해 주세요`. A short reply to the
+    assistant's own question ("응", "no") is otherwise swallowed once with no hint.
+- **Files and size:** `state.py` +2, `daemon.py` +2, `jobs.py` +1, `broker.py` +1.
+- **After:** U7a (`daemon.py`), U31 (`tools.clean`).
+- **Tests:**
+  - `test_state.test_job_events_do_not_keep_a_session_alive`
+  - `test_daemon.test_say_after_a_job_gate_in_an_aged_session_lands_in_the_new_session`
+  - `test_daemon.test_job_done_notice_lands_in_the_screens_session`
+  - `test_state.test_open_approvals_includes_a_job_gate_from_another_session`
+  - `test_daemon.test_notice_text_passes_clean`
+  - `test_broker.test_chat_approval_line_says_how_to_get_past_it`
+
 **Known limits** (listed, not units):
 - **The summary call's usage is lost when it errors (U9).** `memory_pass`'s `usage` sums both
   calls only when the summary call returns.
@@ -1431,9 +1460,10 @@ parallel. **Deploy gate: U15a, U21 and U31.**
 | U15a | not started | D53's backstop: the vault at the ledger door (**deploy gate**) | `ledger.py`, `keychain.py` (`TOKEN_RE`, vault, sweep, index), `scripts/scan_personal.py` | +45 | U14a, U10 | `test_paste_vaulted_and_handle_returned`, `test_pasted_token_reaches_the_record_as_a_handle` |
 | U15b | not started | Binding a handle | `__main__.py` (`secret --from`), `tui.py` (`/secret --from`; the masked prompt lists live handles) | +7 | U15a, U11, U14b | `test_bind_moves_and_deletes_the_pasted_item` |
 | U16 | not started | D53's main path: the harness asks | `daemon.py` (`record` hook, `secret` handler), `tui.py` (`secret.ask`), `installer.py` (event fields) | daemon +9, tui +12, installer +1 | U15b | `test_secret_value_never_reaches_ledger_or_state` |
-| U25 | not started | Gmail: `search_mail`, the filter, `HOME`, the watermark, the IMAP move | `senses/_imap.py` (new), `senses/mail.py` | +65 / −30 | U21 | `test_query_goes_as_a_literal_utf8`, `test_first_poll_takes_the_watermark_silently` |
+| U25 | **done, merged** | Gmail: `search_mail`, the filter, `HOME`, the watermark, the IMAP move | `senses/_imap.py` (new), `senses/mail.py` | +65 / −30 | U21 | `test_query_goes_as_a_literal_utf8`, `test_first_poll_takes_the_watermark_silently` |
 | U31 | not started | Every tool result passes `tools.clean` (D62); `oneline` is `clean` plus flattening; the mail body filter becomes `clean` | `tools.py`, `broker.py`, `senses/mail.py` | tools +5, broker +6, mail −1 | U25, U6 | `test_tool_result_loses_bidi_zero_width_ansi_and_controls`, `test_tool_result_keeps_newlines_tabs_and_spacing`, `test_error_text_passes_the_filter`, `test_ledger_keeps_the_raw_result`, `test_oneline_is_clean_then_flatten` |
 | U26 | not started | The mail password intake; the daemon asks at start when the item is missing | `keychain.py` (`target`), `tui.py`, `__main__.py`, `daemon.py` | +12, daemon +4 | U16, U15b | `test_secret_mail_resolves_service_and_user`, `test_missing_mail_password_is_asked_at_start` |
+| U32 | not started | D63: only the owner's activity keeps a session alive; notice text passes `clean`; the approval line's way out | `state.py`, `daemon.py`, `jobs.py`, `broker.py` | +6 | U7a, U31 | `test_say_after_a_job_gate_in_an_aged_session_lands_in_the_new_session` |
 | U27 | not started | Skills (D58, D61): the seed copy, the index, `read_skill` | `skills.py` (new), `pyproject.toml`, `daemon.py` (`skills.bind`) | ~80, +1, daemon +1 | — | `test_seed_is_copied_when_missing_and_never_overwrites`, `test_index_lists_every_skill_sorted_and_uncut` |
 | U28 | not started | Skills: the write path (a proposal from a user turn, always approved) | `memory.py` (`vault_path`), `prompts/system.txt` | +4 | U27, U8 | `test_skills_target_user_only_and_always_approved` |
 | U29 | not started | The first seed | `pathfinder/skills/connect-gmail.md` | ~35 | U27, U25, U26 | `test_connect_gmail_is_shipped_and_parses` |

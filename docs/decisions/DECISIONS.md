@@ -483,6 +483,19 @@ gate's purpose is that third-party text is filtered before the model, and a tool
 larger path. — *Reversed if* a tool's legitimate output needs a removed character (a zero-width
 joiner inside an emoji the owner uses): that character is allowed back in `clean`, in one place.
 
+**D63. Only the owner's activity keeps a session alive (amends D41).** A job's events - its
+start, each tool call and result, its gate, its end - no longer move its session's `last_ts`,
+and neither does the approval of a job's gate. Found on 2026-09-30: a job that gated or ended
+in a session more than two hours old made that session the newest again, so the owner's next
+message went into it, without a word on the screen, and the model received the old history -
+the 109-turn case D41 was written to stop. D41 never named jobs; its rule for a signal turn
+("only the notice it delivered is conversation") now holds for a job too. The `job_done` notice
+lands in the session the screen is in, with the goal and the summary. A job's open gate is
+answered by the harness from any session (D52), because the gate no longer pulls the owner back
+to the session that holds it. — *Reversed if* live use shows follow-up questions about a
+finished job failing for lack of the conversation that started it: then the notice carries more
+of the job, not the old session.
+
 **The owner's direction for the server (D44/D45), recorded so it is not lost:** what the server
 is for is handing over tool PACKAGES that are useful as they arrive - not wiring services one by
 one. Partition 8 connects single services because the secret path and the registry copy need a

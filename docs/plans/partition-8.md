@@ -10,7 +10,7 @@
 The unit table at the end is where the next session starts. Every row carries its state, its
 files, its size, what it waits for, and its tests.
 
-**Deploy gate.** Nothing from partition 8 reaches the owner's daemon until U15a, U21 and U31 have
+**Deploy gate.** Nothing from partition 8 reaches the owner's daemon until U15a, U21, U31 and U33 have
 landed:
 - **U15a (the pasted-token handle at the ledger door).** The tool record (U5, merged) re-sends up
   to 120 characters of every call's arguments to the cloud model on every later turn. A token
@@ -19,6 +19,8 @@ landed:
   unclipped through a signal's `fields`.
 - **U31 (the tool-result filter, D62).** A tool result is the larger path for the same text; the
   gate's purpose is that third-party text is filtered before the model.
+- **U33 (the remaining raw exits).** U31's review surveyed every exit: calendar titles in the
+  agenda and an MCP server's parameter schema still reach the model raw.
 
 ## The secret path (D53, decided)
 
@@ -970,6 +972,39 @@ line says how to get past it.**
   - `test_daemon.test_notice_text_passes_clean`
   - `test_broker.test_chat_approval_line_says_how_to_get_past_it`
 
+**U33. The exits U21 and U31 do not cover (found by U31's review, a survey of every exit).**
+- **The defect.** Third-party text still reaches the model or the owner's terminal raw through:
+  - **The agenda** (`senses/calendar.py` `context`, the second system message of every turn): a
+    calendar title is only whitespace-flattened. An invitation is someone else's text; ANSI,
+    bidi, zero-width and tag characters ride in every turn. `senses/reminders.py` shares the code.
+  - **A sense's summary** for calendar, reminders, schedule and shell (mail and catalog already
+    pass `oneline`): it becomes notice text and then a final `assistant` event, so it enters
+    history as the assistant's own words. U32 cleans the notice where it is built; the summaries
+    themselves pass `oneline` here, so the ledger's signal holds the clean line too.
+  - **An MCP tool's parameter schema** (`mcp/tools.py`): parameter names, parameter descriptions
+    and `enum` values go to the model as the server sent them; only the top-level description
+    is filtered. The `coerce` errors then quote those names.
+  - **The gate and job.gate lines** on the screen (`tui.py`): `json.dumps` escapes C0 only, so a
+    bidi override can reorder the line the owner approves from.
+  - **`mcp/protocol.sanitize`** is a second character rule next to `clean` (it drops tabs and
+    leaves ANSI remnants), against D62's one rule.
+- **The fix:** each of these passes `tools.oneline` (one line) or `tools.clean` (text that keeps
+  its lines); `sanitize` becomes a call to the one rule with its own flattening and length kept.
+  No new function.
+- **Left as they are** (the review's nits, recorded): variation selectors and a few blank-looking
+  letters survive `clean`; a zero-width non-joiner is lost (Persian, Hindi); a result nested a
+  thousand deep raises; `clean` runs before `clip` on the whole result (0.13 s for 5 MB).
+- **Files and size:** `senses/calendar.py`, `senses/reminders.py` (or their shared
+  `_eventkit.py`), `senses/schedule.py`, `senses/shell.py`, `mcp/tools.py`, `mcp/protocol.py`,
+  `tui.py`; about +10 net.
+- **After:** U31 (`clean`), U7b (`tui.py`). **Deploy gate.**
+- **Tests:**
+  - `test_agenda_lines_pass_the_filter`
+  - `test_sense_summaries_are_one_clean_line` (calendar, reminders, schedule, shell)
+  - `test_mcp_parameter_schema_passes_the_filter`
+  - `test_gate_line_has_no_bidi_or_c1`
+  - `test_sanitize_is_the_one_rule`
+
 **Known limits** (listed, not units):
 - **The summary call's usage is lost when it errors (U9).** `memory_pass`'s `usage` sums both
   calls only when the summary call returns.
@@ -1431,7 +1466,7 @@ README's upgrade note says to run `pathfinder reindex` once.
 
 Each unit is one implementer call: 1-3 files plus their tests, briefed from a file in the session
 scratchpad. Units that share a file run one after another, in table order; the rest may run in
-parallel. **Deploy gate: U15a, U21 and U31.**
+parallel. **Deploy gate: U15a, U21, U31 and U33.**
 
 | # | State | Unit | Files | Size | After | Key tests |
 |---|---|---|---|---|---|---|
@@ -1461,9 +1496,10 @@ parallel. **Deploy gate: U15a, U21 and U31.**
 | U15b | not started | Binding a handle | `__main__.py` (`secret --from`), `tui.py` (`/secret --from`; the masked prompt lists live handles) | +7 | U15a, U11, U14b | `test_bind_moves_and_deletes_the_pasted_item` |
 | U16 | not started | D53's main path: the harness asks | `daemon.py` (`record` hook, `secret` handler), `tui.py` (`secret.ask`), `installer.py` (event fields) | daemon +9, tui +12, installer +1 | U15b | `test_secret_value_never_reaches_ledger_or_state` |
 | U25 | **done, merged** | Gmail: `search_mail`, the filter, `HOME`, the watermark, the IMAP move | `senses/_imap.py` (new), `senses/mail.py` | +65 / −30 | U21 | `test_query_goes_as_a_literal_utf8`, `test_first_poll_takes_the_watermark_silently` |
-| U31 | not started | Every tool result passes `tools.clean` (D62); `oneline` is `clean` plus flattening; the mail body filter becomes `clean` | `tools.py`, `broker.py`, `senses/mail.py` | tools +5, broker +6, mail −1 | U25, U6 | `test_tool_result_loses_bidi_zero_width_ansi_and_controls`, `test_tool_result_keeps_newlines_tabs_and_spacing`, `test_error_text_passes_the_filter`, `test_ledger_keeps_the_raw_result`, `test_oneline_is_clean_then_flatten` |
+| U31 | **done, merged** | Every tool result passes `tools.clean` (D62); `oneline` is `clean` plus flattening; the mail body filter becomes `clean` | `tools.py`, `broker.py`, `senses/mail.py` | tools +5, broker +6, mail −1 | U25, U6 | `test_tool_result_loses_bidi_zero_width_ansi_and_controls`, `test_tool_result_keeps_newlines_tabs_and_spacing`, `test_error_text_passes_the_filter`, `test_ledger_keeps_the_raw_result`, `test_oneline_is_clean_then_flatten` |
 | U26 | not started | The mail password intake; the daemon asks at start when the item is missing | `keychain.py` (`target`), `tui.py`, `__main__.py`, `daemon.py` | +12, daemon +4 | U16, U15b | `test_secret_mail_resolves_service_and_user`, `test_missing_mail_password_is_asked_at_start` |
 | U32 | not started | D63: only the owner's activity keeps a session alive; notice text passes `clean`; the approval line's way out | `state.py`, `daemon.py`, `jobs.py`, `broker.py` | +6 | U7a, U31 | `test_say_after_a_job_gate_in_an_aged_session_lands_in_the_new_session` |
+| U33 | not started | The remaining raw exits: the agenda, sense summaries, MCP parameter schemas, gate lines, `sanitize` (**deploy gate**) | `senses/*.py`, `mcp/tools.py`, `mcp/protocol.py`, `tui.py` | +10 | U31, U7b | `test_agenda_lines_pass_the_filter` |
 | U27 | not started | Skills (D58, D61): the seed copy, the index, `read_skill` | `skills.py` (new), `pyproject.toml`, `daemon.py` (`skills.bind`) | ~80, +1, daemon +1 | — | `test_seed_is_copied_when_missing_and_never_overwrites`, `test_index_lists_every_skill_sorted_and_uncut` |
 | U28 | not started | Skills: the write path (a proposal from a user turn, always approved) | `memory.py` (`vault_path`), `prompts/system.txt` | +4 | U27, U8 | `test_skills_target_user_only_and_always_approved` |
 | U29 | not started | The first seed | `pathfinder/skills/connect-gmail.md` | ~35 | U27, U25, U26 | `test_connect_gmail_is_shipped_and_parses` |

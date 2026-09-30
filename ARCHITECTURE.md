@@ -108,12 +108,12 @@ Partition 3 adds `signals(key, ts, sense, kind)` (the 24 h dedupe: `seen(key, si
 `decisions(signal_key, ts, action, why, notice_id, session, text, signal_keys)`, `judgments(ts)`,
 `deliveries(id, ts, session, via)`, `reactions(ts, delivery_id, vote)`, `presence(session, ts,
 idle_s)` and `signal_turns(ts)` (one row per signal-origin `turn_start`, for the rate limit).
-`today(now, session=, idle_threshold_s=)` returns the counters `rules.decide` needs: `spoken`
+`today(now, idle_threshold_s=)` returns the counters `rules.decide` needs: `spoken`
 and `judgments` (`clock.day_start`-scoped), `last_signal_ts`, `burst` (signal turns in the last
 60 s), `recent_counts` (signals of a kind in the last 600 s, from `signals` not `decisions` - a
 signal is recorded before its own decision, so "including this one" falls out for free; `>= N`
 means the Nth occurrence itself speaks) and `away` (from `presence`, only when the daemon's
-signal-turn triage passes `session`/`idle_threshold_s` - a rule predicate never sees `rules` or
+signal-turn triage passes `idle_threshold_s` - a rule predicate never sees `rules` or
 `state` itself). `undelivered()` finds a `decision speak` with no matching
 `delivery` — what `deliver.Outbox.rebuild()` restores after a crash. `rebuild(ledger)` drops and
 replays these tables too.

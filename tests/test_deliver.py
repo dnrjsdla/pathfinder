@@ -7,7 +7,7 @@ from pathfinder.rules import Rules
 
 
 class FakeState:
-    def presence(self, session):
+    def presence(self):
         return None
 
 

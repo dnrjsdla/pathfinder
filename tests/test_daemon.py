@@ -1891,6 +1891,34 @@ class SessionLifetimeTest(DaemonHarness):
 
         self.assertEqual(self.run_with(fake_model("ok"), scenario), [0, 0])
 
+    def test_notice_held_while_typing_after_a_move(self):
+        """5a: the screen typed on the old session; the notice opened a new one with no presence
+        row, and went out mid-sentence. The owner has one pair of hands: the newest row counts."""
+        async def scenario(daemon):
+            _never_quiet(daemon)
+            c = await Client.open(self.home)
+            c.send({"type": "attach"})
+            first = (await c.recv())["session"]
+            c.send({"type": "presence", "idle_s": 1})  # typing
+            await asyncio.sleep(0.05)
+            self._age(daemon, first, 3 * 3600)
+            daemon.push_signal(Signal(sense="schedule", kind="schedule_due", key="gap-3",
+                                      summary="Scheduled note: call", fields={"id": "s3"}, trust="user"))
+            for _ in range(200):
+                if daemon.outbox.queue or any(e["type"] == "delivery" for e in self.events()):
+                    break
+                await asyncio.sleep(0.01)
+            held = [n.session for n in daemon.outbox.queue]
+            c.send({"type": "presence", "idle_s": 999})  # stopped typing, now on the new session
+            notice = (await c.until("notice"))[-1]
+            c.close()
+            return first, held, notice
+
+        first, held, notice = self.run_with(fake_model("ok"), scenario)
+        self.assertEqual(len(held), 1)
+        self.assertNotEqual(held[0], first)  # the notice's session is the new one
+        self.assertIn("Scheduled note: call", notice["text"])
+
     def test_silent_triage_does_not_keep_a_session(self):
         """Review: every silenced signal records a `decision` in the session; only a delivered
         notice is conversation."""

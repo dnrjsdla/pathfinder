@@ -546,7 +546,7 @@ class Daemon:
         lists = rules_mod.user_lists(self.home)
         to_speak = []
         for sig in bundle:
-            today = self.state.today(session=s.id, idle_threshold_s=self.rules.idle_threshold_s)
+            today = self.state.today(idle_threshold_s=self.rules.idle_threshold_s)
             action, why = rules_mod.decide(sig, self.rules, lists, today, time.time())
             if action == "ask_model":
                 if today.judgments >= self.rules.judgment_cap:

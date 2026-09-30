@@ -103,11 +103,11 @@ decision)`: `approval_pending` 이 넣고 `approval` 이 결정을 적는다. `p
 `decisions(signal_key, ts, action, why, notice_id, session, text, signal_keys)`, `judgments(ts)`,
 `deliveries(id, ts, session, via)`, `reactions(ts, delivery_id, vote)`, `presence(session, ts,
 idle_s)`, `signal_turns(ts)`(신호 기원 `turn_start` 한 번마다 한 줄 — 속도 제한용).
-`today(now, session=, idle_threshold_s=)` 는 `rules.decide` 가 필요로 하는 것들을 준다: `spoken`
+`today(now, idle_threshold_s=)` 는 `rules.decide` 가 필요로 하는 것들을 준다: `spoken`
 과 `judgments`(`clock.day_start` 기준), `last_signal_ts`, `burst`(최근 60초 안의 신호 턴 수),
 `recent_counts`(최근 600초 안의 그 종류 신호 수 — `decisions` 가 아니라 `signals` 에서 재는데,
 신호는 자기 판정보다 먼저 적히므로 "이번 것 포함"이 저절로 나온다; `>= N` 은 N번째 자신이
-말한다는 뜻), `away`(`presence` 에서 — 데몬의 신호 턴 심사가 `session`/`idle_threshold_s` 를
+말한다는 뜻), `away`(`presence` 에서 — 데몬의 신호 턴 심사가 `idle_threshold_s` 를
 건넬 때만; 조건 술어는 `rules` 나 `state` 자체를 못 본다). `undelivered()` 는 `delivery` 가 아직 없는 `decision speak` 를 찾는다 —
 `deliver.Outbox.rebuild()` 가 죽었다 살아날 때 복구하는 것. `rebuild(ledger)` 는 이 표들도
 같이 버리고 다시 흘린다.

@@ -236,6 +236,16 @@ class StateTest(unittest.TestCase):
         self._record("user", session="s2", turn="t2", origin="user", trust="user", text="something else")
         self.assertEqual(self.state.open_approvals("s2"), [])
 
+    def test_presence_is_the_newest_row_across_sessions(self):
+        """5a: the owner has one pair of hands - a screen moved into a new session typed in the old one."""
+        self.assertIsNone(self.state.presence())
+        self._record("presence", session="s1", origin="user", idle_s=0)
+        second = self._record("presence", session="s2", origin="user", idle_s=50)
+        self.assertEqual(self.state.presence(), {"ts": second["ts"], "idle_s": 50})
+        again = self._record("presence", session="s1", origin="user", idle_s=7)
+        self.assertEqual(self.state.presence(), {"ts": again["ts"], "idle_s": 7})
+        self.assertFalse(self.state.today(idle_threshold_s=20).away)  # fresh and typing, whichever session
+
     def test_proposals_and_job_gates_are_not_calls(self):
         self._record("session_start", session="s2")
         self._record("approval_pending", session="s2", origin="user", id="q1", call_id="q1", tool="edit_memory",

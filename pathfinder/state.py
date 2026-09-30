@@ -89,7 +89,7 @@ class Today:
     last_signal_ts: float | None  # ts of the last signal turn opened (rate limit)
     burst: int                # signal turns opened in the last 60 s
     recent_counts: dict       # kind -> signals of that kind in the last 600 s, incl. this one (count_over)
-    away: bool = True         # target session's presence is stale/idle (claude_code's "away")
+    away: bool = True         # the newest presence is stale/idle (claude_code's "away")
     jobs: int = 0             # job_start events today - jobs.py's own daily budget
 
 
@@ -410,6 +410,13 @@ class State:
         return [{"id": r[0], "session": r[1], "turn": r[2], "tool": r[3], "args": json.loads(r[4]), "ts": r[5],
                 "job": r[6]} for r in rows]
 
+    def open_approvals(self, session: str) -> list:
+        """D52: `session`'s pending approvals newer than its last user message - a gate the owner
+        has talked past is not open."""
+        last = self.db.execute("SELECT MAX(ts) FROM messages WHERE session = ? AND role = 'user'",
+                               (session,)).fetchone()[0]
+        return [p for p in self.pending() if p["session"] == session and (last is None or p["ts"] > last)]
+
     def pending_memory(self) -> list:
         """The pending approvals whose tool is `edit_memory` - `pathfinder approvals`'s memory view."""
         return [p for p in self.pending() if p["tool"] == "edit_memory"]
@@ -433,8 +440,9 @@ class State:
         ).fetchone()
         return row[0] if row else None
 
-    def presence(self, session: str):
-        row = self.db.execute("SELECT ts, idle_s FROM presence WHERE session = ?", (session,)).fetchone()
+    def presence(self):
+        """The newest row across sessions: the owner has one pair of hands (5a)."""
+        row = self.db.execute("SELECT ts, idle_s FROM presence ORDER BY ts DESC LIMIT 1").fetchone()
         return None if row is None else {"ts": row[0], "idle_s": row[1]}
 
     def latest_delivery(self):
@@ -456,9 +464,8 @@ class State:
         row = self.db.execute("SELECT 1 FROM signals WHERE key = ? AND ts >= ?", (key, since)).fetchone()
         return row is not None
 
-    def today(self, now: float | None = None, session: str | None = None,
-             idle_threshold_s: float | None = None) -> Today:
-        """`session`/`idle_threshold_s` (only the daemon's signal-turn triage passes them) fill
+    def today(self, now: float | None = None, idle_threshold_s: float | None = None) -> Today:
+        """`idle_threshold_s` (only the daemon's signal-turn triage passes it) fills
         in `away` - a predicate (claude_code's) only ever sees `(signal, value, today, now)`,
         never `rules` or `state` itself, so the threshold has to be applied here, not there."""
         now = now if now is not None else time.time()
@@ -476,8 +483,8 @@ class State:
             "SELECT kind, COUNT(*) FROM signals WHERE ts >= ? GROUP BY kind", (now - 600,)).fetchall())
         jobs_today = self.db.execute("SELECT COUNT(*) FROM jobs WHERE started_ts >= ?", (start,)).fetchone()[0]
         away = True
-        if session is not None and idle_threshold_s is not None:
-            row = self.presence(session)
+        if idle_threshold_s is not None:
+            row = self.presence()
             fresh = row is not None and now - row["ts"] < 60
             away = not fresh or row["idle_s"] >= idle_threshold_s
         return Today(spoken, judgments, last_signal_ts, burst, recent_counts, away, jobs_today)

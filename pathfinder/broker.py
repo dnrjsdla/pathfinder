@@ -2,6 +2,7 @@
 ledger itself - it emits, and the daemon records tool_call/tool_result on the
 event-loop thread, so the single-writer rule from partition 1 still holds."""
 import json
+import unicodedata
 
 from . import policy
 from .tools import READ_CLIP, clip, coerce
@@ -82,3 +83,27 @@ class Broker:
         self.emit("tool_result", {"id": id, "name": name, "ok": ok, "result": result})
         clipped = _clip_for_model(result)
         return {"ok": True, "result": clipped} if ok else {"ok": False, "error": clipped}
+
+
+def _said(text: str) -> str:
+    """How a chat message is compared: NFKC, ’ as ', lowercase, spaces collapsed, trailing `.!~` dropped."""
+    return " ".join(unicodedata.normalize("NFKC", text).replace("’", "'").lower().split()).rstrip(".!~ ")
+
+
+# D52: a whole message that only approves or denies. Normalized like the message, because NFKC
+# turns the compatibility jamo of ㅇㅇ into conjoining ones.
+CHAT_APPROVAL = tuple(map(_said, (
+    "승인", "승인해", "승인해줘", "승인합니다", "승인할게", "승인할게요", "허락", "허용", "진행해", "진행해줘",
+    "네", "예", "응", "ㅇㅇ", "좋아", "그래", "ok", "okay", "yes", "y", "approve", "approved", "i approve",
+    "i'll approve", "go ahead", "do it",
+    "거부", "거절", "취소", "아니", "아니요", "no", "n", "deny", "cancel")))
+
+
+def chat_approval(state, session, text):
+    """D52: an approval phrase typed while a gate is open is answered by the harness, one line per
+    open gate, and the gate stays pending. None: the message goes to the model."""
+    if _said(text) not in CHAT_APPROVAL:
+        return None
+    return "\n".join(f"승인은 채팅으로 받지 않습니다 · approvals are not taken in chat: /approve {p['id']} or /deny "
+                     f"{p['id']} ({p['tool']}; shell: pathfinder approve|deny {p['id']})"
+                     for p in state.open_approvals(session)) or None

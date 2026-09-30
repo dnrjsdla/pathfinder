@@ -17,7 +17,7 @@ import uuid
 from pathlib import Path
 
 from . import clock, config, jobs, loop, memory, rules as rules_mod, signals, tools
-from .broker import Broker, Gate
+from .broker import Broker, Gate, chat_approval
 from .deliver import Notice, Outbox
 from .ledger import Ledger
 from .llm import LLMError, resolve
@@ -492,9 +492,16 @@ class Daemon:
     async def turn(self, s, turn, text, trailing=None):
         """`text` is a new user message; `trailing` is steer text already in the ledger that no
         model call has seen yet (it arrived after the last drain of the previous turn)."""
+        reply = text is not None and chat_approval(self.state, s.id, text)  # D52: before this user line is recorded
         if text is not None:
             self.record("user", session=s.id, turn=turn, origin="user", trust="user", text=text)
         self.record("turn_start", session=s.id, turn=turn, origin="user")
+        if reply:  # the harness answers, no model request; the approval stays pending
+            self.send(s, {"type": "turn.start", "turn": turn})
+            self.send(s, {"type": "delta", "text": reply})
+            self.record("assistant", session=s.id, turn=turn, origin="user", text=reply, final=True)
+            self.record("turn_end", session=s.id, turn=turn, origin="user", kind="answer")
+            return "answer"
         messages = [{"role": "system", "content": self.system_prompt},
                    {"role": "system", "content": await self._second_system_message()}] + self.state.history(s.id)
         if trailing:
@@ -539,7 +546,7 @@ class Daemon:
         lists = rules_mod.user_lists(self.home)
         to_speak = []
         for sig in bundle:
-            today = self.state.today(session=s.id, idle_threshold_s=self.rules.idle_threshold_s)
+            today = self.state.today(idle_threshold_s=self.rules.idle_threshold_s)
             action, why = rules_mod.decide(sig, self.rules, lists, today, time.time())
             if action == "ask_model":
                 if today.judgments >= self.rules.judgment_cap:

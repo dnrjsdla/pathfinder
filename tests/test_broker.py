@@ -1,7 +1,7 @@
 import unittest
 
 from pathfinder import policy
-from pathfinder.broker import USER_DENIED_TEXT, Broker, Gate
+from pathfinder.broker import CHAT_APPROVAL, USER_DENIED_TEXT, Broker, Gate, chat_approval
 from pathfinder.tools import ToolSpec
 
 
@@ -104,6 +104,35 @@ class BrokerTest(unittest.TestCase):
         b, emitted = self._broker()
         result = b.call("c1", "read_thing", {})
         self.assertEqual(result, {"ok": True, "result": {"done": True}})
+
+
+class ChatApprovalTest(unittest.TestCase):
+    class Open:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def open_approvals(self, session):
+            return self.rows
+
+    def test_chat_approval_phrases(self):
+        """D52 part 2: the whole message, normalized, is one of the closed phrases."""
+        open_ = self.Open([{"id": "a1", "tool": "install_server"}, {"id": "b2", "tool": "edit_memory"}])
+        line = ("승인은 채팅으로 받지 않습니다 · approvals are not taken in chat: /approve a1 or /deny a1 "
+                "(install_server; shell: pathfinder approve|deny a1)")
+        self.assertEqual(len(CHAT_APPROVAL), 35)
+        for phrase in ("승인", "승인해", "승인해줘", "승인합니다", "승인할게", "승인할게요", "허락", "허용", "진행해",
+                       "진행해줘", "네", "예", "응", "ㅇㅇ", "좋아", "그래", "ok", "okay", "yes", "y", "approve",
+                       "approved", "i approve", "i'll approve", "go ahead", "do it",
+                       "거부", "거절", "취소", "아니", "아니요", "no", "n", "deny", "cancel"):
+            self.assertEqual(chat_approval(open_, "s", phrase).splitlines(),
+                             [line, line.replace("a1", "b2").replace("install_server", "edit_memory")], phrase)
+        for typed in ("  YES!! ", "Ｙｅｓ", "I'll   approve.", "I’ll approve", "승인~", "OK.", "Go\tAhead!~", "ㅇㅇ!",
+                      "Do it . !"):
+            self.assertIsNotNone(chat_approval(open_, "s", typed), typed)
+        for near in ("yes, and also add X", "yess", "승인해주세요", "approve it", "no way", "ok ok", "!!!", "?",
+                     "yes?", "네 그리고 메일도"):
+            self.assertIsNone(chat_approval(open_, "s", near), near)
+        self.assertIsNone(chat_approval(self.Open([]), "s", "yes"))  # no open gate: the model answers
 
 
 if __name__ == "__main__":

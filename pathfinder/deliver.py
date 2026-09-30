@@ -59,7 +59,7 @@ class Outbox:
     def hold(self, session: str) -> bool:
         if self.is_running(session):
             return True
-        presence = self.state.presence(session)
+        presence = self.state.presence()
         if presence is None:
             return False
         fresh = time.time() - presence["ts"] < 60

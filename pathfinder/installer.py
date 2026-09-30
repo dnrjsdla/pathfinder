@@ -34,10 +34,10 @@ from .mcp import pins as mcp_pins
 from .mcp.protocol import qualify
 from .mcp.servers import Entry
 from .mcp.session import ServerSession
-from .mcp.tools import _NAME_OK, read_only
+from .mcp.tools import read_only, refused
 from .mcp.transport import StdioTransport, StreamableHttpTransport
 from .signals import Signal
-from .tools import TOOLS as _TOOLS
+from .tools import TOOLS as _TOOLS, visible
 
 _log = logging.getLogger("pathfinder.installer")
 
@@ -105,6 +105,8 @@ def brief(c: dict) -> str:
     n, k = len(tools), sum(1 for t in tools if t.get("read_only_hint"))
     parts = [f"license {lic['spdx']} {lic['verdict']}", f"integrity {integrity}",
             f"trial ok, {n} tools ({k} read-only)"]
+    if trial.get("skipped"):  # what the loader will refuse, its names escaped where the trial read them
+        parts[-1] += f", {len(trial['skipped'])} skipped ({', '.join(trial['skipped'])[:120]})"
     if install.get("needs"):
         parts.append("needs: " + ", ".join(install["needs"]))
     if lic.get("warning"):
@@ -316,10 +318,10 @@ class Installer:
         out, skipped = [], []
         for t in raw:
             name = t.get("name", "")
-            if not _NAME_OK.match(qualify(sid, name)):
-                skipped.append(name)  # S5: never trialed further, never granted (mcp/tools.py's own rule)
-                continue
             entry = Entry(server_id=sid, tool_name=name, qualified_name=qualify(sid, name), definition=t)
+            if refused(entry):
+                skipped.append(visible(name))  # S5: never trialed further, never granted (the loader's own rule)
+                continue
             prints = mcp_pins.fingerprint(t)
             out.append({"name": entry.tool_name, "description_hash": prints["description"],
                        "schema_hash": prints["inputSchema"], "read_only_hint": read_only(entry),

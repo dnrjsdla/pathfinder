@@ -42,6 +42,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Any
 
+from ..tools import visible
 from .protocol import sanitize
 
 # The fields that go into the hash. This list IS the definition of "what the model sees".
@@ -125,7 +126,7 @@ class Held:
     def line(self) -> str:
         out = [f"{sanitize(self.qualified_name)} - {self.reason}"]
         if "inputSchema" in self.changed:
-            out.append(f"      arguments: {sanitize(self.param_delta())}")
+            out.append(f"      arguments: {visible(self.param_delta())}")  # an approval line: shown as it runs
         body = " ".join(sanitize(self.incoming_description or "").split())
         if "description" in self.changed and body:
             out.append(f"      incoming description: {body[:200]}")

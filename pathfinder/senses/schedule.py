@@ -8,7 +8,7 @@ import uuid
 
 from .. import clock, config
 from ..signals import Signal
-from ..tools import ToolSpec, normalize_local_datetime
+from ..tools import ToolSpec, normalize_local_datetime, oneline
 
 OPTIONS: dict = {}   # nothing to configure - the schedule list itself lives in the config file
 TRUST = "user"       # the user wrote the reminder's text
@@ -42,7 +42,7 @@ def poll(options, now):
             changed = True
             fired.append(Signal(
                 sense="schedule", kind="schedule_due", key=f"schedule:{row['id']}:{row['at']}",
-                summary=f"Scheduled note: {row['text']}",
+                summary=f"Scheduled note: {oneline(row['text'])}",
                 fields={"id": row["id"], "text": row["text"], "at": row["at"]}, trust=TRUST))
             if row["repeat"] != "none":
                 # Catch up past every missed occurrence (a laptop closed for a week) in one

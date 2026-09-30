@@ -98,6 +98,7 @@ class Daemon:
         # line (added separately in turn()/_signal_model_turn) changes turn to turn.
         self.system_prompt = PROMPT.read_text(encoding="utf-8") + "\n\n" + signals.SIGNAL_TURNS_CLAUSE
         self.sessions = {}
+        self.writers = set()  # every open connection, attached or not: close() closes them all
         self.server = None
         self.dispatch = lambda fn: fn()  # direct until start() swaps in the threadsafe version
         self.mcp = mcp_attach.Attach(self.home, self.state, self.record, self.push_signal, self.dispatch)
@@ -227,8 +228,8 @@ class Daemon:
         for s in self.sessions.values():
             if s.worker:
                 s.worker.cancel()
-            for w in list(s.conns):
-                w.close()  # wait_closed() below waits for every connection: an attached client would hang shutdown
+        for w in list(self.writers):
+            w.close()  # wait_closed() below waits for every connection, a push sense's too (a hook's `signal`)
         if self.server:
             self.server.close()
             await self.server.wait_closed()
@@ -266,6 +267,7 @@ class Daemon:
 
     async def handle(self, reader, writer):
         session = None
+        self.writers.add(writer)
         try:
             while True:
                 try:
@@ -394,6 +396,7 @@ class Daemon:
         finally:
             for x in self.sessions.values():  # D41: a move may have put it in another session
                 x.conns.discard(writer)
+            self.writers.discard(writer)
             writer.close()
 
     def _session(self, sid):

@@ -307,6 +307,42 @@ class TuiCase(unittest.TestCase):
         out = tui.render({"type": "notice", "id": "n", "text": "bad\x07bell", "why": "y"})
         self.assertNotIn("\x07", out)
 
+    def test_gate_line_has_no_bidi_or_c1(self):
+        """U33: what is shown is what runs - a hidden character in an approval line is escaped, never
+        dropped and never raw; tui `gate`, `job.gate`, `say` and `approvals` render the args alike."""
+        from pathfinder import __main__ as cli
+        from pathfinder.ledger import Ledger
+        from pathfinder.state import State
+        args = {"to": "bo\u200bss@example.com", "path": "/x/\u202eevil\x9b"}
+        shown = '{"to": "bo\\u200bss@example.com", "path": "/x/\\u202eevil\\u009b"}'
+        gate = {"type": "gate", "id": "g1", "tool": "send\u200b", "args": args}
+        lines = [tui.render(gate), tui.render({**gate, "type": "job.gate", "approval": "a1"})]
+        server, client = socket.socketpair()
+        with server, client:
+            for m in (gate, {"type": "turn.end", "kind": "answer"}):
+                server.sendall((json.dumps(m, ensure_ascii=False) + "\n").encode())
+            err = io.StringIO()
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+                cli._stream(client, [])
+        lines.append(err.getvalue())
+        with tempfile.TemporaryDirectory() as tmp:
+            state = State(Path(tmp) / "state.db")
+            state.apply(Ledger(Path(tmp)).append("approval_pending", session="s1", origin="user", id="a2",
+                                                call_id="c1", tool="send\u200b", args=args, messages=[]))
+            memory = {"target": "memory", "op": "replace", "old": "typed \\u200b", "new": "real \u200b"}
+            state.apply(Ledger(Path(tmp)).append("approval_pending", session="s1", origin="memory", id="a3",
+                                                call_id="c2", tool="edit_memory", args=memory, messages=[]))
+            state.close()
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                cli.approvals(Path(tmp))
+        # typed text and the real character stay apart, as in the args rows
+        self.assertIn('a3  edit_memory  memory replace: "typed \\\\u200b" -> "real \\u200b"', out.getvalue())
+        lines.append(out.getvalue())
+        for line in lines:
+            self.assertFalse(set(line) & set("\u200b\u202e\x9b\x1b"), repr(line))
+            self.assertIn(shown, line)
+            self.assertIn("send\\u200b", line)
 
 if __name__ == "__main__":
     unittest.main()

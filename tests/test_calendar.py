@@ -304,6 +304,27 @@ class AgendaContextTest(unittest.TestCase):
                 mock.patch.object(calendar_sense.ek, "authorized", return_value=True):
             self.assertEqual(calendar_sense.context(now), ["- calendar, next 24 h: nothing"])
 
+    def test_agenda_lines_pass_the_filter(self):
+        """U33: an invitation's title rides in every turn's second system message - ANSI, bidi,
+        zero-width and tag characters go before the clip, not only the whitespace."""
+        from pathfinder import clock
+        now, _ = clock.parse_local("2026-09-29 01:13")
+        start, _ = clock.parse_local("2026-09-29 09:00")
+        bad = "\x1b[2J회의\u202e \u200b\U000E0041" + "x" * 100
+        events = [{"id": "e", "title": bad, "start": start, "end": None, "all_day": False, "notes": None}]
+        with mock.patch.object(calendar_sense.ek, "list_events", return_value=events), \
+                mock.patch.object(reminders_sense.ek, "list_reminders", return_value=[{"id": "r", "title": bad, "due": start}]), \
+                mock.patch.object(calendar_sense.ek, "authorized", return_value=True):
+            lines = calendar_sense.context(now) + reminders_sense.context(now)
+        title = ("회의 " + "x" * 100)[:80]
+        self.assertEqual(lines, [f"- event 2026-09-29 09:00: {title}", f"- reminder 2026-09-29 09:00: {title}"])
+        events[0]["title"] = "\u200b\u202e"  # nothing left after the filter: said so, not an empty line
+        with mock.patch.object(calendar_sense.ek, "list_events", return_value=events), \
+                mock.patch.object(reminders_sense.ek, "list_reminders", return_value=[{"id": "r", "title": "", "due": start}]), \
+                mock.patch.object(calendar_sense.ek, "authorized", return_value=True):
+            lines = calendar_sense.context(now) + reminders_sense.context(now)
+        self.assertEqual(lines, ["- event 2026-09-29 09:00: (untitled)", "- reminder 2026-09-29 09:00: (untitled)"])
+
     def test_agenda_never_prompts_for_access(self):
         """Review: an undetermined permission would make every turn wait for the prompt (2 x 60 s)."""
         from pathfinder import clock

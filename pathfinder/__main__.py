@@ -24,6 +24,7 @@ from .ledger import Ledger
 from .mcp import servers as mcp_servers
 from .mcp.protocol import qualify
 from .state import State
+from .tools import visible
 
 USAGE = __doc__
 
@@ -62,8 +63,9 @@ def _stream(sock, messages):
             print(flush=True)  # the withdrawn draft and the re-run stay on lines of their own
             print(tui.STRINGS["retract"].format(what=msg["what"]), file=sys.stderr)
         elif msg["type"] == "gate":
-            print(f"\npathfinder: waiting for approval on {msg['tool']} {msg['args']} "
-                  f"(run `pathfinder approve {msg['id']}` or `pathfinder deny {msg['id']}`)", file=sys.stderr)
+            args = json.dumps(msg["args"], ensure_ascii=False)  # the same rendering as the screen's and `approvals`'
+            print("\n" + visible(f"pathfinder: waiting for approval on {msg['tool']} {args} "
+                                 f"(run `pathfinder approve {msg['id']}` or `pathfinder deny {msg['id']}`)"), file=sys.stderr)
         elif msg["type"] == "turn.end":
             print()
             return 1 if failed or msg["kind"] == "error" else 0
@@ -90,8 +92,8 @@ def approvals(home):
         for row in state.pending():
             if row["tool"] == "edit_memory":
                 a = row["args"]
-                print(f"{row['id']}  edit_memory  {a['target']} {a['op']}: "
-                      f"{_clip60(a['old'])} -> {_clip60(a['new'])}")
+                old, new = (json.dumps(_clip60(a[k]), ensure_ascii=False) for k in ("old", "new"))  # as the args rows
+                print(visible(f"{row['id']}  edit_memory  {a['target']} {a['op']}: {old} -> {new}"))
                 continue
             if row["tool"] == "accept_pins":
                 a = row["args"]
@@ -102,7 +104,7 @@ def approvals(home):
                 print(installer_mod.render_row(row))
                 continue
             job = f"  job: {row['job']}" if row.get("job") else ""
-            print(f"{row['id']}  {row['tool']}  {json.dumps(row['args'], ensure_ascii=False)}{job}")
+            print(visible(f"{row['id']}  {row['tool']}  {json.dumps(row['args'], ensure_ascii=False)}{job}"))
     finally:
         state.close()
     return 0
@@ -128,7 +130,7 @@ def mcp_tools_list(home):
             for tool_name in tool_names:
                 name = qualify(sid, tool_name)
                 label = "held" if name in held_names else grants.get(name, "ask")
-                print(f"  {name}  {label}")
+                print(f"  {visible(name)}  {label}")
         if held_rows:
             print("held:")
             for row in held_rows:

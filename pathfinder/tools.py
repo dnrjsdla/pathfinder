@@ -147,6 +147,14 @@ def oneline(text, n=None) -> str:
     return " ".join(clean(text).split())[:n]
 
 
+def visible(text) -> str:
+    """An approval line shows exactly what runs: every character `clean` would drop or change is
+    written as an escape (`\\n`, `\\t`, `\\u200b`, `\\U000e0041`) instead, so a hidden character is
+    seen, not removed; printable text, Korean too, stays as it is, and the line stays one line."""
+    return "".join(ch if ch.isprintable() else {"\n": "\\n", "\t": "\\t"}.get(ch) or
+                   (f"\\u{ord(ch):04x}" if ord(ch) <= 0xFFFF else f"\\U{ord(ch):08x}") for ch in str(text))
+
+
 def map_strings(value, fn):
     """Every string in `value`, dict keys too, however deep, through `fn`; a tuple comes back a list."""
     if isinstance(value, str):

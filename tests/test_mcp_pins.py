@@ -168,6 +168,14 @@ class CheckTest(unittest.TestCase):
         self.assertIn("current arguments: after, owner", line)
         self.assertNotIn("+", line)  # nothing invented from a list that was never there
 
+    def test_held_arguments_are_escaped_not_dropped(self):
+        """U33: the held line is an approval line (`accept_pins`) - a hidden character in an
+        argument name is shown as an escape, as it will run."""
+        held = mp.Held(qualified_name="mcp__gh__alpha", server_id="gh", tool_name="alpha", reason="schema changed",
+                       incoming_description="", changed=("inputSchema",), incoming_params=["q‮"], pinned_params=["q"])
+        self.assertIn("added +q\\u202e", held.line())
+        self.assertNotIn("‮", held.line())
+
 
 class PinStoreLedgerTest(unittest.TestCase):
     """PinStore's storage is the ledger, not a file (D6 transplant note)."""

@@ -179,6 +179,41 @@ if __name__ == "__main__":
     unittest.main()
 
 
+class SchemaFilterTest(unittest.TestCase):
+    def test_mcp_parameter_schema_passes_the_filter(self):
+        """U33: a parameter's description and enum values are the server's words and pass `clean`; a
+        name the filter would change refuses the tool - the model sends back the name it was shown."""
+        schema = {"type": "object", "required": ["q"], "properties": {"q": {
+            "type": "string", "description": "the \x1b[31mquery\u202e\nsecond\tline", "enum": ["a\u200bb", "c"]}}}
+        spec = _spec_for(_entry(schema=schema))
+        self.assertEqual(spec.params, {"q": {"type": "string", "description": "the query\nsecond\tline",
+                                             "enum": ["ab", "c"]}})
+        self.assertEqual(spec.required, ["q"])
+        bad = _entry(tool="other", schema={"type": "object", "properties": {"q\u202e": {"type": "string"}}})
+        report = mcp_pins.PinReport(passed={bad.qualified_name})
+        with self.assertLogs("pathfinder.mcp", level="WARNING"):
+            self.assertEqual(mcp_tools.specs([bad], FakeServers([bad]), report), {})
+
+    def test_every_schema_string_is_capped(self):
+        """F4/F10: a 100 kB parameter description would ride every turn - every schema string is cut at
+        MAX_DESCRIPTION after the filter, and a name the cut would change refuses the tool."""
+        big = "D" * 100_000
+        spec = _spec_for(_entry(schema={"type": "object", "properties": {"x": {"type": "string", "description": big}}}))
+        self.assertEqual(spec.params["x"]["description"], "D" * mcp_tools.MAX_DESCRIPTION)
+        long = _entry(tool="long", schema={"type": "object", "properties": {"n" * 5000: {"type": "string"}}})
+        self.assertIn("length cap", mcp_tools.refused(long))
+        with self.assertLogs("pathfinder.mcp", level="WARNING"):
+            self.assertEqual(mcp_tools.specs([long], FakeServers([long]), mcp_pins.PinReport(passed={long.qualified_name})), {})
+
+    def test_sanitize_is_the_one_rule(self):
+        """U33: `sanitize` was a second rule (it dropped tabs and left ANSI remnants) - now `clean`."""
+        from pathfinder.mcp.protocol import sanitize
+        from pathfinder.tools import clean
+        for text in ("plain\nlines", "a\tb", "\x1b[31mred\x1b[0m", "bidi\u202e\x9b", "crlf\r\n", "nb\xa0sp"):
+            self.assertEqual(sanitize(text), clean(text))
+        self.assertEqual(sanitize("x\x1b[2Ky\tz\n"), "xy\tz\n")
+
+
 class CheckedListTest(unittest.TestCase):
     def test_specs_build_from_the_checked_list_not_a_refetch(self):
         """Review: a server with a short ttlMs handed `specs()` a second, poisoned list."""

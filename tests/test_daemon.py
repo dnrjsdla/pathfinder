@@ -1195,6 +1195,20 @@ class PushDoorValidationTest(DaemonHarness):
         self.assertEqual(reply["type"], "error")
         self.assertEqual(seen[-1]["kind"], "answer")
 
+    def test_close_does_not_wait_for_a_client_that_only_pushed(self):
+        """F5: a push sense's connection (a hook's `signal`, never `attach`) is in no session - close()
+        closes it too, or wait_closed() hangs a `service stop`."""
+        config.set(self.home, "senses", {"shell": {}})
+
+        async def main():
+            daemon = Daemon(self.home, step_factory=fake_model("ok"))
+            await daemon.start()
+            c = await Client.open(self.home)
+            c.send({"type": "signal", "sense": "shell", "fields": {"cmd": "ls", "exit": 0, "seconds": 1, "cwd": "/x"}})
+            await asyncio.sleep(0.2)  # the daemon has read it; the client stays connected
+            await asyncio.wait_for(daemon.close(), 10)
+        asyncio.run(main())
+
     def test_signal_fields_over_4kb_refused(self):
         config.set(self.home, "senses", {"shell": {}})
 
@@ -1648,6 +1662,24 @@ class McpDaemonTest(DaemonHarness):
         self.assertEqual(len([e for e in self.events() if e["type"] == "pin_accept"]), 1)
         self.assertNotIn("mcp__fake__echo", tools_mod.TOOLS)  # closed: the key is gone
         self.assertIsNotNone(proc.poll())  # and the child is dead
+
+    def test_a_refused_tool_is_never_held(self):
+        """U33: the install pinned only what its trial kept; at load the tools the loader refuses are
+        dropped before the pin check - no `accept_pins` proposal, no `tool_held`, never pinned."""
+        cmd = [sys.executable, str(FAKE_SERVER)]
+        config.set(self.home, "mcp_servers", {"fake": {"transport": "stdio", "command": cmd}})
+        self.run_with(fake_model("ok"), lambda daemon: _noop())  # the pins an install writes: echo only
+        config.set(self.home, "mcp_servers", {"fake": {"transport": "stdio", "command": [*cmd, "--refused-tools"]}})
+
+        async def scenario(daemon):
+            await daemon.mcp.loaded
+            return sorted(n for n in tools_mod.TOOLS if n.startswith("mcp__"))
+
+        self.assertEqual(self.run_with(fake_model("ok"), scenario), ["mcp__fake__echo"])
+        events = self.events()
+        self.assertEqual([e for e in events if e["type"] == "approval_pending" and e["tool"] == "accept_pins"], [])
+        self.assertEqual([e for e in events if e["type"] == "signal" and e["kind"] == "tool_held"], [])
+        self.assertEqual([e["tool"] for e in events if e["type"] == "pin_accept"], ["echo"])
 
     def test_rug_pull_holds(self):
         config.set(self.home, "mcp_servers",

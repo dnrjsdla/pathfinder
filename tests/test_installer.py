@@ -269,6 +269,18 @@ class InstallerTest(unittest.TestCase):
         self.assertEqual(out["verification"]["sandbox_trial"]["verdict"], "ok")
         self.assertEqual(out["verification"]["trust_tier"], "checked")
 
+    def test_trial_refuses_what_the_loader_refuses(self):
+        """F3: a tool `mcp.tools.specs` would drop is neither counted, granted nor pinned - listed as
+        skipped, its name escaped - so "trial ok, N tools" is true."""
+        cand = _candidate(args=["-y", "widget@1.0.0", "--refused-tools"])
+        out = self.installer.check(cand, run=_fake_run())
+        trial = out["verification"]["sandbox_trial"]
+        self.assertEqual([t["name"] for t in trial["tools"]], ["echo"])
+        self.assertEqual(trial["skipped"], ["bad\\u200bname", "ctl", "badparam"])
+        self.assertEqual([p["tool"] for p in out["install"]["permissions"]], ["echo"])
+        self.assertIn("trial ok, 1 tools (1 read-only), 3 skipped (bad\\u200bname, ctl, badparam)",
+                      render_row({"id": "a1", "args": out}))  # the owner approving sees what will not load
+
     def test_trial_timeout_fails(self):
         cand = _candidate(args=["-y", "widget@1.0.0", "--never-answer"])
         out = self.installer.check(cand, run=_fake_run(), trial_timeout=1)

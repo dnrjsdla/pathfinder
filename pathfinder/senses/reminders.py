@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from .. import clock
 from ..signals import Signal
-from ..tools import ToolSpec, normalize_local_datetime
+from ..tools import ToolSpec, normalize_local_datetime, oneline
 from . import _eventkit as ek
 
 OPTIONS: dict = {}
@@ -36,10 +36,11 @@ def poll(options, now):
         if r["due"] is None:
             continue
         kind = "overdue_reminder" if r["due"] < now else "due_reminder"
+        title = oneline(r["title"])
         out.append(Signal(
             sense="reminders", kind=kind, key=f"reminder:{r['id']}:{r['due']}",
-            summary=f"Reminder due: {r['title']}",
-            fields={"title": r["title"], "due": clock.format_local(r["due"]),
+            summary=f"Reminder due: {title}",
+            fields={"title": title, "due": clock.format_local(r["due"]),
                     "minutes_until": clock.minutes_until(r["due"], now)},
             trust=TRUST))
     return out
@@ -51,7 +52,7 @@ def context(now):
         return ["- reminders: not readable (access not granted yet)"]
     rems = sorted(ek.list_reminders(due_before_ts=now + _AGENDA_S), key=lambda r: r["due"])
     lines = [f"- reminder {clock.format_local(r['due'])}{' (overdue)' if r['due'] < now else ''}: "
-             f"{' '.join(r['title'].split())[:80]}" for r in rems[:_AGENDA_MAX]]
+             f"{oneline(r['title'], 80) or '(untitled)'}" for r in rems[:_AGENDA_MAX]]
     if len(rems) > _AGENDA_MAX:
         lines.append(f"- {len(rems) - _AGENDA_MAX} more reminders (list_reminders)")
     return lines or ["- reminders due within 24 h or overdue: none"]

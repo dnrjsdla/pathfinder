@@ -1,5 +1,7 @@
 """tui.py against a fake daemon on a temp unix socket, and a pty standing in for the real
 terminal (`os.openpty()`) so termios/cbreak behave for real without a real terminal."""
+import contextlib
+import io
 import json
 import os
 import socket
@@ -278,8 +280,28 @@ class TuiCase(unittest.TestCase):
             {"type": "job.gate", "id": "j1", "approval": "a1", "tool": "search", "args": {}},
             {"type": "job.end", "id": "j1", "state": "done"},
             {"type": "error", "message": "boom"},
+            {"type": "retract", "what": "says something was done", "why": "w"},
         ):
             tui.render(msg)  # must not raise KeyError
+
+    def test_retract_rendered(self):
+        """D51: the withdrawal is one dim harness line on the screen and on `say`'s stderr; the
+        verifier's own `why` is never shown."""
+        from pathfinder import __main__ as cli
+        from pathfinder.loop import FLAG_WORDS
+        msg = {"type": "retract", "what": FLAG_WORDS["unsupported_state"], "why": "MODEL-WHY"}
+        line = ("철회 · withdrawn: the answer above says what the calendar, reminders, memory or registry "
+                "hold with no tool result in this turn - checking with the tools")
+        self.assertEqual(tui.render(msg), tui.NOTICE_DIM + line + tui.RESET)
+        server, client = socket.socketpair()
+        with server, client:
+            for m in ({"type": "turn.start", "turn": "t"}, {"type": "delta", "text": "Your list is empty."}, msg,
+                      {"type": "delta", "text": "It holds two."}, {"type": "turn.end", "kind": "answer"}):
+                server.sendall((json.dumps(m, ensure_ascii=False) + "\n").encode())
+            out, err = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                self.assertEqual(cli._stream(client, []), 0)
+        self.assertEqual((out.getvalue(), err.getvalue()), ("Your list is empty.It holds two.\n", "\n" + line + "\n"))
 
     def test_notice_text_is_sanitized(self):
         out = tui.render({"type": "notice", "id": "n", "text": "bad\x07bell", "why": "y"})

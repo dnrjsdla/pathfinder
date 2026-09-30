@@ -58,6 +58,8 @@ def _stream(sock, messages):
             if not started:
                 return 1  # refused before any turn began (unknown approval, nothing to interrupt): no turn.end will come
             failed = True
+        elif msg["type"] == "retract":  # D51: the draft above is withdrawn, the re-run follows
+            print("\n" + tui.STRINGS["retract"].format(what=msg["what"]), file=sys.stderr)
         elif msg["type"] == "gate":
             print(f"\npathfinder: waiting for approval on {msg['tool']} {msg['args']} "
                   f"(run `pathfinder approve {msg['id']}` or `pathfinder deny {msg['id']}`)", file=sys.stderr)

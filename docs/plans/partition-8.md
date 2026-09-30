@@ -1202,9 +1202,9 @@ README's upgrade note says to run `pathfinder reindex` once.
 11. **D53 against the mail password.** D53's main path is the harness asking. Resolved on
     2026-09-30: the daemon asks at start when the mail sense is configured and its Keychain item
     is missing (U26). A model-callable ask that any procedure could use is later work.
-12. **D36 against `installer.py`'s ceiling.** This plan lands the installer at about 698/700. The
-    only block large enough to move is D36's foreign-file helper, which D36 keeps in the
-    installer until a third caller appears. Moving it needs the owner's word.
+12. **D36 against `installer.py`'s ceiling.** The installer reached 700/700 at U3 (it started at
+    680, not the 677 this plan assumed). Resolved on 2026-09-30 by D60: D36's foreign-file
+    helper moves to `config.py` (U30), before U10.
 14. **MCP tool results against the envelope filter (found at U22's review).** `mcp/tools.py`
     clips a tool result's text at `READ_CLIP` and passes everything else raw: bidi marks, ANSI
     sequences, newlines and `trust:` lines reach the model as a tool result. U21 filters only
@@ -1370,6 +1370,7 @@ parallel. **Deploy gate: U15a and U21.**
 | U22 | **done, merged** | MCP error and failed proposal as failed calls | `mcp/tools.py`, `installer.py` | 122, 682 (+2; the contract's net 0 was not reachable) | U2 | `test_mcp_is_error_is_a_failed_call` |
 | U3 | not started | Move 1: `install`/`uninstall` into the installer | `installer.py`, `daemon.py` | daemon −21, installer +15 | U22 | `test_handle_install_and_uninstall_replies` |
 | U4 | not started | Move 2, 5b | `jobs.py`, `daemon.py` | daemon −10, jobs +15 | U3 | `test_job_lines_reach_a_moved_screen` |
+| U30 | not started | D60: the foreign-file helper moves to `config.py` | `config.py`, `installer.py`, `init.py` | installer −40, config +40 | U3 | the existing `merge_json_file` tests, import path changed |
 | U23 | not started | Refusals as failed calls | `memory.py`, `jobs.py` | +2 | U4 | `test_start_job_refusal_is_a_failed_call` |
 | U6 | not started | Approvals typed in chat (D52-2) | `broker.py`, `state.py` (`open_approvals`), `daemon.py` (`turn`) | daemon +7, broker +26, state +6 | U4 | `test_chat_approval_answered_without_a_model_call` |
 | U7a | not started | The second look (D51), plus a mid-stream error's text | `loop.py`, `daemon.py` (`_run_turn`) | loop +47, daemon +6 | U6 | `test_flagged_draft_is_withdrawn_and_rerun_once`, `test_every_streamed_delta_is_in_the_ledger` |

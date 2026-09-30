@@ -1,11 +1,11 @@
 # Partition 8 — trust in the answer and the security bundle: the rewritten prompt and a second look, a record of what was done, the registry copy, the split memory pass, secrets only through the Keychain, a private home, Gmail, skills
 
 **Where this stands (2026-09-30).**
-- **Code:** branch `partition-8` (worktree `.claude/worktrees/partition-8`), with U0, U1, U2,
-  U5 (U5b folded in), U9, U13, and since 2026-09-30 U21, U22, U24, U3, U4, U23, U30, U6 and U12
-  merged, each after review. 556 offline tests pass there. `daemon.py` 755/780,
-  `installer.py` 655/700 (D60 moved the foreign-file helper to `config.py`, 215).
-- **In review:** U25 (branch `p8-u25`). **Next:** U7a, U7b and U8, then U31.
+- **Code:** branch `partition-8` (worktree `.claude/worktrees/partition-8`). Merged, each after
+  review: U0, U1, U2, U5 (U5b), U9, U13, and on 2026-09-30 U21, U22, U24, U3, U4, U23, U30, U6,
+  U12, U25, U31, U7a, U7b, U8. `daemon.py` 762/780, `loop.py` 293/520, `installer.py` 655/700.
+- **Next:** U32 (D63) and U33 (the remaining raw exits), then U10, U11, U14a, U14b, U15a, U15b,
+  U16, U26, U27-U29, U17, U18.
 
 The unit table at the end is where the next session starts. Every row carries its state, its
 files, its size, what it waits for, and its tests.
@@ -369,6 +369,8 @@ tool names.
 - **It runs only when all hold:**
   - the draft is not empty;
   - no `tool` message follows the turn's last `user` message;
+  - the run has called no tool and is not a resume (decided at build: stricter than the line
+    above, so that "No tool was called in this turn." is always true, also after a steer);
   - a step of the budget is still left for a re-run;
   - no second look has run in this turn yet.
 
@@ -425,8 +427,9 @@ silently replaced.
     stream.
   - **Flagged:**
     1. The draft stays above.
-    2. A dim line under it: "철회 · withdrawn: the answer above said what the reminders hold with
-       no tool result in this turn - checking with the tools".
+    2. A dim line under it: "철회 · withdrawn: the answer above says what the calendar,
+       reminders, memory or registry hold without calling a tool - trying again with the tools"
+       (`{what}` from `FLAG_WORDS`; the verifier's own `why` is never shown).
     3. The re-run streams below.
   - **Other clients:** `pathfinder say` prints the same line to stderr (`_stream`); `listen` goes
     through `tui.render`.
@@ -1006,6 +1009,15 @@ line says how to get past it.**
   - `test_sanitize_is_the_one_rule`
 
 **Known limits** (listed, not units):
+- **A steer is recorded when it arrives, not when the model takes it.** A steer typed while the
+  second look runs (or between the last chunk and the turn's end) has its `user` event before
+  the draft's `assistant` in the ledger and in history, and a steer that gets its own turn is
+  seen twice by that turn. Older than this partition; the second look widens the window from
+  milliseconds to a request. Fixing it changes how the ledger records a turn: a later
+  partition's decision.
+- **Nothing shows while the second look runs.** After the last delta the owner waits one request
+  before `turn.end`. A steer typed then waits for the look; an interrupt cuts it. (10) measures
+  the wait; an indicator needs a socket line this partition does not add.
 - **The summary call's usage is lost when it errors (U9).** `memory_pass`'s `usage` sums both
   calls only when the summary call returns.
 - **A reindex is needed once after the upgrade.** The tool record (U5) is projected only from
@@ -1484,9 +1496,9 @@ parallel. **Deploy gate: U15a, U21, U31 and U33.**
 | U30 | **done, merged** | D60: the foreign-file helper moves to `config.py` | `config.py`, `installer.py`, `init.py` | installer −40, config +40 | U3 | the existing `merge_json_file` tests, import path changed |
 | U23 | **done, merged** | Refusals as failed calls | `memory.py`, `jobs.py` | +2 | U4 | `test_start_job_refusal_is_a_failed_call` |
 | U6 | **done, merged** | Approvals typed in chat (D52-2) | `broker.py`, `state.py` (`open_approvals`), `daemon.py` (`turn`) | daemon +7, broker +26, state +6 | U4 | `test_chat_approval_answered_without_a_model_call` |
-| U7a | not started | The second look (D51), plus a mid-stream error's text | `loop.py`, `daemon.py` (`_run_turn`) | loop +47, daemon +6 | U6 | `test_flagged_draft_is_withdrawn_and_rerun_once`, `test_every_streamed_delta_is_in_the_ledger` |
-| U7b | not started | The `retract` line | `tui.py` (`render`), `__main__.py` (`_stream`) | +4 | U7a | `test_retract_rendered` |
-| U8 | not started | The adopted prompt | `prompts/system.txt` | — | before U18 | `test_second_look_matches_the_bench` (in U17) |
+| U7a | **done, merged** | The second look (D51), plus a mid-stream error's text | `loop.py`, `daemon.py` (`_run_turn`) | loop +47, daemon +6 | U6 | `test_flagged_draft_is_withdrawn_and_rerun_once`, `test_every_streamed_delta_is_in_the_ledger` |
+| U7b | **done, merged** | The `retract` line | `tui.py` (`render`), `__main__.py` (`_stream`) | +4 | U7a | `test_retract_rendered` |
+| U8 | **done, merged** | The adopted prompt | `prompts/system.txt` | — | before U18 | `test_second_look_matches_the_bench` (in U17) |
 | U10 | not started | Intake, D40, 5f | `keychain.py` (`store`, fixed `secret`), `installer.py` (`check` step 4), `__main__.py` (`secret`) | +36 | U3, U7b | `test_store_escapes_backslash_then_quote`, `test_missing_required_secret_stops_before_the_trial` |
 | U11 | not started | `/secret`, 5d | `tui.py` | +22 | U7b, U10 | `test_slash_secret_masks_and_never_touches_the_socket` |
 | U12 | **done, merged** | 5a | `state.py`, `deliver.py`, `daemon.py` line 573 | ~0 | U6 | `test_presence_is_the_newest_row_across_sessions` |

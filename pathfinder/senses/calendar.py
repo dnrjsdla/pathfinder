@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from .. import clock
 from ..signals import Signal
-from ..tools import ToolSpec, normalize_local_datetime
+from ..tools import ToolSpec, normalize_local_datetime, oneline
 from . import _eventkit as ek
 
 OPTIONS: dict = {}
@@ -40,12 +40,13 @@ def poll(options, now):
     for ev in events:
         if ev["start"] is None or ev["start"] < now:  # started: not upcoming (live: a holiday re-signalled 92 times a day)
             continue
+        title = oneline(ev["title"])
         out.append(Signal(
             sense="calendar", kind="upcoming_event", key=f"event:{ev['id']}:{ev['start']}",
-            summary=f"Upcoming: {clock.format_local(ev['start'])} {ev['title']}",
-            fields={"title": ev["title"], "start": clock.format_local(ev["start"]),
+            summary=f"Upcoming: {clock.format_local(ev['start'])} {title}",
+            fields={"title": title, "start": clock.format_local(ev["start"]),
                     "end": clock.format_local(ev["end"]) if ev["end"] else None,
-                    "all_day": ev["all_day"], "notes": ev.get("notes"),
+                    "all_day": ev["all_day"], "notes": ev.get("notes") and oneline(ev["notes"]),
                     "minutes_until": clock.minutes_until(ev["start"], now)},
             trust=TRUST))
     return out
@@ -57,7 +58,7 @@ def context(now):
         return ["- calendar: not readable (access not granted yet)"]
     events = [ev for ev in ek.list_events(now, now + _AGENDA_S) if ev["start"] is not None]
     lines = [f"- event {clock.format_local(ev['start'])}{' (all day)' if ev['all_day'] else ''}: "
-             f"{' '.join(ev['title'].split())[:80]}" for ev in events[:_AGENDA_MAX]]
+             f"{oneline(ev['title'], 80)}" for ev in events[:_AGENDA_MAX]]
     if len(events) > _AGENDA_MAX:
         lines.append(f"- {len(events) - _AGENDA_MAX} more events (list_events)")
     return lines or ["- calendar, next 24 h: nothing"]

@@ -22,6 +22,8 @@ import re
 from enum import Enum
 from typing import Any
 
+from ..tools import clean
+
 # The revision we speak. The `MCP-Protocol-Version` header and the `_meta` value
 # in the body MUST match, or the server rejects the request with 400.
 PROTOCOL_VERSION = "2026-07-28"
@@ -161,9 +163,9 @@ def read_result(payload: dict[str, Any]) -> dict[str, Any]:
 # --- tool names ---------------------------------------------------------------
 
 def sanitize(text: str) -> str:
-    """Strip control characters, keep newlines. Everything a server writes that a model or a
-    terminal will read passes through here (a description, a held tool's line)."""
-    return "".join(c for c in text if c.isprintable() or c == "\n")
+    """The one character rule, `tools.clean` (D62): newlines and tabs kept. Everything a server writes
+    that a model or a terminal will read passes through here (a description, a held tool's line)."""
+    return clean(text)
 
 
 def qualify(server_id: str, tool_name: str) -> str:

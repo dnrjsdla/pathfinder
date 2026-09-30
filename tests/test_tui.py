@@ -307,6 +307,24 @@ class TuiCase(unittest.TestCase):
         out = tui.render({"type": "notice", "id": "n", "text": "bad\x07bell", "why": "y"})
         self.assertNotIn("\x07", out)
 
+    def test_gate_line_has_no_bidi_or_c1(self):
+        """U33: json.dumps escapes C0 only - a bidi override could reorder the line the owner
+        approves from, and a C1 control reach the terminal. The `say` client's line too."""
+        from pathfinder import __main__ as cli
+        gate = {"type": "gate", "id": "g1", "tool": "shell\u202e", "args": {"cmd": "rm \u202eevil\x9b2J\u200b"}}
+        lines = [tui.render(gate), tui.render({**gate, "type": "job.gate", "approval": "a1"})]
+        self.assertTrue(all("rm evil2J" in line for line in lines), lines)
+        server, client = socket.socketpair()
+        with server, client:
+            for m in (gate, {"type": "turn.end", "kind": "answer"}):
+                server.sendall((json.dumps(m, ensure_ascii=False) + "\n").encode())
+            err = io.StringIO()
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+                cli._stream(client, [])
+        lines.append(err.getvalue())
+        for line in lines:
+            self.assertFalse(set(line) & set("\u202e\x9b\u200b\x1b"), repr(line))
+
 
 if __name__ == "__main__":
     unittest.main()

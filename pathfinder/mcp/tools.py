@@ -17,7 +17,7 @@ import logging
 import re
 from typing import Any
 
-from ..tools import ToolSpec
+from ..tools import ToolSpec, clean, map_strings, oneline
 from . import protocol
 
 _log = logging.getLogger("pathfinder.mcp")
@@ -48,6 +48,11 @@ def specs(entries, servers, pins_report) -> dict[str, ToolSpec]:
             _log.warning("%s: tool %r has an argument named 'control' (the broker's own keyword) - skipped",
                         entry.server_id, entry.tool_name)
             continue
+        # the model sends back the name it was shown, and the server expects its own: never renamed
+        if isinstance(schema, dict) and any(name != oneline(name) for name in (schema.get("properties") or {})):
+            _log.warning("%s: tool %r has an argument name the character filter would change - skipped",
+                        entry.server_id, entry.tool_name)
+            continue
         out[entry.qualified_name] = _to_spec(servers, entry)
     return out
 
@@ -67,8 +72,8 @@ def _to_spec(servers, entry) -> ToolSpec:
     return ToolSpec(
         name=qualified,
         description=_describe(entry.server_id, entry.tool_name, entry.definition.get("description")),
-        params=params,
-        required=required,
+        params=map_strings(params, clean),  # descriptions and enum values are the server's words
+        required=map_strings(required, clean),
         handler=handler,
         write=True, network=True,
     )

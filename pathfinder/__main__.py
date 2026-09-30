@@ -22,7 +22,7 @@ from .clock import format_local
 from .daemon import SOCKET, Daemon, is_serving
 from .ledger import Ledger
 from .mcp import servers as mcp_servers
-from .mcp.protocol import qualify
+from .mcp.protocol import qualify, sanitize
 from .state import State
 
 USAGE = __doc__
@@ -62,8 +62,8 @@ def _stream(sock, messages):
             print(flush=True)  # the withdrawn draft and the re-run stay on lines of their own
             print(tui.STRINGS["retract"].format(what=msg["what"]), file=sys.stderr)
         elif msg["type"] == "gate":
-            print(f"\npathfinder: waiting for approval on {msg['tool']} {msg['args']} "
-                  f"(run `pathfinder approve {msg['id']}` or `pathfinder deny {msg['id']}`)", file=sys.stderr)
+            print(sanitize(f"\npathfinder: waiting for approval on {msg['tool']} {msg['args']} "
+                           f"(run `pathfinder approve {msg['id']}` or `pathfinder deny {msg['id']}`)"), file=sys.stderr)
         elif msg["type"] == "turn.end":
             print()
             return 1 if failed or msg["kind"] == "error" else 0

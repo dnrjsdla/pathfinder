@@ -685,7 +685,7 @@ class Daemon:
         def work(step, budget):
             try:
                 return loop.run(step, messages, call_tool=broker.call, emit=emit,
-                                budget=budget, control=control, resume=resume,
+                                budget=budget, control=control, resume=resume, second_look=list(user_tools),
                                 final_step=self.step_factory(cfg, control, {}))  # D30: no tools
             finally:
                 aio.call_soon_threadsafe(out_q.put_nowait, (None, None))
@@ -706,6 +706,10 @@ class Daemon:
                     recorded = {**payload, "result": tools.clip_for_ledger(payload["result"])}
                     self.record("tool_result", session=s.id, turn=turn, origin="user", **recorded)
                     self.send(s, {"type": "tool", "name": payload["name"], "ok": payload["ok"]})
+                elif kind == "retract":  # D51: kept in the ledger as the owner saw it, never in history
+                    self.record("assistant", session=s.id, turn=turn, origin="user", text=payload["draft"],
+                                final=False, withdrawn={"flags": payload["flags"], "why": payload["why"]})
+                    self.send(s, {"type": "retract", "what": payload["what"], "why": payload["why"]})
             out = await running
         except Gate as g:
             # The approval has its own id: the tool-call id is a string the model chose and
@@ -723,6 +727,8 @@ class Daemon:
         except LLMError as e:
             # Out of credit, rate limited, offline, no model set: the assistant goes quiet,
             # the daemon does not die. Signals keep landing in the ledger.
+            if getattr(e, "said", ""):  # Invariant 2: what streamed before the error reaches the ledger
+                self.record("assistant", session=s.id, turn=turn, origin="user", text=e.said, final=True)
             self.record("error", session=s.id, turn=turn, origin="user", status=e.status, message=str(e)[:300])
             self.send(s, {"type": "error", "message": str(e)[:300]})
             self.record("turn_end", session=s.id, turn=turn, origin="user", kind="error")
@@ -733,7 +739,7 @@ class Daemon:
         if out.text:
             self.record("assistant", session=s.id, turn=turn, origin="user", text=out.text, final=True)
         self.record("turn_end", session=s.id, turn=turn, origin="user", kind=out.kind,
-                    steps=out.steps, usage=out.usage)
+                    steps=out.steps, usage=out.usage, check=out.check)
         return out.kind
 
 

@@ -74,6 +74,20 @@ class StateTest(unittest.TestCase):
             {"role": "assistant", "content": "the real reply"},
         ])
 
+    def test_withdrawn_draft_survives_rebuild(self):
+        """Invariant 2: the withdrawn draft stays in the ledger, never in history, across a rebuild."""
+        self._record("session_start", session="s2")
+        self._record("user", session="s2", turn="t1", origin="user", trust="user", text="any reminders?")
+        self._record("assistant", session="s2", turn="t1", origin="user", text="none", final=False,
+                     withdrawn={"flags": ["unsupported_state"], "why": "no tool result"})
+        self._record("assistant", session="s2", turn="t1", origin="user", text="two", final=True)
+        rebuilt = State(self.home / "rebuilt.db")
+        self.addCleanup(rebuilt.close)
+        rebuilt.rebuild(self.ledger)
+        self.assertIn("none", [e["text"] for e in self.ledger.read() if e["type"] == "assistant" and e.get("withdrawn")])
+        self.assertEqual(rebuilt.history("s2"), [{"role": "user", "content": "any reminders?"},
+                                                 {"role": "assistant", "content": "two"}])
+
     def _call(self, id, name, args, ok=True, result="RESULT-TEXT", origin="user", **kw):
         self._record("tool_call", session="s2", turn="t1", origin=origin, id=id, name=name, args=args, **kw)
         self._record("tool_result", session="s2", turn="t1", origin=origin, id=id, name=name, ok=ok,

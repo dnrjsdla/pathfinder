@@ -21,7 +21,7 @@ from pathfinder.deliver import Notice
 from pathfinder.ledger import Ledger
 from pathfinder.llm import LLMError
 from pathfinder.mcp import pins as mcp_pins
-from pathfinder.loop import TurnControl
+from pathfinder.loop import FLAG_WORDS, VERIFIER_PROMPT, TurnControl
 from pathfinder.signals import Signal
 from pathfinder.state import State
 from pathfinder.tools import ToolSpec
@@ -31,7 +31,8 @@ def fake_model(reply="Hello there."):
     def factory(cfg, cancel=None, tools=None):
         factory.cancels.append(cancel)
         def step(messages):
-            step.seen.append([dict(m) for m in messages])
+            if messages[0]["content"] != VERIFIER_PROMPT:  # the second look's ask is not a turn's request
+                step.seen.append([dict(m) for m in messages])
             for word in reply.split(" "):
                 yield ("text", word + " ")
             yield ("usage", {"prompt_tokens": 10, "completion_tokens": 3})
@@ -381,6 +382,8 @@ class DaemonTest(DaemonHarness):
             calls = {"n": 0}
 
             def step(messages):
+                if messages[0]["content"] == VERIFIER_PROMPT:
+                    return  # the second look: the steer's user message follows the tool, so it runs
                 seen_messages.append([dict(m) for m in messages])
                 n = calls["n"]
                 calls["n"] += 1
@@ -541,6 +544,8 @@ class ReviewRegressionsTest(DaemonHarness):
     def test_steer_after_the_last_chunk_gets_its_own_turn(self):
         def late_steer_model(cfg, control=None, tools=None):
             def step(messages):
+                if messages[0]["content"] == VERIFIER_PROMPT:
+                    return  # the second look: no verdict, the draft stands
                 late_steer_model.calls += 1
                 late_steer_model.last = messages[-1]
                 yield ("text", "answer ")
@@ -563,6 +568,103 @@ class ReviewRegressionsTest(DaemonHarness):
         self.assertEqual([u["text"] for u in users], ["hello"])  # the fake put the steer in directly
         self.assertEqual(sum(1 for e in self.events() if e["type"] == "turn_start"), 2)
         self.assertEqual(late_steer_model.last, {"role": "user", "content": "and in Korean"})
+
+
+FLAGGED = json.dumps({"unsupported_state": True, "unsupported_done": False, "empty_promise": False,
+                      "false_incapability": False, "why": "no list_reminders result"})
+PASSED = FLAGGED.replace("true", "false")
+
+
+def scripted_model(verdict, draft="Your list is empty.", rerun="Checked: it holds two."):
+    """Answers `draft` first and `rerun` after; the second look answers `verdict`. A user message
+    names another ending: "error" breaks mid-stream, "stop" is interrupted mid-stream, "loop"
+    calls a tool until the budget runs out, "write" stops at the gate."""
+    def factory(cfg, control=None, tools=None):
+        def step(messages):
+            if messages[0]["content"] == VERIFIER_PROMPT:
+                yield ("text", verdict)
+                return
+            said = [m["content"] for m in messages if m["role"] == "user"][-1]
+            if said == "error":
+                yield ("text", "half an ans")
+                raise LLMError(500, "upstream went away")
+            if said == "stop":
+                yield ("text", "partial ")
+                control.interrupt.set()
+                yield ("cancelled", None)
+            elif said == "loop":
+                yield ("text", "working " if tools else "no luck.")
+                if tools:
+                    yield ("tool_calls", [{"id": "c1", "name": "anything", "arguments": {}}])
+            elif said == "write":
+                yield ("text", "writing it. ")
+                yield ("tool_calls", [{"id": "c1", "name": "write_file", "arguments": {"path": "n.txt", "content": "x"}}])
+            else:
+                factory.answers += 1
+                yield ("text", draft if factory.answers == 1 else rerun)
+        return step
+    factory.answers = 0
+    return factory
+
+
+class SecondLookDaemonTest(DaemonHarness):
+    """D51 in the daemon: the withdrawn draft is recorded as the owner saw it, marked, and kept
+    out of history; turn_end carries the check."""
+
+    def _say(self, factory, *texts):
+        async def scenario(daemon):
+            c = await Client.open(self.home)
+            turns = []
+            for text in texts:
+                c.send({"type": "say", "text": text})
+                turns.append(await c.until("turn.end"))
+            c.close()
+            return turns, daemon.state.history(next(iter(daemon.sessions)))
+        return self.run_with(factory, scenario)
+
+    def test_retract_records_withdrawn_assistant_and_sends_line(self):
+        (seen,), _ = self._say(scripted_model(FLAGGED), "any reminders?")
+        self.assertEqual([m["type"] for m in seen], ["attached", "turn.start", "delta", "retract", "delta", "turn.end"])
+        self.assertEqual(seen[3], {"type": "retract", "what": FLAG_WORDS["unsupported_state"],
+                                   "why": "no list_reminders result"})
+        said = [(e["text"], e["final"], e.get("withdrawn")) for e in self.events() if e["type"] == "assistant"]
+        self.assertEqual(said, [("Your list is empty.", False, {"flags": ["unsupported_state"],
+                                                                 "why": "no list_reminders result"}),
+                                ("Checked: it holds two.", True, None)])
+
+    def test_withdrawn_draft_marked_with_reason_and_out_of_history(self):
+        _, history = self._say(scripted_model(FLAGGED), "any reminders?")
+        withdrawn = [e for e in self.events() if e["type"] == "assistant" and not e["final"]]
+        self.assertEqual([(e["text"], e["withdrawn"]["why"]) for e in withdrawn],
+                         [("Your list is empty.", "no list_reminders result")])
+        self.assertNotIn("Your list is empty.", [m["content"] for m in history])
+
+    def test_history_holds_only_the_rerun(self):
+        _, history = self._say(scripted_model(FLAGGED), "any reminders?")
+        self.assertEqual(history, [{"role": "user", "content": "any reminders?"},
+                                   {"role": "assistant", "content": "Checked: it holds two."}])
+
+    def test_turn_end_carries_check(self):
+        checks = []
+        for verdict in (PASSED, FLAGGED, "I think the draft is fine."):
+            self._say(scripted_model(verdict), "hi")
+            checks.append([e.get("check") for e in self.events() if e["type"] == "turn_end"][-1])
+        self._say(scripted_model(PASSED), "loop")
+        checks.append(self.events()[-1]["check"])  # an answer after tools is never checked
+        self.assertEqual(checks, ["passed", "flagged", "failed", None])
+
+    def test_every_streamed_delta_is_in_the_ledger(self):
+        """Invariant 2: whatever the ending, the turn's assistant events hold every delta sent."""
+        endings = ("hi", "loop", "stop", "error", "any reminders?", "write")
+        turns, _ = self._say(scripted_model(FLAGGED), *endings)
+        self.assertEqual([seen[-1]["kind"] for seen in turns],
+                         ["answer", "exhausted", "cancelled", "error", "answer", "gated"])
+        for seen in turns:
+            turn = next(m for m in seen if m["type"] == "turn.start")["turn"]
+            streamed = "".join(m["text"] for m in seen if m["type"] == "delta")
+            recorded = "".join(e["text"] for e in self.events() if e["type"] == "assistant" and e["turn"] == turn)
+            self.assertTrue(streamed)
+            self.assertEqual(streamed, recorded)
 
 
 class RealStepFactoryTest(unittest.TestCase):

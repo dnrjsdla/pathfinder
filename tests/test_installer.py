@@ -206,6 +206,26 @@ class InstallerTest(unittest.TestCase):
         self.assertEqual(emitted[-1][0], "tool_result")
         self.assertFalse(emitted[-1][1]["ok"])
 
+    def test_handle_install_and_uninstall_replies(self):
+        """U3: the socket's `install`/`uninstall` messages are answered here, the daemon only writes."""
+        def handle(msg):
+            return asyncio.run(self.installer.handle(msg))
+        with mock.patch.object(Installer, "propose_by_name", return_value={"id": "a1", "line": "widget@1.0.0"}) as p:
+            self.assertEqual(handle({"type": "install", "name": "widget"}),
+                             {"type": "install", "id": "a1", "line": "widget@1.0.0"})
+        p.assert_called_once_with("widget")
+        with mock.patch.object(Installer, "propose_by_name", return_value={"error": "no such server; try search_tools"}):
+            self.assertEqual(handle({"type": "install", "name": "nope"}),
+                             {"type": "error", "message": "no such server; try search_tools"})
+        with mock.patch.object(Installer, "propose_by_name", side_effect=OSError("boom")):  # a raise still answers
+            self.assertEqual(handle({"type": "install", "name": "widget"}), {"type": "error", "message": "OSError: boom"})
+        with mock.patch.object(Installer, "uninstall", return_value={"id": "widget"}):
+            self.assertEqual(handle({"type": "uninstall", "id": "widget"}), {"type": "uninstall", "id": "widget"})
+        self.assertEqual(handle({"type": "uninstall", "id": "widget"}),
+                         {"type": "error", "message": "no installed server: widget"})
+        self.assertEqual(handle({"type": "install", "name": ""}), {"type": "error", "message": "install needs a \"name\""})
+        self.assertEqual(handle({"type": "uninstall", "id": 7}), {"type": "error", "message": "uninstall needs an \"id\""})
+
     # -- server_id -------------------------------------------------------------------------
     def test_server_id_from_name(self):
         self.assertEqual(server_id("io.github.acme/widget-server", set()), "widget-server")

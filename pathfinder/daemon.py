@@ -363,29 +363,8 @@ class Daemon:
                 elif kind == "memory.run":
                     result = await asyncio.to_thread(self.memory_mgr.run_pass, True)
                     _write(writer, {"type": "memory.run", "result": result})
-                elif kind == "install":
-                    name = msg.get("name")
-                    if not isinstance(name, str) or not name:
-                        _write(writer, {"type": "error", "message": "install needs a \"name\""})
-                        continue
-                    try:
-                        result = await asyncio.to_thread(self.installer.propose_by_name, name)
-                    except Exception as e:  # a check that raised must answer, not drop the connection (m5: "no reply")
-                        result = {"error": f"{type(e).__name__}: {e}"[:300]}
-                    if "error" in result:
-                        _write(writer, {"type": "error", "message": result["error"]})
-                    else:
-                        _write(writer, {"type": "install", "id": result["id"], "line": result["line"]})
-                elif kind == "uninstall":
-                    id = msg.get("id")
-                    if not isinstance(id, str) or not id:
-                        _write(writer, {"type": "error", "message": "uninstall needs an \"id\""})
-                        continue
-                    result = await self.installer.uninstall(id)
-                    if "error" in result:
-                        _write(writer, {"type": "error", "message": result["error"]})
-                    else:
-                        _write(writer, {"type": "uninstall", "id": result["id"]})
+                elif kind in ("install", "uninstall"):
+                    _write(writer, await self.installer.handle(msg))
                 elif kind == "signal":
                     sense_name, fields = msg.get("sense"), msg.get("fields")
                     sense = self.senses.get(sense_name)

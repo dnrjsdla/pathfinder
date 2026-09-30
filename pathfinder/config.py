@@ -5,6 +5,7 @@ import importlib
 import json
 import os
 import re
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -146,13 +147,16 @@ def make_private(home: Path) -> None:
     """Drop group and other bits from everything under the home (`mode & 0o700`, so the owner's
     x stays). A symlink is skipped, never followed, and `workspace/` is not entered: the owner's
     working files keep their modes. Called once, at daemon start - not in `home()`, which runs on
-    every tool call."""
+    every tool call. An entry that cannot be changed is logged and left: it never stops the daemon."""
     for root, dirs, files in os.walk(home):
         if root == str(home) and "workspace" in dirs:
             dirs.remove("workspace")
         for path in (os.path.join(root, name) for name in dirs + files):
-            if not os.path.islink(path):
-                os.chmod(path, os.stat(path).st_mode & 0o700)
+            try:
+                if not os.path.islink(path):
+                    os.chmod(path, os.stat(path).st_mode & 0o700)
+            except OSError as e:  # vanished mid-walk (a -wal file), not the owner's, immutable
+                print(f"pathfinder: could not make {path} private: {e}", file=sys.stderr)
 
 
 def load(home: Path) -> dict:

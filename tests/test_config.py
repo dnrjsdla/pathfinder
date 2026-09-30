@@ -1,8 +1,11 @@
+import contextlib
+import io
 import json
 import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from pathfinder import config
 
@@ -159,6 +162,28 @@ class ConfigTest(unittest.TestCase):
             self.assertEqual([mode(home / "events"), mode(ledger), mode(script)], [0o700, 0o600, 0o700])
             self.assertEqual([mode(home / "workspace"), mode(mine)], [0o755, 0o644])
             self.assertEqual([mode(outside), mode(theirs)], [0o755, 0o644])  # neither link followed
+
+
+    def test_make_private_logs_an_entry_it_cannot_change_and_goes_on(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            (home / "events").mkdir()
+            names = ("stuck", "a.txt", "events/0.jsonl", "z.txt")
+            for name in names:
+                (home / name).write_text("x")
+                os.chmod(home / name, 0o644)
+            real = os.chmod
+
+            def chmod(path, mode):
+                if str(path).endswith("stuck"):
+                    raise PermissionError(1, "Operation not permitted", str(path))
+                real(path, mode)
+            with mock.patch("pathfinder.config.os.chmod", chmod), \
+                    contextlib.redirect_stderr(io.StringIO()) as err:
+                config.make_private(home)
+            self.assertIn("could not make", err.getvalue())
+            self.assertIn("stuck", err.getvalue())
+            self.assertEqual([(home / n).stat().st_mode & 0o777 for n in names], [0o644, 0o600, 0o600, 0o600])
 
 
 if __name__ == "__main__":

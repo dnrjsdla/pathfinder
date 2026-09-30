@@ -13,6 +13,7 @@ import io
 import json
 import os
 import re
+import select
 import selectors
 import socket
 import sys
@@ -28,6 +29,7 @@ from .tools import visible
 
 PROMPT = "> "
 SECRET_PROMPT = "비밀 · secret> "  # the masked input line: this, then one `*` per character
+SECRET_DRAIN_S = 0.05           # input within this after a masked Enter is a paste that ran past the value
 _UNIT = re.compile(r"\\U[0-9a-f]{8}|\\u[0-9a-f]{4}|\\.|.")  # an escape, JSON's or `visible`'s, is one unit
 SELECT_TIMEOUT = 0.05           # how often the main loop wakes up to check the timers below
 PRESENCE_ACTIVE_S = 1.0         # at most one presence{idle_s: 0} per second while keys arrive
@@ -56,6 +58,7 @@ STRINGS = {
     "secret_stored": "저장됨 · {name} stored for {id}; an installed server picks it up at the next "
                      "`pathfinder service restart`",
     "secret_cancelled": "저장 안 함 · nothing stored",
+    "secret_one_line": "저장 안 함 · nothing stored: a secret is one line - paste only the value",
     "no_approvals": "대기 중인 승인 없음 · no approvals seen this sitting",
     "no_jobs": "확인된 작업 없음 · no jobs seen this sitting",
 }
@@ -110,7 +113,7 @@ class _Session:
         self.secret = None  # (id, NAME) while the input line is masked for `/secret`
         self.turn_running = False
         self.interrupt_sent = False  # one Ctrl-C interrupts, the second quits
-        self._esc = 0  # 1 after ESC, 2 inside an ESC [ sequence (arrow keys are dropped)
+        self._esc = 0  # 1 after ESC, 2 inside ESC [ (CSI), 3 after ESC O (SS3): such keys are dropped
         self._recv_buf = b""
         self._keys = codecs.getincrementaldecoder("utf-8")("replace")  # a Hangul syllable is 3 bytes (D6)
         now = time.monotonic()
@@ -176,10 +179,32 @@ class _Session:
             return self._ctrl_c()
         if not data:  # stdin closed
             return 0
-        for ch in self._keys.decode(data):
+        chars = self._keys.decode(data)
+        for i, ch in enumerate(chars):
+            if self.secret and ch in "\r\n":
+                return self._secret_enter(spill=i + 1 < len(chars))
             rc = self._key(ord(ch))
             if rc is not None:
                 return rc
+        return None
+
+    def _secret_enter(self, spill):
+        """A secret is one line: Enter stores the masked value only when silence follows it. Input
+        after it in the same read, or readable within SECRET_DRAIN_S (a paste spread over reads), is
+        read and dropped unseen, the value with it - nothing is stored, shown or sent."""
+        while select.select([self.in_fd], [], [], SECRET_DRAIN_S)[0] and os.read(self.in_fd, 1024):
+            spill = True
+        (id, name), value = self.secret, self.buf
+        self.secret, self.buf, self._esc = None, "", 0
+        self._keys.reset()
+        if spill:
+            self.show(STRINGS["secret_one_line"])
+            return None
+        try:  # stored in this process, never sent on the socket
+            keychain.store(f"pathfinder-mcp-{id}", name, value)
+            self.show(STRINGS["secret_stored"].format(name=name, id=id))
+        except Exception as e:  # store's messages never carry the value
+            self.show(STRINGS["error"].format(message=e))
         return None
 
     def _ctrl_c(self):
@@ -198,9 +223,9 @@ class _Session:
             return self._ctrl_c()
         if byte == 0x04:  # Ctrl-D
             return 0
-        if byte == 0x1b or self._esc:  # ESC [ A ... : arrow and function keys, dropped whole
-            self._esc = 1 if byte == 0x1b else (2 if self._esc == 1 and byte == 0x5b else
-                                                 (2 if self._esc == 2 and not 0x40 <= byte <= 0x7e else 0))
+        if byte == 0x1b or self._esc:  # ESC [ ... final, ESC O x: arrow and function keys, dropped whole
+            self._esc = (1 if byte == 0x1b else {0x5b: 2, 0x4f: 3}.get(byte, 0) if self._esc == 1 else
+                         2 if self._esc == 2 and not 0x40 <= byte <= 0x7e else 0)
             return None
         now = time.monotonic()
         self.last_key = now
@@ -221,14 +246,7 @@ class _Session:
         return rc
 
     def _line(self, line):
-        if self.secret:  # the masked value: stored in this process, never sent on the socket
-            (id, name), self.secret = self.secret, None
-            try:
-                keychain.store(f"pathfinder-mcp-{id}", name, line)
-                self.show(STRINGS["secret_stored"].format(name=name, id=id))
-            except Exception as e:  # store's messages never carry the value
-                self.show(STRINGS["error"].format(message=e))
-        elif line == "+":
+        if line == "+":
             self.send({"type": "react", "vote": "up"})
         elif line == "-":
             self.send({"type": "react", "vote": "down"})

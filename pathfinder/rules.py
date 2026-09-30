@@ -132,9 +132,11 @@ def load(home, senses) -> Rules:
     home = Path(home)
     rules_path = home / "RULES.md"
     if not rules_path.exists():
+        rules_path.touch(mode=0o600)  # born private, as everything under the home
         rules_path.write_text(DEFAULT_RULES_PATH.read_text(encoding="utf-8"), encoding="utf-8")
     user_path = home / "USER.md"
     if not user_path.exists():  # the empty lists new_mail's rules read; partition 5 fills them in
+        user_path.touch(mode=0o600)
         user_path.write_text("---\nwaiting_for: []\nsubject_alerts: []\nnoise_domains: []\n---\n", encoding="utf-8")
     conditions = dict(CORE_CONDITIONS)
     validated_kinds = set()

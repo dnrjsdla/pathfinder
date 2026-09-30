@@ -243,22 +243,22 @@ class TuiCase(unittest.TestCase):
         screen, nothing on the socket, so no client attached to the daemon can receive it."""
         value = "s3cr3t-" + "v4lue"
         with mock.patch("pathfinder.keychain.store") as store:
-            self.type_("/secret easy-notion NOTION_TOKEN\r")
-            self.assertTrue(_wait_for(lambda: "NOTION_TOKEN for easy-notion (hidden;" in self.out_text()))
+            self.type_("/secret rv11test TOKEN\r")
+            self.assertTrue(_wait_for(lambda: "TOKEN for rv11test (hidden;" in self.out_text()))
             self.type_(value)
             self.assertTrue(_wait_for(lambda: self.out_text().endswith(tui.SECRET_PROMPT + "*" * len(value))))
             self.type_("\r")
-            self.assertTrue(_wait_for(lambda: "NOTION_TOKEN stored for easy-notion" in self.out_text()))
-            self.type_("/secret Bad_Id NOTION_TOKEN\r")
+            self.assertTrue(_wait_for(lambda: "TOKEN stored for rv11test" in self.out_text()))
+            self.type_("/secret Bad_Id TOKEN\r")
             self.assertTrue(_wait_for(lambda: "/secret ID NAME takes a server id" in self.out_text()))
-            store.assert_called_once_with("pathfinder-mcp-easy-notion", "NOTION_TOKEN", value)
+            store.assert_called_once_with("pathfinder-mcp-rv11test", "TOKEN", value)
         self.assertNotIn(value, self.out_text())
         self.assertNotIn(value, json.dumps(self.daemon.received))
         self.assertEqual({m["type"] for m in self.daemon.received} - {"attach", "presence"}, set())
 
     def test_ctrl_c_cancels_secret_entry(self):
         with mock.patch("pathfinder.keychain.store") as store:
-            self.type_("/secret easy-notion NOTION_TOKEN\r")
+            self.type_("/secret rv11test TOKEN\r")
             self.assertTrue(_wait_for(lambda: "(hidden;" in self.out_text()))
             self.type_("half")
             self.assertTrue(_wait_for(lambda: self.out_text().endswith(tui.SECRET_PROMPT + "****")))
@@ -269,6 +269,39 @@ class TuiCase(unittest.TestCase):
             store.assert_not_called()
         self.assertTrue(self._main.is_alive())
         self.assertNotIn("half", self.out_text() + json.dumps(self.daemon.received))
+
+    def _paste_runs_past_the_secret(self, *writes):
+        with mock.patch("pathfinder.keychain.store") as store:
+            self.type_("/secret rv11test TOKEN\r")
+            self.assertTrue(_wait_for(lambda: "(hidden;" in self.out_text()))
+            for w in writes:
+                self.type_(w)
+                time.sleep(0.01)  # a paste over two reads, well inside the drain window
+            self.assertTrue(_wait_for(lambda: "a secret is one line" in self.out_text()))
+            self.type_("hello\r")  # back to plain input, nothing of the paste left in the buffer
+            self.assertTrue(_wait_for(lambda: any(m.get("type") == "say" for m in self.daemon.received)))
+            store.assert_not_called()
+        self.assertEqual([m for m in self.daemon.received if m["type"] == "say"], [{"type": "say", "text": "hello"}])
+        for part in ("PART1-tok", "PART2-after", "PART3"):
+            self.assertNotIn(part, self.out_text() + json.dumps(self.daemon.received))
+
+    def test_paste_past_the_secret_line_stores_and_sends_nothing(self):
+        """Review blocker: a secret is one line; whatever follows its Enter voids it, unseen."""
+        self._paste_runs_past_the_secret("PART1-tok\rPART2-after\rPART3")
+
+    def test_paste_past_the_secret_line_over_two_reads_stores_and_sends_nothing(self):
+        self._paste_runs_past_the_secret("PART1-tok\r", "PART2-after\rPART3")
+
+    def test_masked_input_drops_escape_sequences_whole(self):
+        """CSI and SS3 keys (F1 is ESC O P) leave no byte in the value; letters stay."""
+        with mock.patch("pathfinder.keychain.store") as store:
+            self.type_("/secret rv11test TOKEN\r")
+            self.assertTrue(_wait_for(lambda: "(hidden;" in self.out_text()))
+            self.type_("\x1b[200~BPASTE\x1b[201~\x1b[A\x1b[D\x1b[1;5C\x1bOP")
+            self.assertTrue(_wait_for(lambda: self.out_text().endswith(tui.SECRET_PROMPT + "******")))
+            self.type_("\r")
+            self.assertTrue(_wait_for(lambda: store.called))
+            store.assert_called_once_with("pathfinder-mcp-rv11test", "TOKEN", "BPASTE")
 
     def test_ctrl_c_interrupts_a_running_stream_then_quits(self):
         self.daemon.send({"type": "turn.start", "turn": 1})

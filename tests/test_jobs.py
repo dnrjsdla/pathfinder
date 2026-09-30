@@ -364,6 +364,7 @@ class JobGateTest(JobsHarness):
         mgr.stop(job_id)
         self.assertEqual(mgr.jobs[job_id].state, "cancelled")
         self.assertEqual(self.state.pending(), [])  # the row is closed (denied), not left pending
+        self.assertEqual([e["job"] for e in self.ledger.read() if e["type"] == "approval"], [job_id])  # D63
         self.assertEqual(self.state.job(job_id)["state"], "cancelled")
         self.assertEqual([s.kind for s in self.pushed], ["job_failed"])
         mgr.resume(approval_id, "approved")  # a stale approve does nothing

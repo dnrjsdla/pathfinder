@@ -2,9 +2,10 @@
 
 **Where this stands (2026-09-30).**
 - **Code:** branch `partition-8` (worktree `.claude/worktrees/partition-8`), with U0, U1, U2,
-  U5 (U5b folded in), U9, U13, and since 2026-09-30 U21, U22 and U24 merged, each after two
-  review rounds. 542 offline tests pass there.
-- **Everything else:** not started. Next: U3, U4, U23, U6 (the daemon moves), then U7a.
+  U5 (U5b folded in), U9, U13, and since 2026-09-30 U21, U22, U24, U3, U4, U23 and U30 merged,
+  each after two review rounds. 548 offline tests pass there. `daemon.py` 748/780,
+  `installer.py` 655/700 (D60 moved the foreign-file helper to `config.py`, 215).
+- **Everything else:** not started. Next: U6 and U12, U25, then U7a, U7b and U8.
 
 The unit table at the end is where the next session starts. Every row carries its state, its
 files, its size, what it waits for, and its tests.
@@ -1368,10 +1369,10 @@ parallel. **Deploy gate: U15a and U21.**
 | U24 | **done, merged** | Lone surrogates (one U+FFFD each, utf-16 route) | `ledger.py` | 132 (+10) | — | `test_old_ledger_with_a_lone_surrogate_catches_up_and_reindexes` |
 | U21 | **done, merged** | The envelope filter (**deploy gate**); summary cap 2,200 | `tools.py`, `catalog.py`, `signals.py` | 225, 268, 211 | U2 | `test_envelope_strips_bidi_zero_width_and_ansi_from_fields` |
 | U22 | **done, merged** | MCP error and failed proposal as failed calls | `mcp/tools.py`, `installer.py` | 122, 682 (+2; the contract's net 0 was not reachable) | U2 | `test_mcp_is_error_is_a_failed_call` |
-| U3 | not started | Move 1: `install`/`uninstall` into the installer | `installer.py`, `daemon.py` | daemon −21, installer +15 | U22 | `test_handle_install_and_uninstall_replies` |
-| U4 | not started | Move 2, 5b | `jobs.py`, `daemon.py` | daemon −10, jobs +15 | U3 | `test_job_lines_reach_a_moved_screen` |
-| U30 | not started | D60: the foreign-file helper moves to `config.py` | `config.py`, `installer.py`, `init.py` | installer −40, config +40 | U3 | the existing `merge_json_file` tests, import path changed |
-| U23 | not started | Refusals as failed calls | `memory.py`, `jobs.py` | +2 | U4 | `test_start_job_refusal_is_a_failed_call` |
+| U3 | **done, merged** | Move 1: `install`/`uninstall` into the installer | `installer.py`, `daemon.py` | daemon −21, installer +15 | U22 | `test_handle_install_and_uninstall_replies` |
+| U4 | **done, merged** | Move 2, 5b | `jobs.py`, `daemon.py` | daemon −10, jobs +15 | U3 | `test_job_lines_reach_a_moved_screen` |
+| U30 | **done, merged** | D60: the foreign-file helper moves to `config.py` | `config.py`, `installer.py`, `init.py` | installer −40, config +40 | U3 | the existing `merge_json_file` tests, import path changed |
+| U23 | **done, merged** | Refusals as failed calls | `memory.py`, `jobs.py` | +2 | U4 | `test_start_job_refusal_is_a_failed_call` |
 | U6 | not started | Approvals typed in chat (D52-2) | `broker.py`, `state.py` (`open_approvals`), `daemon.py` (`turn`) | daemon +7, broker +26, state +6 | U4 | `test_chat_approval_answered_without_a_model_call` |
 | U7a | not started | The second look (D51), plus a mid-stream error's text | `loop.py`, `daemon.py` (`_run_turn`) | loop +47, daemon +6 | U6 | `test_flagged_draft_is_withdrawn_and_rerun_once`, `test_every_streamed_delta_is_in_the_ledger` |
 | U7b | not started | The `retract` line | `tui.py` (`render`), `__main__.py` (`_stream`) | +4 | U7a | `test_retract_rendered` |

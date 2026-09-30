@@ -377,22 +377,19 @@ class Installer:
         return {"id": aid, "line": line + ("  deprecated in the registry" if status == "deprecated" else "")}
 
     async def handle(self, msg: dict) -> dict:
-        if msg["type"] == "install":
-            name = msg.get("name")
-            if not isinstance(name, str) or not name:
-                return {"type": "error", "message": "install needs a \"name\""}
-            try:
-                result = await asyncio.to_thread(self.propose_by_name, name)
-            except Exception as e:  # a check that raised must answer, not drop the connection (m5: "no reply")
-                result = {"error": f"{type(e).__name__}: {e}"[:300]}
-            reply = {"type": "install", "id": result.get("id"), "line": result.get("line")}
-        else:
-            id = msg.get("id")
-            if not isinstance(id, str) or not id:
-                return {"type": "error", "message": "uninstall needs an \"id\""}
-            result = await self.uninstall(id)
-            reply = {"type": "uninstall", "id": result.get("id")}
-        return {"type": "error", "message": result["error"]} if "error" in result else reply
+        install = msg["type"] == "install"
+        arg = msg.get("name" if install else "id")
+        if not isinstance(arg, str) or not arg:
+            return {"type": "error", "message": "install needs a \"name\"" if install else "uninstall needs an \"id\""}
+        try:
+            result = await (asyncio.to_thread(self.propose_by_name, arg) if install else self.uninstall(arg))
+        except Exception as e:  # a check or an uninstall that raised must answer, not drop the connection (m5: "no reply")
+            result = {"error": f"{type(e).__name__}: {e}"[:300]}
+        if "error" in result:
+            return {"type": "error", "message": result["error"]}
+        if install:
+            return {"type": "install", "id": result["id"], "line": result["line"]}
+        return {"type": "uninstall", "id": result["id"]}
 
     # -- install / rollback --------------------------------------------------------------
     async def decide(self, approval_id: str, decision: str) -> None:

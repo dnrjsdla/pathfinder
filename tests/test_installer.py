@@ -222,6 +222,8 @@ class InstallerTest(unittest.TestCase):
             self.assertEqual(handle({"type": "install", "name": "widget"}), {"type": "error", "message": "OSError: boom"})
         with mock.patch.object(Installer, "uninstall", return_value={"id": "widget"}):
             self.assertEqual(handle({"type": "uninstall", "id": "widget"}), {"type": "uninstall", "id": "widget"})
+        with mock.patch.object(Installer, "uninstall", side_effect=OSError("disk full")):  # a raise still answers
+            self.assertEqual(handle({"type": "uninstall", "id": "widget"}), {"type": "error", "message": "OSError: disk full"})
         self.assertEqual(handle({"type": "uninstall", "id": "widget"}),
                          {"type": "error", "message": "no installed server: widget"})
         self.assertEqual(handle({"type": "install", "name": ""}), {"type": "error", "message": "install needs a \"name\""})

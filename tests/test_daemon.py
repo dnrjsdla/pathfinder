@@ -1422,6 +1422,34 @@ class JobDaemonIntegrationTest(DaemonHarness):
         self.assertEqual(first[-1]["kind"], "answer")
         self.assertEqual(second[-1]["kind"], "answer")
 
+    def test_job_lines_reach_a_moved_screen(self):
+        """U4 (5b): the job's session went quiet (D41), the screen attached to a newer one, and the
+        job's lines still reach it."""
+        def job_factory(cfg, control, tools):
+            def step(messages):
+                yield ("text", "found it")
+            return step
+
+        async def scenario(daemon):
+            daemon.record("session_start", session="older")
+            daemon.state.db.execute("UPDATE sessions SET last_ts = last_ts - ? WHERE id = ?", (3 * 3600, "older"))
+            c = await Client.open(self.home)
+            c.send({"type": "attach"})
+            attached = (await c.until("attached"))[-1]
+            daemon.jobs_mgr.start("research", "older")
+            lines = await c.until("job.end")
+            for _ in range(200):  # let the job finish before close() tears down the state under it
+                if all(j.state != "running" for j in daemon.jobs_mgr.jobs.values()):
+                    break
+                await asyncio.sleep(0.01)
+            c.close()
+            return attached, lines
+
+        attached, lines = self.run_with(fake_model("ok"), scenario, job_factory=job_factory)
+        self.assertNotEqual(attached["session"], "older")
+        self.assertEqual([m["type"] for m in lines if m["type"].startswith("job.")], ["job.start", "job.end"])
+        self.assertEqual(lines[-1]["state"], "done")
+
 
 class JobSignalTest(DaemonHarness):
     def test_job_done_speaks_without_budget(self):

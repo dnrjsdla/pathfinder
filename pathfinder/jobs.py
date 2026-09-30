@@ -86,10 +86,11 @@ tools_mod.TOOLS.update(TOOLS)
 
 
 class Manager:
-    def __init__(self, home, record, push, step_factory, rules):
+    def __init__(self, home, record, push, step_factory, rules, send=lambda msg: None, job_state=None):
         self.home = Path(home)
         self._record = record             # the daemon's ledger-then-state door
         self._push = push                 # daemon.push_signal
+        self._send = send                 # a line to every screen (daemon._send_all)
         self.step_factory = step_factory
         self.rules = rules                # the daemon's own Rules (jobs_per_day, job_steps)
         # Marshals every `record`/`push` call onto the event-loop thread, like the daemon does
@@ -99,6 +100,9 @@ class Manager:
         # constructor's own restart sweep, and any standalone use) it just calls straight through.
         self.dispatch = lambda fn: fn()
         self.state = State(self.home / "state.db")     # read-only from here: record() writes it
+        # job.end reads the row through the writer's connection (daemon.state.job): this one is
+        # shared with turn threads, and its snapshot can predate the write just applied.
+        self._job_state = job_state or self.state.job
         self.jobs: dict[str, Job] = {}
         self._lock = threading.Lock()
 
@@ -108,7 +112,18 @@ class Manager:
         self.state.close()
 
     def record(self, type, **fields):
-        self.dispatch(lambda: self._record(type, **fields))  # a closing loop is the daemon's dispatch to absorb
+        """The daemon's door, then the `job.start`/`job.gate`/`job.end` line a screen is owed
+        (live: a job's gate was silent - only `approvals` knew)."""
+        def go():
+            self._record(type, **fields)
+            if type == "job_start":
+                self._send({"type": "job.start", "id": fields["id"], "goal": fields["goal"]})
+            elif type == "approval_pending":
+                self._send({"type": "job.gate", "id": fields["job"], "approval": fields["id"], "tool": fields["tool"], "args": fields["args"]})
+            elif type in ("job_done", "job_failed"):  # the row exists: job_start came through this door
+                self._send({"type": "job.end", "id": fields["id"], "state": self._job_state(fields["id"])["state"]})
+            # a job's tool_call/tool_result/steer: ledger only
+        self.dispatch(go)  # a closing loop is the daemon's dispatch to absorb
 
     def push(self, signal):
         self.dispatch(lambda: self._push(signal))
@@ -137,10 +152,10 @@ class Manager:
     def start(self, goal: str, session: str) -> str:
         with self._lock:
             if any(j.state in ("running", "gated") for j in self.jobs.values()):
-                return "a job is already running; wait for it to finish or stop it first"
-            if self.state.today().jobs >= self.rules.jobs_per_day:
-                return ("the day's job budget is spent; ask again tomorrow or raise "
-                        "jobs_per_day in RULES.md")
+                raise ValueError("a job is already running; wait for it to finish or stop it first")
+            if self.state.today().jobs >= self.rules.jobs_per_day:  # refusals are failed calls, not "ok"
+                raise ValueError("the day's job budget is spent; ask again tomorrow or raise "
+                                 "jobs_per_day in RULES.md")
             id = uuid.uuid4().hex[:8]
             messages = [{"role": "system", "content": JOB_PROMPT},
                        {"role": "system", "content": clock.now_line()},

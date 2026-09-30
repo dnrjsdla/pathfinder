@@ -114,7 +114,8 @@ class Daemon:
         self.outbox.rebuild()
         self.sense_loop = signals.SenseLoop(list(self.senses.values()), push=self.push_signal,
                                             on_error=self._sense_error)
-        self.jobs_mgr = jobs.Manager(self.home, self._job_record, self.push_signal, self.job_step_factory, self.rules)
+        self.jobs_mgr = jobs.Manager(self.home, self.record, self.push_signal, self.job_step_factory, self.rules,
+                                     send=self._send_all, job_state=self.state.job)
         jobs.bind(self.jobs_mgr)
         self.memory_mgr = memory.Manager(self.home, self.record, self.push_signal, self.pass_step_factory,
                                          self.rules, list(self.senses.values()), is_busy=self._is_busy)
@@ -161,21 +162,6 @@ class Daemon:
             args = installer_mod.brief(fields["args"]) if fields["tool"] == "install_server" else fields["args"]
             line = {"type": "gate", "id": fields["id"], "tool": fields["tool"], "args": args}
             self.dispatch(lambda: self._send_to_session(fields.get("session"), line))
-        return event
-
-    def _job_record(self, type, **fields):
-        """`jobs.Manager`'s door: `record`, plus the `job.start`/`job.gate`/`job.end` lines its
-        session is owed (live: a job's gate was silent - only `approvals` knew)."""
-        event = self.record(type, **fields)
-        if type == "job_start":
-            line = {"type": "job.start", "id": fields["id"], "goal": fields["goal"]}
-        elif type == "approval_pending":
-            line = {"type": "job.gate", "id": fields["job"], "approval": fields["id"], "tool": fields["tool"], "args": fields["args"]}
-        elif type in ("job_done", "job_failed"):  # the row exists: job_start came through this door
-            line = {"type": "job.end", "id": fields["id"], "state": self.state.job(fields["id"])["state"]}
-        else:
-            return event  # a job's tool_call/tool_result/steer: ledger only
-        self._send_to_session(fields.get("session"), line)
         return event
 
     # -- socket ------------------------------------------------------------------------
@@ -274,6 +260,10 @@ class Daemon:
         if s is not None:
             self.send(s, msg)
 
+    def _send_all(self, msg) -> None:  # every screen: D41 may have moved one away from the job's session
+        for s in list(self.sessions.values()):
+            self.send(s, msg)
+
     async def handle(self, reader, writer):
         session = None
         try:
@@ -363,29 +353,8 @@ class Daemon:
                 elif kind == "memory.run":
                     result = await asyncio.to_thread(self.memory_mgr.run_pass, True)
                     _write(writer, {"type": "memory.run", "result": result})
-                elif kind == "install":
-                    name = msg.get("name")
-                    if not isinstance(name, str) or not name:
-                        _write(writer, {"type": "error", "message": "install needs a \"name\""})
-                        continue
-                    try:
-                        result = await asyncio.to_thread(self.installer.propose_by_name, name)
-                    except Exception as e:  # a check that raised must answer, not drop the connection (m5: "no reply")
-                        result = {"error": f"{type(e).__name__}: {e}"[:300]}
-                    if "error" in result:
-                        _write(writer, {"type": "error", "message": result["error"]})
-                    else:
-                        _write(writer, {"type": "install", "id": result["id"], "line": result["line"]})
-                elif kind == "uninstall":
-                    id = msg.get("id")
-                    if not isinstance(id, str) or not id:
-                        _write(writer, {"type": "error", "message": "uninstall needs an \"id\""})
-                        continue
-                    result = await self.installer.uninstall(id)
-                    if "error" in result:
-                        _write(writer, {"type": "error", "message": result["error"]})
-                    else:
-                        _write(writer, {"type": "uninstall", "id": result["id"]})
+                elif kind in ("install", "uninstall"):
+                    _write(writer, await self.installer.handle(msg))
                 elif kind == "signal":
                     sense_name, fields = msg.get("sense"), msg.get("fields")
                     sense = self.senses.get(sense_name)

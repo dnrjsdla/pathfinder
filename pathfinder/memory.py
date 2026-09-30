@@ -442,7 +442,7 @@ class Manager:
         allowed = p["allowed"] if p else {}
         proposal, error = self.vet(target, op, old, new, evidence, origin, allowed, session)
         if error:
-            return error
+            raise ValueError(error)  # a refusal is a failed call, not "ok" in the record
         if target.startswith("wiki/"):
             self.apply(proposal, origin=origin)
             if p is not None:

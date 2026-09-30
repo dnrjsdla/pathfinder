@@ -14,7 +14,6 @@ run on a thread, off the daemon's event loop.
 from __future__ import annotations
 
 import asyncio
-import copy
 import hashlib
 import json
 import logging
@@ -27,9 +26,9 @@ import time
 import urllib.request
 import uuid
 from pathlib import Path
-from typing import Callable
 
 from . import catalog, config, keychain, mirror
+from .config import _atomic_write_json, backup_file, merge_json_file
 from . import exec as exec_mod
 from .mcp import pins as mcp_pins
 from .mcp.protocol import qualify
@@ -377,6 +376,21 @@ class Installer:
         status = ((item.get("_meta") or {}).get("io.modelcontextprotocol.registry/official") or {}).get("status")
         return {"id": aid, "line": line + ("  deprecated in the registry" if status == "deprecated" else "")}
 
+    async def handle(self, msg: dict) -> dict:
+        install = msg["type"] == "install"
+        arg = msg.get("name" if install else "id")
+        if not isinstance(arg, str) or not arg:
+            return {"type": "error", "message": "install needs a \"name\"" if install else "uninstall needs an \"id\""}
+        try:
+            result = await (asyncio.to_thread(self.propose_by_name, arg) if install else self.uninstall(arg))
+        except Exception as e:  # a check or an uninstall that raised must answer, not drop the connection (m5: "no reply")
+            result = {"error": f"{type(e).__name__}: {e}"[:300]}
+        if "error" in result:
+            return {"type": "error", "message": result["error"]}
+        if install:
+            return {"type": "install", "id": result["id"], "line": result["line"]}
+        return {"type": "uninstall", "id": result["id"]}
+
     # -- install / rollback --------------------------------------------------------------
     async def decide(self, approval_id: str, decision: str) -> None:
         if decision == "approved":
@@ -620,47 +634,6 @@ class Installer:
         readback = json.loads(path.read_text(encoding="utf-8-sig"))
         if not _claude_json_unchanged_except(before, readback, id):
             raise RuntimeError("claude.json removal changed an unrelated key")
-
-
-def backup_file(path: Path) -> str:
-    """Copies `path` to `<path>.pathfinder-<ts>`, in the original file's own mode (0600 stays
-    0600), and prunes older backups of the same file down to the newest three (S6 - `rollback`'s
-    restore only ever needs the latest, the others are debugging history)."""
-    backup = path.with_name(f"{path.name}.pathfinder-{int(time.time() * 1000)}")
-    backup.write_bytes(path.read_bytes())
-    os.chmod(backup, path.stat().st_mode & 0o777)
-    olds = sorted(path.parent.glob(f"{path.name}.pathfinder-*"))
-    for old in olds[:-3]:
-        old.unlink(missing_ok=True)
-    return str(backup)
-
-
-def _atomic_write_json(path: Path, data: dict) -> None:
-    path = path.resolve()  # a dotfile-repo symlink: replace the target, not the link
-    path.parent.mkdir(parents=True, exist_ok=True)
-    mode = path.stat().st_mode & 0o777 if path.exists() else 0o644
-    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".claudejson-", suffix=".tmp")
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
-    os.chmod(tmp, mode)  # mkstemp makes 0600; keep what the user had
-    os.replace(tmp, path)
-
-
-def merge_json_file(path: Path, mutate: Callable[[dict], dict]) -> str:
-    """One foreign-file helper (D36), generalised from `_merge_claude_json`: backs up `path`
-    (if it exists) before writing, computes `after = mutate(deepcopy(before))`, writes it
-    atomically, and reads back to require the write landed exactly as `after` - a mismatch
-    (the mutate returned something JSON cannot round-trip identically) raises rather than
-    leaving a file nobody can trust. Returns the backup path, or "" when the file did not
-    exist before (nothing to restore to but deletion)."""
-    before = json.loads(path.read_text(encoding="utf-8-sig")) if path.exists() else {}
-    after = mutate(copy.deepcopy(before))  # before the backup: a raising mutate leaves no stray copy
-    backup = backup_file(path) if path.exists() else ""
-    _atomic_write_json(path, after)
-    readback = json.loads(path.read_text(encoding="utf-8-sig"))
-    if readback != after:
-        raise RuntimeError(f"{path.name} merge did not read back as written")
-    return backup
 
 
 # -- the tool (senses/catalog.py's TOOLS, opt-in per the sense being on) ---------------------

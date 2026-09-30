@@ -57,7 +57,7 @@ daemon.Daemon ── one lane (queue + worker) per session; lane items: say | re
 | `~/Library/LaunchAgents/pathfinder.daemon.plist` | the launchd agent: the running interpreter `-m pathfinder daemon`, a literal `PATH`, `PATHFINDER_HOME` when set, `KeepAlive`, log to `<home>/daemon.log`, `WorkingDirectory` = the package's parent | `init` (plistlib), after a yes | `pathfinder service start` fails until `init` is run again |
 | `<home>/daemon.log` | the daemon's stderr under launchd | launchd | nothing |
 | `<home>/hooks/pathfinder.zsh` and one guarded line in `~/.zshrc` | the shell sense's `preexec`/`precmd` hook (`docs/senses.md`), sourced only if the file exists | `init`, after a yes; `~/.zshrc` is backed up to `~/.zshrc.pathfinder-<ts>` and appended, never rewritten | the shell sense hears nothing |
-| `~/.claude/settings.json` (`hooks.Stop`, `hooks.Notification`) | the Claude Code sense's two hook entries | `init` through `installer.merge_json_file` (D36): backup, atomic write, read-back; idempotent by the `pathfinder signal claude_code` marker | Claude Code's own concern |
+| `~/.claude/settings.json` (`hooks.Stop`, `hooks.Notification`) | the Claude Code sense's two hook entries | `init` through `config.merge_json_file` (D60): backup, atomic write, read-back; idempotent by the `pathfinder signal claude_code` marker | Claude Code's own concern |
 | macOS Keychain `pathfinder-mcp-<id>` / `pathfinder-mail` | every secret (an MCP server's token, the IMAP password) | the user, by hand (`security add-generic-password`) | the server stays listed as `disabled: secret missing: <NAME>`; the mail sense errors |
 
 `<home>` is `$PATHFINDER_HOME` or `~/.pathfinder` (mode 0700).
@@ -765,7 +765,7 @@ python3 -m pathfinder memory undo                  # replay the last memory_appl
   not block on either); the shell hook (the snippet to `<home>/hooks/pathfinder.zsh`, one guarded
   line appended to `~/.zshrc` after a backup, a newline first when the file lacks one; the snippet
   loads `zsh/datetime` and registers through `add-zsh-hook`, beside the user's own hooks); the Claude Code hooks (two entries merged into
-  `~/.claude/settings.json` through `installer.merge_json_file`, D36); the launchd agent (written
+  `~/.claude/settings.json` through `config.merge_json_file`, D60); the launchd agent (written
   with `plistlib`, then `launchctl bootstrap gui/<uid> <plist>`, then up to ten seconds waiting for
   the socket). Every step is idempotent: a second run changes no derived file. Answers come from
   `input()` so a test pipes them; `launchctl` is one injectable function.

@@ -313,6 +313,23 @@ class TuiCase(unittest.TestCase):
         self.assertLess(out.index("\x1b[?2004h"), out.index("\x1b[?2004l"))  # off once stored, screen still up
         self.assertTrue(self._main.is_alive())
 
+    def test_bracketed_paste_with_a_trailing_newline_is_still_one_line(self):
+        """A value copied with its line end (a triple-click) is the value; text after a newline is not."""
+        with mock.patch("pathfinder.keychain.store") as store:
+            for n, end in enumerate(("\n", "\r\n"), 1):
+                self.type_("/secret rv11test TOKEN\r")
+                self.assertTrue(_wait_for(lambda: self.out_text().endswith(tui.SECRET_PROMPT)))
+                self.type_("\x1b[200~tok-" + "value" + end + "\x1b[201~")
+                self.assertTrue(_wait_for(lambda: self.out_text().endswith(tui.SECRET_PROMPT + "*" * 9)))
+                self.type_("\r")
+                self.assertTrue(_wait_for(lambda: store.call_count == n))
+            self.assertNotIn("a secret is one line", self.out_text())
+            self.type_("/secret rv11test TOKEN\r")
+            self.assertTrue(_wait_for(lambda: self.out_text().endswith(tui.SECRET_PROMPT)))
+            self.type_("\x1b[200~a\nb\x1b[201~")
+            self.assertTrue(_wait_for(lambda: "a secret is one line" in self.out_text()))
+        self.assertEqual(store.call_args_list, [mock.call("pathfinder-mcp-rv11test", "TOKEN", "tok-value")] * 2)
+
     def test_screen_closing_while_masked_turns_bracketed_paste_off(self):
         self.type_("/secret rv11test TOKEN\r")
         self.assertTrue(_wait_for(lambda: "(hidden;" in self.out_text()))

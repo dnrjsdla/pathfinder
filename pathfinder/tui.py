@@ -114,7 +114,7 @@ class _Session:
         self.turn_running = False
         self.interrupt_sent = False  # one Ctrl-C interrupts, the second quits
         self._esc = 0  # 1 after ESC, 2 inside ESC [ (CSI), 3 after ESC O (SS3): such keys are dropped
-        self._seq, self._paste = "", None  # the escape's bytes; in a bracketed paste: True once it holds a newline
+        self._seq, self._paste = "", None  # the escape's bytes; in a paste: False, "\n" after a newline, True with text after one
         self._recv_buf = b""
         self._keys = codecs.getincrementaldecoder("utf-8")("replace")  # a Hangul syllable is 3 bytes (D6)
         now = time.monotonic()
@@ -189,8 +189,10 @@ class _Session:
         chars = self._keys.decode(data)
         for i, ch in enumerate(chars):
             if self._paste is not None and ch != "\x1b" and not ch.isprintable():  # in a paste no control is a key
-                self._paste = self._paste or ch in "\r\n"
+                self._paste = self._paste or ("\n" if ch in "\r\n" else False)
                 continue
+            if self._paste == "\n" and not self._esc and ch != "\x1b":  # text after a newline: more than one line
+                self._paste = True
             if self.secret and ch in "\r\n":
                 return self._secret_enter(spill=i + 1 < len(chars))
             rc = self._key(ord(ch))
@@ -239,7 +241,7 @@ class _Session:
             self._esc = (1 if byte == 0x1b else {0x5b: 2, 0x4f: 3}.get(byte, 0) if self._esc == 1 else
                          2 if self._esc == 2 and not 0x40 <= byte <= 0x7e else 0)
             if self.secret and not self._esc and self._seq in ("[200~", "[201~"):  # a paste's marks
-                if self._seq == "[201~" and self._paste:  # more than one line: all of it goes, unseen
+                if self._seq == "[201~" and self._paste is True:  # more than one line: all of it goes, unseen
                     self._masked(None)
                     self.show(STRINGS["secret_one_line"])
                 self._paste = False if self._seq == "[200~" else None

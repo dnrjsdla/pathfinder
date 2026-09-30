@@ -287,8 +287,9 @@ class State:
         # they would keep the session alive forever and the pass would never see it go idle.
         # Nor may a screen's 30 s `presence` heartbeat or a signal's silent triage (D41: live, one
         # session ran four days) - of a signal turn, only the notice it delivered is conversation.
+        # Nor a job's own events: acting on a job - a steer, an approval - is not conversation (D63).
         origin = event.get("origin")
-        if (session and origin != "memory" and event["type"] != "presence"
+        if (session and origin not in ("memory", "job") and not event.get("job") and event["type"] != "presence"
                 and (origin != "signal" or event["type"] == "assistant")):
             self.db.execute("UPDATE sessions SET last_ts = ? WHERE id = ?", (event["ts"], session))
         self.db.execute("UPDATE meta SET value = ? WHERE key = 'cursor'", (str(seq),))
@@ -410,12 +411,15 @@ class State:
         return [{"id": r[0], "session": r[1], "turn": r[2], "tool": r[3], "args": json.loads(r[4]), "ts": r[5],
                 "job": r[6]} for r in rows]
 
-    def open_approvals(self, session: str) -> list:
+    def open_approvals(self, session: str, max_age_s: float) -> list:
         """D52: `session`'s pending approvals newer than its last user message - a gate the owner
-        has talked past is not open."""
+        has talked past is not open. A job's gate counts from any session (D63) while it is younger
+        than `max_age_s` (`session_resume_s`): a forgotten one must not swallow a new session's reply."""
         last = self.db.execute("SELECT MAX(ts) FROM messages WHERE session = ? AND role = 'user'",
                                (session,)).fetchone()[0]
-        return [p for p in self.pending() if p["session"] == session and (last is None or p["ts"] > last)]
+        return [p for p in self.pending()
+                if (p["session"] == session or p["job"] and time.time() - p["ts"] <= max_age_s)
+                and (last is None or p["ts"] > last)]
 
     def pending_memory(self) -> list:
         """The pending approvals whose tool is `edit_memory` - `pathfinder approvals`'s memory view."""

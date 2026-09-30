@@ -1889,7 +1889,8 @@ class ChatApprovalTest(DaemonHarness):
         seen, decision = self.run_with(factory, scenario)
         self.assertEqual([m["type"] for m in seen], ["turn.start", "delta", "turn.end"])
         self.assertTrue(seen[1]["text"].endswith(": /approve a1 or /deny a1 (edit_memory; shell: pathfinder "
-                                                 "approve|deny a1)"), seen[1]["text"])
+                                                 "approve|deny a1) - if you meant something else, say it "
+                                                 "again · 다른 뜻이었다면 다시 말해 주세요"), seen[1]["text"])
         self.assertEqual(seen[-1]["kind"], "answer")
         self.assertEqual(factory.seen, [])  # no model request
         self.assertIsNone(decision)  # still pending
@@ -2090,6 +2091,154 @@ class SessionLifetimeTest(DaemonHarness):
         sid, after_triage, after_notice = self.run_with(fake_model("ok"), scenario)
         self.assertIsNone(after_triage)
         self.assertEqual(after_notice, sid)
+
+    def _old_session(self, daemon):
+        daemon.record("session_start", session="old")
+        daemon.record("user", session="old", turn="t1", origin="user", trust="user", text="old question")
+        self._age(daemon, "old", 3 * 3600)
+
+    async def _settle(self, daemon):  # let a job's thread finish before close() tears the state down
+        for _ in range(300):
+            if all(j.state not in ("running", "gated") for j in daemon.jobs_mgr.jobs.values()):
+                break
+            await asyncio.sleep(0.01)
+
+    def test_say_after_a_job_gate_in_an_aged_session_lands_in_the_new_session(self):
+        """D63 (live 2026-09-30): a job's gate made a session D41 had ended the newest again, and the
+        owner's next message went into it with its old history. The phrase typed after the gate gets
+        the harness line in the screen's session; said again, it reaches the model there."""
+        def job_factory(cfg, control, tools):
+            def step(messages):
+                if not any(m.get("role") == "tool" for m in messages):
+                    yield ("tool_calls", [{"id": "c1", "name": "write_file",
+                                           "arguments": {"path": str(self.home / "n.txt"), "content": "hi"}}])
+                else:
+                    yield ("text", "done")
+            return step
+        model = fake_model("ok")
+
+        async def scenario(daemon):
+            self._old_session(daemon)
+            aged = daemon.state.session("old")["last_ts"]
+            c = await Client.open(self.home)
+            c.send({"type": "attach"})
+            screen = (await c.until("attached"))[-1]["session"]
+            daemon.jobs_mgr.start("write a note", "old")
+            gate = (await c.until("job.gate"))[-1]
+            said = []
+            for _ in range(2):
+                c.send({"type": "say", "text": "응"})
+                said.append("".join(m["text"] for m in await c.until("turn.end") if m["type"] == "delta"))
+            seen = list(model.seen)
+            c.send({"type": "approve", "id": gate["approval"]})
+            await c.until("job.end")
+            await self._settle(daemon)
+            c.close()
+            return screen, gate, said, seen, daemon.state.session("old")["last_ts"] == aged
+
+        screen, gate, said, seen, still_aged = self.run_with(model, scenario, job_factory=job_factory)
+        self.assertNotEqual(screen, "old")
+        self.assertTrue(still_aged)  # the job's start, gate, approval and end moved nothing
+        self.assertIn(f"/approve {gate['approval']} ", said[0])
+        self.assertTrue(said[0].endswith(" - if you meant something else, say it again · 다른 뜻이었다면 다시 말해 주세요"))
+        self.assertEqual(said[1], "ok ")
+        self.assertEqual(len(seen), 1)  # only the phrase said again made a request
+        self.assertNotIn("old question", json.dumps(seen[0], ensure_ascii=False))
+        self.assertEqual([e["session"] for e in self.events() if e["type"] == "user" and e["text"] == "응"],
+                         [screen, screen])
+
+    def test_job_done_notice_lands_in_the_screens_session(self):
+        """D63: a job from a session D41 ended reports where the screen is - the goal and the summary,
+        not the old session's history."""
+        def job_factory(cfg, control, tools):
+            def step(messages):
+                yield ("text", "found it")
+            return step
+        model = fake_model("ok")
+
+        async def scenario(daemon):
+            _never_quiet(daemon)
+            self._old_session(daemon)
+            c = await Client.open(self.home)
+            c.send({"type": "attach"})
+            screen = (await c.until("attached"))[-1]["session"]
+            daemon.jobs_mgr.start("research", "old")
+            notice = (await c.until("notice"))[-1]
+            await self._settle(daemon)
+            c.send({"type": "say", "text": "and then?"})
+            await c.until("turn.end")
+            c.close()
+            return screen, notice
+
+        screen, notice = self.run_with(model, scenario, job_factory=job_factory)
+        self.assertNotEqual(screen, "old")
+        self.assertTrue(notice["text"].startswith("Job done: research\nfound it"), notice["text"])
+        self.assertEqual([e["session"] for e in self.events() if e["type"] in ("delivery", "assistant")
+                          and e["origin"] == "signal"], [screen, screen])
+        history = json.dumps(model.seen[-1], ensure_ascii=False)
+        self.assertIn("found it", history)
+        self.assertNotIn("old question", history)
+
+    def test_notice_text_passes_clean(self):
+        """D62, found at U25's review: every sense's summary reaches the screen and then history. It
+        is cleaned once where the notice text is formed - live, rebuilt after a restart, and a job's
+        worker text."""
+        def job_factory(cfg, control, tools):
+            def step(messages):
+                yield ("text", "found \x1b[31mit\x1b[0m\u202e now")
+            return step
+
+        async def scenario(daemon):
+            _never_quiet(daemon)
+            c = await Client.open(self.home)
+            c.send({"type": "attach"})
+            screen = (await c.until("attached"))[-1]["session"]
+            daemon.jobs_mgr.start("research", screen)
+            live = (await c.until("notice"))[-1]
+            await self._settle(daemon)
+            c.send({"type": "presence", "idle_s": 0})  # typing: the next notice is held, then the daemon stops
+            await asyncio.sleep(0.05)
+            daemon.push_signal(Signal(sense="schedule", kind="schedule_due", key="dirty-1", fields={"id": "s1"},
+                                      summary="Scheduled note: \x1b[1mtrain\u202e", trust="user"))
+            for _ in range(200):
+                if any(e.get("signal_key") == "dirty-1" and e.get("action") == "speak" for e in self.events()):
+                    break
+                await asyncio.sleep(0.01)
+            c.close()
+            return live
+
+        live = self.run_with(fake_model("ok"), scenario, job_factory=job_factory)
+        self.assertTrue(live["text"].startswith("Job done: research\nfound it now"), live["text"])
+        rebuilt = State(self.home / "rebuilt.db")  # a restart's state, rebuilt from the ledger
+        rebuilt.catch_up(Ledger(self.home))
+        held = [row["text"] for row in rebuilt.undelivered()]
+        rebuilt.close()
+        self.assertEqual(held, ["Scheduled note: train"])
+        texts = [e["text"] for e in self.events() if e["type"] in ("decision", "assistant") and e.get("text")]
+        self.assertTrue(texts)
+        for text in texts:
+            self.assertNotRegex(text, "[\x1b\u202e]")
+
+    def test_a_notice_held_by_the_rate_limit_goes_out_later_clean(self):
+        """U32's review: the release of a notice the rate limit held (`signal_ready`) carries the
+        clean summaries recorded with its decision."""
+        async def scenario(daemon):
+            daemon.rules = dataclasses.replace(daemon.rules, quiet_hours="0-0", min_interval_s=1, burst_limit=999)
+            c = await Client.open(self.home)
+            c.send({"type": "attach"})
+            await c.until("attached")
+            for i, summary in enumerate(["Scheduled note: one\n\ttwo", "Scheduled note: \x1b[31mred\u202e"]):
+                daemon.push_signal(Signal(sense="schedule", kind="schedule_due", key=f"held-{i}", fields={"id": str(i)},
+                                          summary=summary, trust="user"))
+                await asyncio.sleep(0.05)
+            texts = [(await c.until("notice"))[-1]["text"] for _ in range(2)]
+            c.close()
+            return texts
+
+        texts = self.run_with(fake_model(""), scenario)
+        self.assertEqual(texts, ["Scheduled note: one\n\ttwo", "Scheduled note: red"])
+        held = [e for e in self.events() if e["type"] == "decision" and e["signal_key"] == "held-1"]
+        self.assertEqual(held[0]["text"], "Scheduled note: red")
 
 
 class AgendaTest(DaemonHarness):

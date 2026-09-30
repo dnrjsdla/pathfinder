@@ -177,7 +177,8 @@ class Manager:
             # `approve` would otherwise run the write the user just stopped) and end the job here.
             for p in self.state.pending():
                 if p.get("job") == id:
-                    self.record("approval", session=p["session"], turn=p["turn"], origin="user", id=p["id"], decision="denied")
+                    self.record("approval", session=p["session"], turn=p["turn"], origin="user", id=p["id"],
+                                decision="denied", job=id)
             self._fail(job, "stopped")
 
     def steer(self, id: str, text: str) -> None:

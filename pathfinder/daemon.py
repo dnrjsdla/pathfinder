@@ -115,7 +115,7 @@ class Daemon:
         self.sense_loop = signals.SenseLoop(list(self.senses.values()), push=self.push_signal,
                                             on_error=self._sense_error)
         self.jobs_mgr = jobs.Manager(self.home, self.record, self.push_signal, self.job_step_factory, self.rules,
-                                     send=self._send_all)
+                                     send=self._send_all, job_state=self.state.job)
         jobs.bind(self.jobs_mgr)
         self.memory_mgr = memory.Manager(self.home, self.record, self.push_signal, self.pass_step_factory,
                                          self.rules, list(self.senses.values()), is_busy=self._is_busy)

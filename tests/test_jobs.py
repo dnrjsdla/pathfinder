@@ -211,6 +211,17 @@ class JobLinesTest(JobsHarness):
             {"type": "job.end", "id": "j1", "state": "done"}])
         self.assertEqual([e["type"] for e in self.events()], ["job_start", "user", "approval_pending", "job_done"])
 
+    def test_job_end_reads_the_passed_state(self):
+        """U4 review: job.end's state comes from the writer's getter, not this Manager's own
+        connection (shared with turn threads, its snapshot went stale under load)."""
+        lines = []
+        mgr = jobs.Manager(self.home, self.record, self.push, None, rules_mod.Rules(), send=lines.append,
+                           job_state=lambda id: {"state": "from-the-writer"})
+        self._managers.append(mgr)
+        mgr.record("job_start", session="s1", origin="job", id="j1", goal="research")
+        mgr.record("job_failed", session="s1", origin="job", id="j1", reason="stopped")
+        self.assertEqual(lines[-1], {"type": "job.end", "id": "j1", "state": "from-the-writer"})
+
 
 class JobControlTest(JobsHarness):
     def test_job_stop_kills_tool(self):

@@ -86,7 +86,7 @@ tools_mod.TOOLS.update(TOOLS)
 
 
 class Manager:
-    def __init__(self, home, record, push, step_factory, rules, send=lambda msg: None):
+    def __init__(self, home, record, push, step_factory, rules, send=lambda msg: None, job_state=None):
         self.home = Path(home)
         self._record = record             # the daemon's ledger-then-state door
         self._push = push                 # daemon.push_signal
@@ -100,6 +100,9 @@ class Manager:
         # constructor's own restart sweep, and any standalone use) it just calls straight through.
         self.dispatch = lambda fn: fn()
         self.state = State(self.home / "state.db")     # read-only from here: record() writes it
+        # job.end reads the row through the writer's connection (daemon.state.job): this one is
+        # shared with turn threads, and its snapshot can predate the write just applied.
+        self._job_state = job_state or self.state.job
         self.jobs: dict[str, Job] = {}
         self._lock = threading.Lock()
 
@@ -118,7 +121,7 @@ class Manager:
             elif type == "approval_pending":
                 self._send({"type": "job.gate", "id": fields["job"], "approval": fields["id"], "tool": fields["tool"], "args": fields["args"]})
             elif type in ("job_done", "job_failed"):  # the row exists: job_start came through this door
-                self._send({"type": "job.end", "id": fields["id"], "state": self.state.job(fields["id"])["state"]})
+                self._send({"type": "job.end", "id": fields["id"], "state": self._job_state(fields["id"])["state"]})
             # a job's tool_call/tool_result/steer: ledger only
         self.dispatch(go)  # a closing loop is the daemon's dispatch to absorb
 

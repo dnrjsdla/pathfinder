@@ -12,6 +12,7 @@ import contextlib
 import io
 import json
 import os
+import re
 import selectors
 import socket
 import sys
@@ -20,11 +21,14 @@ import tty
 import termios
 from pathlib import Path
 
+from . import keychain
 from .daemon import SOCKET
 from .mcp.protocol import sanitize
 from .tools import visible
 
 PROMPT = "> "
+SECRET_PROMPT = "비밀 · secret> "  # the masked input line: this, then one `*` per character
+_UNIT = re.compile(r"\\U[0-9a-f]{8}|\\u[0-9a-f]{4}|\\.|.")  # an escape, JSON's or `visible`'s, is one unit
 SELECT_TIMEOUT = 0.05           # how often the main loop wakes up to check the timers below
 PRESENCE_ACTIVE_S = 1.0         # at most one presence{idle_s: 0} per second while keys arrive
 PRESENCE_IDLE_S = 30.0          # a presence{idle_s: n} every 30s of silence
@@ -46,10 +50,23 @@ STRINGS = {
     "tool_fail": "도구 실패 · tool {name} failed",
     "notice": "알림 · notice: {text} ({why})",
     "retract": "철회 · withdrawn: the answer above {what} without calling a tool - trying again with the tools",
-    "help": "알 수 없는 명령 · unknown command - try /approve, /deny, /approvals, /jobs, /quit",
+    "help": "알 수 없는 명령 · unknown command - try /approve, /deny, /approvals, /jobs, /secret, /quit",
+    "secret_usage": "사용법 · /secret ID NAME takes a server id and an env variable name",
+    "secret_ask": "비밀 입력 · {name} for {id} (hidden; stored in the Keychain, never shown to the assistant)",
+    "secret_stored": "저장됨 · {name} stored for {id}; an installed server picks it up at the next "
+                     "`pathfinder service restart`",
+    "secret_cancelled": "저장 안 함 · nothing stored",
     "no_approvals": "대기 중인 승인 없음 · no approvals seen this sitting",
     "no_jobs": "확인된 작업 없음 · no jobs seen this sitting",
 }
+
+
+def _gate_args(args) -> str:
+    """5d: the args as shown, cut at the first unit that would pass 300 shown characters - after
+    `visible`, so the count is what the owner sees, and never inside an escape such as `\\u200b`."""
+    shown = visible(json.dumps(args, ensure_ascii=False))
+    cross = next((m for m in _UNIT.finditer(shown) if m.end() > 300), None)
+    return shown if cross is None else shown[:cross.start()] + "...(clipped; /approvals)"
 
 
 def render(msg: dict) -> str | None:
@@ -66,7 +83,7 @@ def render(msg: dict) -> str | None:
         return STRINGS[key].format(name=msg.get("name"))
     if kind == "gate":  # what is shown is what runs: a hidden character is escaped, never dropped
         return visible(STRINGS["gate"].format(id=msg.get("id"), tool=msg.get("tool"),
-                                               args=json.dumps(msg.get("args"), ensure_ascii=False)))
+                                               args=_gate_args(msg.get("args"))))
     if kind == "retract":  # D51: harness words only - the verifier's `why` never reaches the screen
         return NOTICE_DIM + STRINGS["retract"].format(what=msg.get("what")) + RESET
     if kind == "notice":
@@ -76,8 +93,7 @@ def render(msg: dict) -> str | None:
         return STRINGS["job_start"].format(id=msg.get("id"), goal=sanitize(msg.get("goal") or ""))
     if kind == "job.gate":
         return visible(STRINGS["job_gate"].format(id=msg.get("id"), approval=msg.get("approval"),
-                                                   tool=msg.get("tool"),
-                                                   args=json.dumps(msg.get("args"), ensure_ascii=False)))
+                                                   tool=msg.get("tool"), args=_gate_args(msg.get("args"))))
     if kind == "job.end":
         return STRINGS["job_end"].format(id=msg.get("id"), state=msg.get("state"))
     if kind == "error":
@@ -91,6 +107,7 @@ class _Session:
     def __init__(self, sock, in_fd, out, home):
         self.sock, self.in_fd, self.out, self.home = sock, in_fd, out, home
         self.buf = ""
+        self.secret = None  # (id, NAME) while the input line is masked for `/secret`
         self.turn_running = False
         self.interrupt_sent = False  # one Ctrl-C interrupts, the second quits
         self._esc = 0  # 1 after ESC, 2 inside an ESC [ sequence (arrow keys are dropped)
@@ -107,7 +124,7 @@ class _Session:
         self.sock.sendall((json.dumps(msg, ensure_ascii=False) + "\n").encode())
 
     def redraw(self):
-        self.out.write("\r\033[K" + PROMPT + self.buf)
+        self.out.write("\r\033[K" + (SECRET_PROMPT + "*" * len(self.buf) if self.secret else PROMPT + self.buf))
         self.out.flush()
 
     def show(self, text):
@@ -166,6 +183,10 @@ class _Session:
         return None
 
     def _ctrl_c(self):
+        if self.secret:  # cancels the masked entry and nothing else
+            self.secret, self.buf = None, ""
+            self.show(STRINGS["secret_cancelled"])
+            return None
         if self.turn_running and not self.interrupt_sent:
             self.send({"type": "interrupt"})
             self.interrupt_sent = True
@@ -200,7 +221,14 @@ class _Session:
         return rc
 
     def _line(self, line):
-        if line == "+":
+        if self.secret:  # the masked value: stored in this process, never sent on the socket
+            (id, name), self.secret = self.secret, None
+            try:
+                keychain.store(f"pathfinder-mcp-{id}", name, line)
+                self.show(STRINGS["secret_stored"].format(name=name, id=id))
+            except Exception as e:  # store's messages never carry the value
+                self.show(STRINGS["error"].format(message=e))
+        elif line == "+":
             self.send({"type": "react", "vote": "up"})
         elif line == "-":
             self.send({"type": "react", "vote": "down"})
@@ -220,6 +248,13 @@ class _Session:
             self.send({"type": "deny", "id": rest})
         elif cmd in ("approvals", "jobs"):
             self._cli_list(cmd)
+        elif cmd == "secret":
+            args = rest.split()
+            if len(args) == 2 and keychain.valid_target(*args):
+                self.secret = tuple(args)
+                self.show(STRINGS["secret_ask"].format(id=args[0], name=args[1]))
+            else:
+                self.show(STRINGS["secret_usage"])
         elif cmd == "quit":
             return 0
         else:

@@ -11,6 +11,7 @@ import threading
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from pathfinder import tui
 
@@ -237,6 +238,38 @@ class TuiCase(unittest.TestCase):
         self.assertTrue(_wait_for(lambda: any(
             m == {"type": "react", "vote": "down"} for m in self.daemon.received)))
 
+    def test_slash_secret_masks_and_never_touches_the_socket(self):
+        """U11: the value is read masked and stored in the screen's own process - only `*` on the
+        screen, nothing on the socket, so no client attached to the daemon can receive it."""
+        value = "s3cr3t-" + "v4lue"
+        with mock.patch("pathfinder.keychain.store") as store:
+            self.type_("/secret easy-notion NOTION_TOKEN\r")
+            self.assertTrue(_wait_for(lambda: "NOTION_TOKEN for easy-notion (hidden;" in self.out_text()))
+            self.type_(value)
+            self.assertTrue(_wait_for(lambda: self.out_text().endswith(tui.SECRET_PROMPT + "*" * len(value))))
+            self.type_("\r")
+            self.assertTrue(_wait_for(lambda: "NOTION_TOKEN stored for easy-notion" in self.out_text()))
+            self.type_("/secret Bad_Id NOTION_TOKEN\r")
+            self.assertTrue(_wait_for(lambda: "/secret ID NAME takes a server id" in self.out_text()))
+            store.assert_called_once_with("pathfinder-mcp-easy-notion", "NOTION_TOKEN", value)
+        self.assertNotIn(value, self.out_text())
+        self.assertNotIn(value, json.dumps(self.daemon.received))
+        self.assertEqual({m["type"] for m in self.daemon.received} - {"attach", "presence"}, set())
+
+    def test_ctrl_c_cancels_secret_entry(self):
+        with mock.patch("pathfinder.keychain.store") as store:
+            self.type_("/secret easy-notion NOTION_TOKEN\r")
+            self.assertTrue(_wait_for(lambda: "(hidden;" in self.out_text()))
+            self.type_("half")
+            self.assertTrue(_wait_for(lambda: self.out_text().endswith(tui.SECRET_PROMPT + "****")))
+            self.type_("\x03")
+            self.assertTrue(_wait_for(lambda: "nothing stored" in self.out_text()))
+            self.type_("hello\r")  # still attached, and back to plain input
+            self.assertTrue(_wait_for(lambda: any(m.get("text") == "hello" for m in self.daemon.received)))
+            store.assert_not_called()
+        self.assertTrue(self._main.is_alive())
+        self.assertNotIn("half", self.out_text() + json.dumps(self.daemon.received))
+
     def test_ctrl_c_interrupts_a_running_stream_then_quits(self):
         self.daemon.send({"type": "turn.start", "turn": 1})
         time.sleep(0.1)
@@ -343,6 +376,17 @@ class TuiCase(unittest.TestCase):
             self.assertFalse(set(line) & set("\u200b\u202e\x9b\x1b"), repr(line))
             self.assertIn(shown, line)
             self.assertIn("send\\u200b", line)
+
+    def test_gate_args_clipped(self):
+        """5d: past 300 shown characters the args end in a tail. The count is taken after escaping,
+        and the cut never splits an escape: here a `\\u200b` straddles the 300th character."""
+        args = {"q": "a" * 290 + "\u200b" * 10}  # `{"q": "` and 290 letters: 297 shown, then 6-long units
+        for msg in ({"type": "gate", "id": "g1", "tool": "search", "args": args},
+                    {"type": "job.gate", "id": "j1", "approval": "a1", "tool": "search", "args": args}):
+            self.assertIn(' search {"q": "' + "a" * 290 + "...(clipped; /approvals) - /approve", tui.render(msg))
+        exact = tui.render({"type": "gate", "id": "g1", "tool": "search", "args": {"q": "a" * 291}})
+        self.assertIn('"a' + "a" * 290 + '"} - /approve', exact)  # exactly 300 shown: kept whole
+
 
 if __name__ == "__main__":
     unittest.main()

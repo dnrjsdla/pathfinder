@@ -287,7 +287,7 @@ def search_cmd(home, text):
 def secret_cmd(id, name):
     """`pathfinder secret ID NAME`: the value read hidden and put straight into the Keychain -
     no socket, no daemon, no ledger."""
-    if not config._MCP_SERVER_ID.match(id) or not (name.isidentifier() and name.isascii()):
+    if not keychain.valid_target(id, name):
         print("pathfinder: secret ID NAME takes a server id and an env variable name", file=sys.stderr)
         return 2
     try:

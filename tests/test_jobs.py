@@ -174,6 +174,24 @@ class JobBudgetTest(JobsHarness):
         self.assertTrue(_wait_until(lambda: mgr.jobs[job_id].state == "done"))
 
 
+class JobLinesTest(JobsHarness):
+    def test_record_builds_the_three_job_lines(self):
+        """U4: `record` records, then sends the line a screen is owed; a steer is ledger only."""
+        lines = []
+        mgr = jobs.Manager(self.home, self.record, self.push, None, rules_mod.Rules(), send=lines.append)
+        self._managers.append(mgr)
+        mgr.record("job_start", session="s1", origin="job", id="j1", goal="research")
+        mgr.record("user", session="s1", origin="user", job="j1", trust="user", text="faster", steer=True)
+        mgr.record("approval_pending", session="s1", origin="job", id="a1", call_id="c1", tool="search",
+                   args={"q": "x"}, messages=[], job="j1")
+        mgr.record("job_done", session="s1", origin="job", id="j1", summary="found", steps=1, usage={})
+        self.assertEqual(lines, [
+            {"type": "job.start", "id": "j1", "goal": "research"},
+            {"type": "job.gate", "id": "j1", "approval": "a1", "tool": "search", "args": {"q": "x"}},
+            {"type": "job.end", "id": "j1", "state": "done"}])
+        self.assertEqual([e["type"] for e in self.events()], ["job_start", "user", "approval_pending", "job_done"])
+
+
 class JobControlTest(JobsHarness):
     def test_job_stop_kills_tool(self):
         def blocking_handler(control=None):

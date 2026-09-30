@@ -114,7 +114,8 @@ class Daemon:
         self.outbox.rebuild()
         self.sense_loop = signals.SenseLoop(list(self.senses.values()), push=self.push_signal,
                                             on_error=self._sense_error)
-        self.jobs_mgr = jobs.Manager(self.home, self._job_record, self.push_signal, self.job_step_factory, self.rules)
+        self.jobs_mgr = jobs.Manager(self.home, self.record, self.push_signal, self.job_step_factory, self.rules,
+                                     send=self._send_all)
         jobs.bind(self.jobs_mgr)
         self.memory_mgr = memory.Manager(self.home, self.record, self.push_signal, self.pass_step_factory,
                                          self.rules, list(self.senses.values()), is_busy=self._is_busy)
@@ -161,21 +162,6 @@ class Daemon:
             args = installer_mod.brief(fields["args"]) if fields["tool"] == "install_server" else fields["args"]
             line = {"type": "gate", "id": fields["id"], "tool": fields["tool"], "args": args}
             self.dispatch(lambda: self._send_to_session(fields.get("session"), line))
-        return event
-
-    def _job_record(self, type, **fields):
-        """`jobs.Manager`'s door: `record`, plus the `job.start`/`job.gate`/`job.end` lines its
-        session is owed (live: a job's gate was silent - only `approvals` knew)."""
-        event = self.record(type, **fields)
-        if type == "job_start":
-            line = {"type": "job.start", "id": fields["id"], "goal": fields["goal"]}
-        elif type == "approval_pending":
-            line = {"type": "job.gate", "id": fields["job"], "approval": fields["id"], "tool": fields["tool"], "args": fields["args"]}
-        elif type in ("job_done", "job_failed"):  # the row exists: job_start came through this door
-            line = {"type": "job.end", "id": fields["id"], "state": self.state.job(fields["id"])["state"]}
-        else:
-            return event  # a job's tool_call/tool_result/steer: ledger only
-        self._send_to_session(fields.get("session"), line)
         return event
 
     # -- socket ------------------------------------------------------------------------
@@ -272,6 +258,10 @@ class Daemon:
         here before handing off to `send`, which wants the Session object."""
         s = self.sessions.get(sid)
         if s is not None:
+            self.send(s, msg)
+
+    def _send_all(self, msg) -> None:  # every screen: D41 may have moved one away from the job's session
+        for s in list(self.sessions.values()):
             self.send(s, msg)
 
     async def handle(self, reader, writer):

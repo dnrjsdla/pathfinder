@@ -217,6 +217,25 @@ class StateTest(unittest.TestCase):
         self._decide("q1", "denied")
         self.assertEqual(self._lines(), [["send_mail {} waiting for approval"]])
 
+    def test_open_approvals(self):
+        """D52: pending rows of this session newer than its last user message."""
+        self._record("session_start", session="s2")
+        self._record("approval_pending", session="s2", origin="user", id="talked", call_id="c0", tool="x",
+                     args={}, messages=[])
+        self._record("user", session="s2", turn="t1", origin="user", trust="user", text="go")
+        self._gate("gate", "send_mail", {})
+        self._record("approval_pending", session="s2", origin="user", id="decided", call_id="c1", tool="x",
+                     args={}, messages=[])
+        self._decide("decided", "denied")
+        self._record("approval_pending", session="s3", origin="user", id="other", call_id="c2", tool="x",
+                     args={}, messages=[])
+        self._record("approval_pending", session="s2", origin="job", id="job", call_id="c3", tool="x", args={},
+                     messages=[{"role": "user", "content": "x"}], job="j1")
+        self.assertEqual([p["id"] for p in self.state.open_approvals("s2")], ["gate", "job"])
+        self.assertEqual([p["id"] for p in self.state.open_approvals("s3")], ["other"])  # no user line yet
+        self._record("user", session="s2", turn="t2", origin="user", trust="user", text="something else")
+        self.assertEqual(self.state.open_approvals("s2"), [])
+
     def test_proposals_and_job_gates_are_not_calls(self):
         self._record("session_start", session="s2")
         self._record("approval_pending", session="s2", origin="user", id="q1", call_id="q1", tool="edit_memory",

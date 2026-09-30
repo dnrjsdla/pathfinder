@@ -1704,6 +1704,124 @@ class ProposalGateLineTest(DaemonHarness):
         self.assertTrue(line["args"].startswith("io.github.acme/widget@1.0.0  license MIT ok"), line["args"])
 
 
+class ChatApprovalTest(DaemonHarness):
+    """D52 part 2 (m10's T68): "I approve" typed into chat was taken by the model for an approval."""
+
+    def _gate(self, daemon, sid, id):
+        daemon.record("approval_pending", session=sid, turn="t0", origin="user", id=id, call_id=id,
+                      tool="edit_memory", args={"target": "USER.md"}, messages=[])
+
+    async def _say(self, c, text):
+        c.send({"type": "say", "text": text})
+        return [m for m in await c.until("turn.end") if m["type"] != "gate"]
+
+    async def _attach(self):
+        c = await Client.open(self.home)
+        c.send({"type": "attach"})
+        return c, (await c.recv())["session"]
+
+    def test_chat_approval_answered_without_a_model_call(self):
+        factory = fake_model("ok")
+
+        async def scenario(daemon):
+            c, sid = await self._attach()
+            self._gate(daemon, sid, "a1")
+            seen = await self._say(c, "I'll approve.")
+            c.close()
+            return seen, daemon.state.approval("a1")["decision"]
+
+        seen, decision = self.run_with(factory, scenario)
+        self.assertEqual([m["type"] for m in seen], ["turn.start", "delta", "turn.end"])
+        self.assertTrue(seen[1]["text"].endswith(": /approve a1 or /deny a1 (edit_memory)"), seen[1]["text"])
+        self.assertEqual(seen[-1]["kind"], "answer")
+        self.assertEqual(factory.seen, [])  # no model request
+        self.assertIsNone(decision)  # still pending
+        turn = [e for e in self.events() if e["type"] in ("user", "turn_start", "assistant", "turn_end")]
+        self.assertEqual([e["type"] for e in turn], ["user", "turn_start", "assistant", "turn_end"])
+        self.assertEqual((turn[0]["text"], turn[2]["text"], turn[2]["final"]), ("I'll approve.", seen[1]["text"], True))
+        self.assertEqual((turn[3]["kind"], "usage" in turn[3]), ("answer", False))
+
+    def test_chat_approval_needs_an_open_gate_newer_than_the_last_user_message(self):
+        factory = fake_model("ok")
+
+        async def scenario(daemon):
+            c, sid = await self._attach()
+            no_gate = await self._say(c, "yes")
+            self._gate(daemon, sid, "old")
+            await self._say(c, "something else first")
+            talked_past = await self._say(c, "yes")
+            self._gate(daemon, sid, "new")
+            answered = await self._say(c, "yes")
+            c.close()
+            return no_gate, talked_past, answered
+
+        no_gate, talked_past, answered = self.run_with(factory, scenario)
+        self.assertEqual(len(factory.seen), 3)  # the answered "yes" made no request
+        for seen in (no_gate, talked_past):
+            self.assertEqual([m["text"] for m in seen if m["type"] == "delta"], ["ok "])
+        self.assertIn("/approve new ", answered[1]["text"])
+        self.assertNotIn("old", answered[1]["text"])
+
+    def test_longer_message_still_reaches_the_model(self):
+        factory = fake_model("ok")
+
+        async def scenario(daemon):
+            c, sid = await self._attach()
+            self._gate(daemon, sid, "a1")
+            seen = await self._say(c, "yes, and also add X")
+            c.close()
+            return seen, daemon.state.approval("a1")["decision"]
+
+        seen, decision = self.run_with(factory, scenario)
+        self.assertEqual(factory.seen[0][-1], {"role": "user", "content": "yes, and also add X"})
+        self.assertEqual([m["text"] for m in seen if m["type"] == "delta"], ["ok "])
+        self.assertIsNone(decision)
+
+    def test_steer_is_never_intercepted(self):
+        """D17: a `say` while the owner's turn runs is a steer, with a gate open or not."""
+        proceed = threading.Event()
+        tools_mod.TOOLS["slow_tool"] = ToolSpec(name="slow_tool", description="", params={}, required=[],
+                                                handler=lambda control=None: proceed.wait(2) and {"slept": True})
+        self.addCleanup(tools_mod.TOOLS.pop, "slow_tool", None)
+        seen_messages = []
+
+        def factory(cfg, control=None, tools=None):
+            def step(messages):
+                seen_messages.append([dict(m) for m in messages])
+                if len(seen_messages) == 1:
+                    yield ("tool_calls", [{"id": "c1", "name": "slow_tool", "arguments": {}}])
+                else:
+                    yield ("text", "done")
+            return step
+
+        async def scenario(daemon):
+            c, sid = await self._attach()
+            c.send({"type": "say", "text": "go"})
+            await c.until("turn.start")
+            s = daemon.sessions[sid]
+            for _ in range(200):
+                if s.control is not None and s.control.in_tool:
+                    break
+                await asyncio.sleep(0.01)
+            self._gate(daemon, sid, "a1")  # open: newer than "go"
+            c.send({"type": "say", "text": "yes"})
+            for _ in range(200):
+                if s.control.steers:
+                    break
+                await asyncio.sleep(0.01)
+            proceed.set()
+            seen = await c.until("turn.end")
+            c.close()
+            return seen
+
+        seen = self.run_with(factory, scenario)
+        self.assertEqual([m["text"] for m in seen if m["type"] == "delta"], ["done"])
+        self.assertIn({"role": "user", "content": "yes"}, seen_messages[1])
+        steers = [e["text"] for e in self.events() if e["type"] == "user" and e.get("steer")]
+        self.assertEqual(steers, ["yes"])
+        self.assertFalse(any("/approve" in e.get("text", "") for e in self.events() if e["type"] == "assistant"))
+
+
 class SessionLifetimeTest(DaemonHarness):
     """D41 (live 2026-09-29): an open screen's `presence` kept one session alive for four days,
     and its old wrong answers kept coming back. Two hours without conversation end a session."""

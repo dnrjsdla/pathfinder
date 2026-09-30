@@ -25,7 +25,8 @@ class FakeIMAP:
     replies. Good enough to prove `poll` never issues a full-body fetch. Like imaplib, a search
     sends `literal` after its arguments and clears it; `literals` keeps what each search sent."""
 
-    def __init__(self, *a, uidvalidity=b"1", search_uids=b"1 2", capabilities=("IMAP4REV1",), message=None, **kw):
+    def __init__(self, *a, uidvalidity=b"1", search_uids=b"1 2", capabilities=("IMAP4REV1",), message=None,
+                 messages=None, search_typ="OK", **kw):
         self.commands = []
         self._uidvalidity = uidvalidity
         self._search_uids = search_uids
@@ -33,6 +34,8 @@ class FakeIMAP:
         self.literal = None
         self.literals = []
         self._message = message
+        self._messages = messages or {}
+        self._search_typ = search_typ
 
     def login(self, user, password):
         self.commands.append(("login", user, password))
@@ -49,10 +52,12 @@ class FakeIMAP:
         if cmd == "search":
             self.literals.append(self.literal)
             self.literal = None
+            if self._search_typ != "OK":
+                return self._search_typ, [b"[BADCHARSET] nope"]
             return "OK", [self._search_uids]
         if cmd == "fetch":
             uid, fields = args
-            raw = self._message or (f"From: a@example.com\r\nSubject: hi\r\nMessage-ID: <{uid}@example.com>\r\n\r\n").encode()
+            raw = self._messages.get(uid) or self._message or (f"From: a@example.com\r\nSubject: hi\r\nMessage-ID: <{uid}@example.com>\r\n\r\n").encode()
             return "OK", [(b"1 (...)", raw)]
         return "OK", [None]
 
@@ -216,16 +221,18 @@ class MailToolsTest(unittest.TestCase):
         self.assertEqual(self._searches(other), [("CHARSET", "UTF-8", "TEXT")])
 
     def test_query_goes_as_a_literal_utf8(self):
-        query = '회의록 "x" HEADER SUBJECT "y"\r\nA001 LOGOUT'
+        query = '회의록 "x" HEADER SUBJECT "y" A001 LOGOUT'
         fake = FakeIMAP(capabilities=("X-GM-EXT-1",))
         self._call(fake, mail_sense._search_mail, query)
         self.assertEqual(fake.literals, [query.encode("utf-8")])  # the literal, byte for byte
         self.assertEqual(self._searches(fake), [("CHARSET", "UTF-8", "X-GM-RAW")])  # nothing of it in the command
-        for query, limit in (("", 5), ("x" * 201, 5), ("ok", 0), ("ok", 21)):
+        for query, limit in (("", 5), ("x" * 201, 5), ("ok", 0), ("ok", 21), ("a\r\nb", 5), ("nul\x00", 5), ("sur\ud800", 5)):
             fake = FakeIMAP()
             with self.assertRaises(ValueError):
                 self._call(fake, mail_sense._search_mail, query, limit)
             self.assertEqual(fake.commands, [])  # refused before connecting
+        with self.assertRaises(ValueError):
+            self._call(FakeIMAP(), mail_sense._list_mail, 21)  # the same 1-20 as search_mail
 
     def test_search_never_marks_read(self):
         fake = FakeIMAP(capabilities=("X-GM-EXT-1",))
@@ -253,7 +260,48 @@ class MailToolsTest(unittest.TestCase):
                 self.assertLessEqual(len(row[field]), 300)
             self.assertNotIn("[31m", row["from"])  # the ANSI sequence goes whole
             self.assertTrue(row["subject"].startswith("gnp.exe x"))
+            self.assertEqual(row["date"], "Tue, 29 Sep 2026 10:00:00 +0900")
         self.assertEqual(rows[2]["body"], "line one\n\nline three")  # newlines kept, the rest filtered
+
+    def test_hostile_header_degrades_to_its_own_row(self):
+        """Review: an encoded-word From that decodes to CR/LF made `msg.get` raise, failing every
+        listing that held the mail and the whole poll batch around it."""
+        import base64
+        hostile = "=?utf-8?b?" + base64.b64encode(b"x\r\ny").decode() + "?= <b@example.com>"
+        mails = {u: f"From: {hostile if u == '2' else 'a@example.com'}\r\nSubject: s\r\nMessage-ID: <{u}@example.com>\r\n\r\n".encode()
+                 for u in ("1", "2", "3")}
+        rows = self._call(FakeIMAP(messages=mails, search_uids=b"1 2 3"), mail_sense._list_mail, 3)
+        self.assertEqual([r["from"] for r in rows], ["a@example.com", "x y <b@example.com>", "a@example.com"])
+        _watermark_at_zero()
+        self.addCleanup(_clear_watermark)
+        signals = self._call(FakeIMAP(messages=mails, search_uids=b"1 2 3"), mail_sense.poll,
+                             {"host": "imap.example.com", "user": "me@example.com"}, time.time())
+        self.assertEqual(len(signals), 3)  # the good mails around it are still announced
+
+    def test_message_id_outside_printable_ascii_falls_back_to_a_uid_that_reads(self):
+        """Review: a Message-ID with bidi/zero-width characters or 3,000 characters reached the model
+        as is, and `read_mail` then refused the id the list had handed out."""
+        for bad in ("<a‮b​@example.com>", "<" + "y" * 3000 + "@example.com>", '<a"b@example.com>'):
+            mail = f"From: a@example.com\r\nSubject: s\r\nMessage-ID: {bad}\r\n\r\nbody\r\n".encode()
+            rows = self._call(FakeIMAP(message=mail, search_uids=b"9"), mail_sense._list_mail, 1)
+            self.assertEqual(rows[0]["id"], "uid:9")
+        fake = FakeIMAP(message=mail)
+        self.assertEqual(self._call(fake, mail_sense._read_mail, "uid:9")["body"], "body")
+        self.assertEqual(self._searches(fake), [])  # no HEADER MESSAGE-ID "uid:9" search
+        self.assertEqual([c[2] for c in fake.commands if c[:2] == ("uid", "fetch")], [("9", "(BODY.PEEK[])")])
+
+    def test_a_refused_search_raises(self):
+        for fn, args in ((mail_sense._search_mail, ("hi",)), (mail_sense._list_mail, (5,))):
+            with self.assertRaisesRegex(RuntimeError, "BADCHARSET"):  # not an empty "no mail" answer
+                self._call(FakeIMAP(search_typ="NO"), fn, *args)
+
+    def test_read_mail_cuts_and_degrades(self):
+        head = "From: a@example.com\r\nSubject: s\r\nMessage-ID: <m@example.com>\r\n"
+        read = lambda raw: self._call(FakeIMAP(message=raw), mail_sense._read_mail, "<m@example.com>")["body"]
+        body = read((head + "Content-Type: text/plain\r\n\r\n" + "z" * 9000).encode())
+        self.assertEqual(body, "z" * 8000 + "...(truncated)")
+        self.assertEqual(read((head + "Content-Type: text/html\r\n\r\n<p>hi</p>").encode()), "(no plain-text part)")
+        self.assertEqual(read((head + "Content-Type: text/plain; charset=x-bogus\r\n\r\n").encode() + b"caf\xc3\xa9"), "café")
 
     def test_mail_tools_use_the_bound_home(self):
         other = tempfile.TemporaryDirectory()

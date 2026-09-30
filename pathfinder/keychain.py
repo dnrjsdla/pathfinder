@@ -41,7 +41,9 @@ def store(service: str, account: str, value: str, run=None) -> None:
     try:
         cmd.encode("utf-8")
     except UnicodeEncodeError:  # its `.object` is the whole command, value included
-        raise ValueError("not valid text") from None
+        cmd = ""
+    if not cmd:  # raised outside the `except`, so no `__context__` carries the command
+        raise ValueError("not valid text")
     result = run(["security", "-i"], input=cmd, capture_output=True, encoding="utf-8", timeout=10)
     if result.returncode != 0:
         raise RuntimeError(f"security could not store {account} for {service} (exit {result.returncode})")

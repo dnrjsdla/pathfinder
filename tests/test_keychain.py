@@ -101,7 +101,8 @@ class KeychainTest(unittest.TestCase):
         with self.assertRaises(ValueError) as err:
             keychain.store("svc", "acct", value, run=run)
         run.assert_not_called()
-        for text in (str(err.exception), repr(err.exception)):
+        e = err.exception
+        for text in (str(e), repr(e), repr(e.args), repr(e.__cause__), repr(e.__context__)):
             self.assertNotIn("s3cr3t", text)
 
 

@@ -115,11 +115,11 @@ class Manager:
         """The daemon's door, then the `job.start`/`job.gate`/`job.end` line a screen is owed
         (live: a job's gate was silent - only `approvals` knew)."""
         def go():
-            self._record(type, **fields)
+            event = self._record(type, **fields)  # the lines show what was recorded (D53's handle)
             if type == "job_start":
-                self._send({"type": "job.start", "id": fields["id"], "goal": fields["goal"]})
+                self._send({"type": "job.start", "id": fields["id"], "goal": event["goal"]})
             elif type == "approval_pending":
-                self._send({"type": "job.gate", "id": fields["job"], "approval": fields["id"], "tool": fields["tool"], "args": fields["args"]})
+                self._send({"type": "job.gate", "id": fields["job"], "approval": fields["id"], "tool": fields["tool"], "args": event["args"]})
             elif type in ("job_done", "job_failed"):  # the row exists: job_start came through this door
                 self._send({"type": "job.end", "id": fields["id"], "state": self._job_state(fields["id"])["state"]})
             # a job's tool_call/tool_result/steer: ledger only

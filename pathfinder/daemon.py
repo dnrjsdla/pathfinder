@@ -159,8 +159,9 @@ class Daemon:
         event = self.ledger.append(type, **fields)
         self.state.apply(event)
         if type == "approval_pending" and fields.get("origin") == "user" and not fields.get("messages"):
-            # a proposal from the user's own turn owes a Gate's line (live: "approve" typed into chat)
-            args = installer_mod.brief(fields["args"]) if fields["tool"] == "install_server" else fields["args"]
+            # a proposal from the user's own turn owes a Gate's line (live: "approve" typed into chat);
+            # its args are the recorded ones, so the screen shows what the approval holds (D53)
+            args = installer_mod.brief(event["args"]) if fields["tool"] == "install_server" else event["args"]
             line = {"type": "gate", "id": fields["id"], "tool": fields["tool"], "args": args}
             self.dispatch(lambda: self._send_to_session(fields.get("session"), line))
         return event
@@ -438,8 +439,8 @@ class Daemon:
                 _write(w, msg)
 
     def steer(self, s, text):
-        self.record("user", session=s.id, turn=s.turn, origin="user", trust="user", text=text, steer=True)
-        s.control.steers.append(text)
+        event = self.record("user", session=s.id, turn=s.turn, origin="user", trust="user", text=text, steer=True)
+        s.control.steers.append(event["text"])  # as recorded: a pasted token rides on as its handle (D53)
         if not s.control.in_tool:  # the daemon does not cut a stream while a tool handler is running
             s.control.steer_cut.set()
 
@@ -723,9 +724,9 @@ class Daemon:
                 self.record("assistant", session=s.id, turn=turn, origin="user", text=g.said, final=True)
             loop._drain(control, messages, envelope=False)
             approval_id = uuid.uuid4().hex[:12]
-            self.record("approval_pending", session=s.id, turn=turn, origin="user", id=approval_id,
-                        call_id=g.id, tool=g.name, args=g.arguments, messages=messages)
-            self.send(s, {"type": "gate", "id": approval_id, "tool": g.name, "args": g.arguments})
+            pending = self.record("approval_pending", session=s.id, turn=turn, origin="user", id=approval_id,
+                                  call_id=g.id, tool=g.name, args=g.arguments, messages=messages)
+            self.send(s, {"type": "gate", "id": approval_id, "tool": g.name, "args": pending["args"]})
             self.record("turn_end", session=s.id, turn=turn, origin="user", kind="gated", check=g.check)
             return "gated"
         except LLMError as e:

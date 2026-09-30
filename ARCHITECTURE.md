@@ -59,6 +59,8 @@ daemon.Daemon ── one lane (queue + worker) per session; lane items: say | re
 | `<home>/hooks/pathfinder.zsh` and one guarded line in `~/.zshrc` | the shell sense's `preexec`/`precmd` hook (`docs/senses.md`), sourced only if the file exists | `init`, after a yes; `~/.zshrc` is backed up to `~/.zshrc.pathfinder-<ts>` and appended, never rewritten | the shell sense hears nothing |
 | `~/.claude/settings.json` (`hooks.Stop`, `hooks.Notification`) | the Claude Code sense's two hook entries | `init` through `config.merge_json_file` (D60): backup, atomic write, read-back; idempotent by the `pathfinder signal claude_code` marker | Claude Code's own concern |
 | macOS Keychain `pathfinder-mcp-<id>` / `pathfinder-mail` | every secret (an MCP server's token, the IMAP password) | the user, by hand (`security add-generic-password`) | the server stays listed as `disabled: secret missing: <NAME>`; the mail sense errors |
+| macOS Keychain `pathfinder-pasted` / `pasted-N` | a token-shaped string (`keychain.TOKEN_RE`) that reached the ledger door; the event keeps `[secret:pasted-N]` in its place (D53) | `ledger.append()` through `keychain.vault`; deleted 24 hours after it was made, at the next paste or ledger start | the handle stays in the ledger and the value is gone - it is entered again with `/secret` |
+| `<home>/pasted.json` (0600) | the live handles with their creation times, and the highest N handed out, so a handle is never reused - never a value | `keychain.vault`/`sweep`, under the ledger's lock | the count restarts, so a new handle can repeat an old one; the items it listed are no longer swept |
 
 `<home>` is `$PATHFINDER_HOME` or `~/.pathfinder` (mode 0700).
 

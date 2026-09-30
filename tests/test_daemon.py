@@ -1892,6 +1892,61 @@ class ProposalGateLineTest(DaemonHarness):
         self.assertTrue(line["args"].startswith("io.github.acme/widget@1.0.0  license MIT ok"), line["args"])
 
 
+class PastedTokenScreenTest(DaemonHarness):
+    """D53: a screen line shows what the ledger holds, so the owner approves what will run. The
+    Keychain is a dict here."""
+    TOKEN = "ntn_" + "s" * 40  # built by concatenation, so the scanner never flags this file
+
+    def setUp(self):
+        super().setUp()
+        self.items = {}
+        for name, fake in (("store", lambda s, a, v: self.items.__setitem__(a, v)),
+                           ("delete", lambda s, a: True), ("secret", None)):
+            patch = mock.patch(f"pathfinder.keychain.{name}", side_effect=fake)
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def test_gate_line_carries_the_handle_the_approval_holds(self):
+        note_path = str(self.home / "note.txt")
+
+        def gate_model(cfg, control=None, tools=None):
+            def step(messages):
+                yield ("tool_calls", [{"id": "c1", "name": "write_file",
+                                        "arguments": {"path": note_path, "content": self.TOKEN}}])
+            return step
+
+        async def scenario(daemon):
+            c = await Client.open(self.home)
+            c.send({"type": "attach"})
+            sid = (await c.recv())["session"]
+            c.send({"type": "say", "text": "please write a note"})
+            seen = await c.until("turn.end")
+            daemon.record("approval_pending", session=sid, origin="user", id="a2", call_id="a2",
+                          tool="write_file", args={"content": self.TOKEN}, messages=[])
+            seen.append(await c.recv())
+            c.close()
+            return seen
+
+        seen = self.run_with(gate_model, scenario)
+        gates = [m for m in seen if m["type"] == "gate"]
+        self.assertEqual([g["args"]["content"] for g in gates], ["[secret:pasted-1]", "[secret:pasted-2]"])
+        self.assertNotIn(self.TOKEN, json.dumps(seen))
+        state = State(self.home / "state.db")
+        self.addCleanup(state.close)
+        for gate in gates:
+            self.assertEqual(state.approval(gate["id"])["args"], gate["args"])
+
+    def test_steer_is_kept_as_recorded(self):
+        """A steer said after the model's last chunk is re-sent as the next turn's `trailing` text
+        from `control.steers`, so that deque holds the handle, not the token."""
+        async def scenario(daemon):
+            s = mock.Mock(id="s1", turn="t1", control=TurnControl())
+            daemon.steer(s, f"use {self.TOKEN}")
+            return list(s.control.steers)
+
+        self.assertEqual(self.run_with(fake_model("ok"), scenario), ["use [secret:pasted-1]"])
+
+
 class ChatApprovalTest(DaemonHarness):
     """D52 part 2 (m10's T68): "I approve" typed into chat was taken by the model for an approval."""
 

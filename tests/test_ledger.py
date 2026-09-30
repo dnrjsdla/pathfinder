@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from pathfinder import keychain as keychain_mod
 from pathfinder import ledger as ledger_mod
 from pathfinder.ledger import Ledger
 from pathfinder.state import State
@@ -331,30 +332,50 @@ class PastedTokenTest(unittest.TestCase):
         self.assertNotIn(other, disk)
         self.assertIn("[secret:pasted-1]", disk)
         self.assertEqual(self.state.history("s"), [{"role": "user", "content": event["text"]}])
-        self.assertEqual(sorted(self._index()), ["pasted-1", "pasted-2"])  # handles and times only
+        self.assertEqual(sorted(self._index()["pasted"]), ["pasted-1", "pasted-2"])  # handles and times only
         self.assertNotIn(self.TOKEN, (self.home / "pasted.json").read_text())
         self.assertEqual((self.home / "pasted.json").stat().st_mode & 0o777, 0o600)
         plain = self._record("user", session="s", origin="user", trust="user", text="no token here")
         self.assertEqual(plain["text"], "no token here")
         self.assertEqual(len(self.items), 2)
 
+    def _back_date(self, pasted):
+        (self.home / "pasted.json").write_text(json.dumps({"last": 2, "pasted": pasted}))
+
     def test_unbound_paste_expires_after_24h(self):
         now = time.time()
-        (self.home / "pasted.json").write_text(json.dumps({"pasted-1": now - 25 * 3600, "pasted-2": now - 3600}))
+        self._back_date({"pasted-1": now - 25 * 3600, "pasted-2": now - 3600})
         self.items = {("pathfinder-pasted", "pasted-1"): "a", ("pathfinder-pasted", "pasted-2"): "b"}
         Ledger(self.home)  # a daemon start sweeps
         self.assertEqual(list(self.items), [("pathfinder-pasted", "pasted-2")])
-        self.assertEqual(list(self._index()), ["pasted-2"])
+        self.assertEqual(self._index(), {"last": 2, "pasted": {"pasted-2": now - 3600}})
 
-        (self.home / "pasted.json").write_text(json.dumps({"pasted-2": now - 25 * 3600}))
+        self._back_date({"pasted-2": now - 25 * 3600})
         self.deletable = False  # a locked keychain: the entry stays for the next sweep
         Ledger(self.home)
-        self.assertEqual(list(self._index()), ["pasted-2"])
+        self.assertEqual(list(self._index()["pasted"]), ["pasted-2"])
         self.deletable = True
         self._record("user", text=self.TOKEN)  # a new paste sweeps too
-        self.assertNotIn(("pathfinder-pasted", "pasted-2"), self.items)
-        self.assertEqual(len(self._index()), 1)
-        self.assertEqual(list(self.items.values()), [self.TOKEN])
+        self.assertEqual(self.items, {("pathfinder-pasted", "pasted-3"): self.TOKEN})
+        self.assertEqual(list(self._index()["pasted"]), ["pasted-3"])
+
+    def test_a_handle_is_never_reused(self):
+        self.assertEqual(self._record("user", text=self.TOKEN)["text"], "[secret:pasted-1]")
+        index = self._index()
+        index["pasted"]["pasted-1"] -= 25 * 3600
+        (self.home / "pasted.json").write_text(json.dumps(index))
+        self.assertEqual(self._record("user", text="sk-" + "n" * 30)["text"], "[secret:pasted-2]")
+        self.assertEqual(list(self._index()["pasted"]), ["pasted-2"])
+        self.assertNotIn(("pathfinder-pasted", "pasted-1"), self.items)
+
+    def test_failed_read_back_leaves_no_orphan(self):
+        def differs(service, account, value):  # stored, then read back as something else
+            self.items[(service, account)] = value[:-1]
+            raise RuntimeError("the Keychain gave back a different value")
+        keychain_mod.store.side_effect = differs
+        self.assertEqual(self._record("user", text=self.TOKEN)["text"], "[redacted]")
+        self.assertEqual(self.items, {})
+        self.assertFalse((self.home / "pasted.json").exists())
 
     def test_keychain_failure_falls_back_to_redaction(self):
         mock.patch.stopall()  # the real store(), over a `security` that is missing or refuses

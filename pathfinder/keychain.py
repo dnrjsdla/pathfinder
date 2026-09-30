@@ -7,12 +7,15 @@ import subprocess
 import time
 from pathlib import Path
 
-# One pattern for the ledger door and the pre-commit scan (D53): vendor-prefixed API keys and
-# tokens, Notion's `ntn_`/`secret_`, and a private key's first line.
+# One pattern for the ledger door and the pre-commit scan (D53): a private key (the whole block
+# when its END line is there), then vendor-prefixed keys and tokens, a JWT and a Telegram bot
+# token - each only at the start of a word, so `task-management-...` is not an `sk-` key.
 TOKEN_RE = re.compile(
-    r"sk-[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AIza[0-9A-Za-z_-]{30,}"
-    r"|xox[abprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|ntn_[A-Za-z0-9]{20,}|secret_[A-Za-z0-9]{20,}"
-    r"|-----BEGIN [A-Z ]*PRIVATE KEY-----")
+    r"-----BEGIN [A-Z ]*PRIVATE KEY-----(?:[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----)?"
+    r"|(?<![A-Za-z0-9])(?:sk-[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}"
+    r"|AIza[0-9A-Za-z_-]{30,}|xox[abprs]-[A-Za-z0-9-]{10,}|xapp-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}"
+    r"|ntn_[A-Za-z0-9]{20,}|secret_[A-Za-z0-9]{40,}|[sr]k_(?:live|test)_[A-Za-z0-9]{20,}"
+    r"|eyJ[A-Za-z0-9_-]{7,}\.eyJ[A-Za-z0-9_-]{7,}\.[A-Za-z0-9_-]{10,}|\d{8,10}:[A-Za-z0-9_-]{35}(?![A-Za-z0-9_-]))")
 PASTED = "pathfinder-pasted"  # a pasted token's service; its account is its handle, pasted-N
 
 
@@ -74,15 +77,16 @@ def delete(service: str, account: str) -> bool:
 
 def sweep(index: Path, now: float) -> dict:
     """Delete pasted items older than 24 hours from the Keychain and the index (D53); returns the
-    index that is left, handle -> creation time. A delete the Keychain refuses stays for next time."""
+    index: `last`, the highest N ever handed out, so a handle is never reused, and `pasted`,
+    handle -> creation time. A delete the Keychain refuses stays for next time."""
     try:
         held = json.loads(index.read_text())
     except (OSError, ValueError):
-        return {}
-    live = {h: t for h, t in held.items() if now - t < 24 * 3600 or not delete(PASTED, h)}
-    if live != held:
-        _save(index, live)
-    return live
+        return {"last": 0, "pasted": {}}
+    live = {h: t for h, t in held["pasted"].items() if now - t < 24 * 3600 or not delete(PASTED, h)}
+    if live != held["pasted"]:
+        _save(index, {**held, "pasted": live})
+    return {**held, "pasted": live}
 
 
 def _save(index: Path, held: dict) -> None:
@@ -96,12 +100,13 @@ def _save(index: Path, held: dict) -> None:
 def _paste(token: str, index: Path) -> str:
     now = time.time()
     held = sweep(index, now)  # every new paste sweeps first
-    account = f"pasted-{max((int(h.removeprefix('pasted-')) for h in held), default=0) + 1}"
+    account = f"pasted-{held['last'] + 1}"
     try:
         store(PASTED, account, token)
     except (ValueError, RuntimeError, OSError, subprocess.SubprocessError):  # locked, or no `security`
+        delete(PASTED, account)  # a read-back that differed leaves no orphan behind
         return "[redacted]"
-    _save(index, {**held, account: now})
+    _save(index, {"last": held["last"] + 1, "pasted": {**held["pasted"], account: now}})
     return f"[secret:{account}]"
 
 

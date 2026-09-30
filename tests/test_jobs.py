@@ -7,6 +7,7 @@ import threading
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from pathfinder import jobs
 from pathfinder import rules as rules_mod
@@ -210,6 +211,20 @@ class JobLinesTest(JobsHarness):
             {"type": "job.gate", "id": "j1", "approval": "a1", "tool": "search", "args": {"q": "x"}},
             {"type": "job.end", "id": "j1", "state": "done"}])
         self.assertEqual([e["type"] for e in self.events()], ["job_start", "user", "approval_pending", "job_done"])
+
+    def test_job_lines_show_the_recorded_handle(self):
+        """D53: the screen shows the handle the approval row holds, not the pasted token."""
+        token = "ntn_" + "j" * 40  # built by concatenation, so the scanner never flags this file
+        lines = []
+        mgr = jobs.Manager(self.home, self.record, self.push, None, rules_mod.Rules(), send=lines.append)
+        self._managers.append(mgr)
+        with mock.patch("pathfinder.keychain.store"), mock.patch("pathfinder.keychain.delete"):
+            mgr.record("job_start", session="s1", origin="job", id="j1", goal=f"post with {token}")
+            mgr.record("approval_pending", session="s1", origin="job", id="a1", call_id="c1", tool="post",
+                       args={"key": token}, messages=[], job="j1")
+        self.assertEqual(lines[0]["goal"], "post with [secret:pasted-1]")
+        self.assertEqual(lines[1]["args"], {"key": "[secret:pasted-2]"})
+        self.assertEqual(self.state.approval("a1")["args"], lines[1]["args"])
 
     def test_job_end_reads_the_passed_state(self):
         """U4 review: job.end's state comes from the writer's getter, not this Manager's own

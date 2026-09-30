@@ -58,6 +58,8 @@ daemon.Daemon ── 세션마다 lane 하나 (큐 + 워커); 큐 항목: say | 
 | `<home>/hooks/pathfinder.zsh` 와 `~/.zshrc` 의 가드된 한 줄 | 셸 감각의 `preexec`/`precmd` 훅(`docs/senses.md`), 파일이 있을 때만 source | `init`, 예라고 한 뒤; `~/.zshrc` 는 `~/.zshrc.pathfinder-<ts>` 로 백업하고 덧붙이기만, 다시 쓰지 않음 | 셸 감각이 아무것도 못 듣는다 |
 | `~/.claude/settings.json`(`hooks.Stop`, `hooks.Notification`) | Claude Code 감각의 훅 두 항목 | `init` 이 `config.merge_json_file`(D60)로: 백업 · 원자 쓰기 · 읽어서 대조; `pathfinder signal claude_code` 표식으로 멱등 | Claude Code 자기 일 |
 | macOS Keychain `pathfinder-mcp-<id>` / `pathfinder-mail` | 모든 비밀(MCP 서버 토큰, IMAP 비밀번호) | 사용자가 손으로(`security add-generic-password`) | 서버는 `disabled: secret missing: <NAME>` 로 남고, 메일 감각은 오류 |
+| macOS Keychain `pathfinder-pasted` / `pasted-N` | 원장 입구에 닿은 토큰 모양 문자열(`keychain.TOKEN_RE`); 사건에는 그 자리에 `[secret:pasted-N]` 이 남는다(D53) | `ledger.append()` 가 `keychain.vault` 로; 만든 지 24시간이 지나면 다음 붙여넣기나 원장 시작 때 삭제 | 원장에는 핸들만 남고 값은 사라진다 - `/secret` 으로 다시 입력 |
+| `<홈>/pasted.json` (0600) | 살아 있는 핸들과 만든 시각, 지금까지 준 가장 큰 N(핸들은 다시 쓰이지 않는다) - 값은 절대 없음 | 원장 잠금 아래의 `keychain.vault`/`sweep` | 번호가 처음부터 다시 세어져 새 핸들이 옛 핸들과 겹칠 수 있고, 목록에 있던 항목은 더는 청소되지 않는다 |
 
 `<홈>` 은 `$PATHFINDER_HOME` 또는 `~/.pathfinder` (권한 0700).
 

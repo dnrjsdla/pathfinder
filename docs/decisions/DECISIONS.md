@@ -447,6 +447,14 @@ a skill it has: then the matching skill's title rides in the turn, as the wiki m
 the second look (D51) has been measured in live use. When it comes it is a write tool that asks
 every time, showing the recipient, the subject and the body.
 
+**D60. D36's foreign-file helper moves to `config.py`** (`backup_file`, `_atomic_write_json`,
+`merge_json_file`, about 40 lines; decided 2026-09-30). `installer.py` reached 700/700 at U3 and
+U10 and U16 still need 6 lines; by D56 a file past its ceiling is cut, not raised. The helper
+writes files, it does not install, and `init` already imports it. It stays one reviewed copy:
+`installer.py` and `init.py` import it from `config`. It writes foreign files only; `config.set()`
+remains the one writer of PATHFINDER's own config. — *Reversed if* `config.py` needs a ceiling
+the helper crowds: then D36's own reversal applies, a module of its own.
+
 **The owner's direction for the server (D44/D45), recorded so it is not lost:** what the server
 is for is handing over tool PACKAGES that are useful as they arrive - not wiring services one by
 one. Partition 8 connects single services because the secret path and the registry copy need a

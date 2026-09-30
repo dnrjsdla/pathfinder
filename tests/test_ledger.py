@@ -1,4 +1,5 @@
 import json
+import os
 import tempfile
 import threading
 import unittest
@@ -255,6 +256,22 @@ class SurrogateTest(unittest.TestCase):
         with path.open("a") as f:  # a valid pair written as two JSON escapes
             f.write(json.dumps({"seq": 2, "ts": 0, "type": "user", "text": "😀"}) + "\n")
         self.assertEqual([e["text"] for e in Ledger(self.home).read()], ["ok \U0001f600", "\U0001f600"])
+
+
+class FileModeTest(unittest.TestCase):
+    def test_partition_and_lock_born_0600_dir_0700(self):
+        old = os.umask(0o022)  # the usual umask, under which a plain create is 0644 and 0755
+        try:
+            with tempfile.TemporaryDirectory() as root:
+                led = Ledger(Path(root))
+                event = led.append("session_start", session="s")
+                self.assertEqual(led.dir.stat().st_mode & 0o777, 0o700)
+                files = sorted(p.name for p in led.dir.iterdir())
+                self.assertEqual(files, [".lock", f"{ledger_mod.partition(event['ts'])}.jsonl"])
+                for name in files:
+                    self.assertEqual((led.dir / name).stat().st_mode & 0o777, 0o600, name)
+        finally:
+            os.umask(old)
 
 
 if __name__ == "__main__":

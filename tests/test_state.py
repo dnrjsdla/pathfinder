@@ -1,3 +1,4 @@
+import os
 import tempfile
 import time
 import unittest
@@ -403,6 +404,17 @@ class StateTest(unittest.TestCase):
         since = time.time() - 10
         self.assertEqual(self.state.context_cwds(since), {"/home/user/proj"})
         self.assertEqual(self.state.context_cwds(time.time() + 10), set())
+
+    def test_db_wal_shm_born_0600(self):
+        old = os.umask(0o022)  # the usual umask, under which SQLite alone creates the db 0644
+        try:
+            state = State(self.home / "fresh.db")
+            state.apply(self.ledger.append("session_start", session="s1"))  # a write: -wal and -shm exist
+            for suffix in ("", "-wal", "-shm"):
+                self.assertEqual(os.stat(f"{self.home / 'fresh.db'}{suffix}").st_mode & 0o777, 0o600, suffix)
+            state.close()
+        finally:
+            os.umask(old)
 
 
 class PinsTest(unittest.TestCase):

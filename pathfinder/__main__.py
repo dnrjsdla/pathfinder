@@ -3,11 +3,12 @@ approvals | approve ID | deny ID | interrupt |
 listen | signal SENSE JSON | react up|down [ID] | rules | tools |
 jobs | job stop ID | job steer ID TEXT |
 memory | memory run | memory undo [N] |
-install NAME | uninstall ID | search TEXT |
+install NAME | uninstall ID | search TEXT | secret ID NAME |
 init | service start|stop|restart|status | tui"""
 from __future__ import annotations
 
 import asyncio
+import getpass
 import json
 import shlex
 import socket
@@ -15,7 +16,7 @@ import sys
 import time
 from pathlib import Path
 
-from . import catalog, config, memory, mirror, tui
+from . import catalog, config, keychain, memory, mirror, tui
 from . import init as init_mod
 from . import installer as installer_mod
 from .clock import format_local
@@ -283,6 +284,26 @@ def search_cmd(home, text):
     return 0
 
 
+def secret_cmd(id, name):
+    """`pathfinder secret ID NAME`: the value read hidden and put straight into the Keychain -
+    no socket, no daemon, no ledger."""
+    if not config._MCP_SERVER_ID.match(id) or not (name.isidentifier() and name.isascii()):
+        print("pathfinder: secret ID NAME takes a server id and an env variable name", file=sys.stderr)
+        return 2
+    try:
+        value = getpass.getpass(f"{name} for {id} (hidden; stored in the Keychain): ")
+    except (EOFError, KeyboardInterrupt):
+        print("\nnothing stored", file=sys.stderr)
+        return 1
+    try:
+        keychain.store(f"pathfinder-mcp-{id}", name, value)
+    except Exception as e:  # store's messages never carry the value
+        print(f"pathfinder: {e}", file=sys.stderr)
+        return 1
+    print(f"{name} stored for {id}; an installed server picks it up at the next `pathfinder service restart`")
+    return 0
+
+
 def rules_path(home):
     print(str(Path(home) / "RULES.md"))
     return 0
@@ -438,6 +459,8 @@ def main(argv=None):
         return uninstall_cmd(home, args[1])
     if len(args) >= 2 and args[0] == "search":
         return search_cmd(home, " ".join(args[1:]))
+    if len(args) == 3 and args[0] == "secret":
+        return secret_cmd(args[1], args[2])
     if args == ["jobs"]:
         return jobs_list(home)
     if len(args) == 3 and args[0] == "job" and args[1] == "stop":

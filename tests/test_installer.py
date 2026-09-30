@@ -295,13 +295,52 @@ class InstallerTest(unittest.TestCase):
         self.assertIn("io.github.acme/widget@1.0.0", line)  # the whole sequence goes, not only the ESC byte
 
     def test_secret_missing_proposal_says_what_to_add(self):
-        env = [{"name": "TOKEN", "secret": True, "required": True}]
+        env = [{"name": "TOKEN", "secret": True, "required": False}]  # a required one stops the check (D40)
         with mock.patch("pathfinder.installer.keychain.secret", return_value=None):
             cand = self._check(_candidate(env=env), run=_fake_run())
         self.assertEqual(cand["install"]["needs"], ["TOKEN"])
         aid = self.installer.propose(cand, "user")
         line = render_row(self.state.approval(aid))
         self.assertIn("needs: TOKEN", line)
+
+    # -- D40: the secret comes before the trial -------------------------------------------------
+    def test_required_non_secret_env_resolves_from_keychain(self):
+        """The registry omits `isSecret` when false; a required token not marked secret is still
+        read from the Keychain, handed to the trial, and referenced from the config."""
+        env = [{"name": "SLACK_TOKEN", "secret": False, "required": True},
+               {"name": "LOG_LEVEL", "secret": False, "required": False}]
+        with mock.patch("pathfinder.installer.keychain.secret", return_value="tok") as secret, \
+                mock.patch.object(Installer, "_trial", return_value=(_FAKE_TOOLS, [])) as trial:
+            cand = self.installer.check(_candidate(env=env), run=_fake_run())
+        sid = cand["install"]["id"]
+        secret.assert_called_once_with(f"pathfinder-mcp-{sid}", "SLACK_TOKEN")
+        self.assertEqual(trial.call_args[0][2], {"SLACK_TOKEN": "tok"})
+        self.assertEqual(cand["install"]["needs"], [])
+        self.assertEqual(cand["install"]["env_from_keychain"], ["SLACK_TOKEN"])
+
+    def test_missing_required_secret_stops_before_the_trial(self):
+        env = [{"name": "NOTION_TOKEN", "secret": True, "required": True}]
+        with mock.patch("pathfinder.installer.keychain.secret", return_value=None), \
+                mock.patch.object(Installer, "_trial") as trial:
+            cand = self.installer.check(_candidate(env=env), run=_fake_run())
+        trial.assert_not_called()
+        self.assertEqual(cand["outcome"], "install_failed")
+        self.assertEqual(cand["verification"]["failed_step"], "secrets")
+        sid = self.installer._server_id(cand["name"])
+        reason = cand["verification"]["reason"]
+        self.assertTrue(reason.startswith("needs NOTION_TOKEN - "))
+        self.assertIn(f"/secret {sid} NOTION_TOKEN", reason)
+        self.assertIn(f"pathfinder secret {sid} NOTION_TOKEN", reason)
+
+    def test_missing_optional_secret_still_trials(self):
+        env = [{"name": "TOKEN", "secret": True, "required": False}]
+        with mock.patch("pathfinder.installer.keychain.secret", return_value=None), \
+                mock.patch.object(Installer, "_trial", return_value=(_FAKE_TOOLS, [])) as trial:
+            cand = self.installer.check(_candidate(env=env), run=_fake_run())
+        trial.assert_called_once()
+        self.assertNotEqual(cand["outcome"], "install_failed")
+        self.assertEqual(cand["install"]["needs"], ["TOKEN"])
+        self.assertIn("needs: TOKEN", render_row({"id": "a1", "args": cand}))
 
     def test_explicit_request_shows_excluded_license_but_catalog_fails_it(self):
         catalog_check = self._check(_candidate(), run=_fake_run(license="GPL-3.0"))
@@ -393,7 +432,7 @@ class InstallerTest(unittest.TestCase):
     def test_load_step_ok_when_only_problem_is_a_listed_secret(self):
         """B6: a server held `disabled` only because of a secret the row already listed under
         `needs` is still `install_done`, not rolled back."""
-        env = [{"name": "TOKEN", "secret": True, "required": True}]
+        env = [{"name": "TOKEN", "secret": True, "required": False}]
         with mock.patch("pathfinder.installer.keychain.secret", return_value=None):
             cand = self._check(_candidate(env=env), run=_fake_run())
         id = self.installer._server_id(cand["name"])
@@ -447,7 +486,7 @@ class InstallerTest(unittest.TestCase):
 
     def test_missing_secret_is_still_referenced_in_both_configs(self):
         """B6: adding the secret to the Keychain later must be all it takes."""
-        env = [{"name": "TOKEN", "secret": True, "required": True}]
+        env = [{"name": "TOKEN", "secret": True, "required": False}]
         with mock.patch("pathfinder.installer.keychain.secret", return_value=None):
             cand = self._check(_candidate(env=env), run=_fake_run())
         self.assertEqual(cand["install"]["needs"], ["TOKEN"])

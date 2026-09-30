@@ -15,6 +15,8 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
+from .tools import oneline  # the one filter for someone else's text; `catalog.oneline(...)` callers keep working
+
 REGISTRY = "https://registry.modelcontextprotocol.io"
 # PyPI's own JSON API - not the invariant's registry, but still one named place tests can repoint.
 PYPI_URL = "https://pypi.org/pypi"
@@ -77,18 +79,6 @@ def latest(name: str, registry, timeout=20):
             e.close()
             return None
         raise
-
-
-_ANSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
-
-
-def oneline(text, n=None) -> str:
-    """Registry text (a name, a description, a version) is someone else's: whole ANSI sequences out, whitespace
-    to one space, every non-printable character (controls, bidi marks, zero-width) dropped, at most `n`
-    characters. Everything the copy hands the model or the screen goes through this."""
-    text = _ANSI_RE.sub("", str(text))
-    text = "".join(" " if ch.isspace() else ch for ch in text if ch.isspace() or ch.isprintable())
-    return " ".join(text.split())[:n]
 
 
 def listing(item) -> str:

@@ -5,6 +5,7 @@ which Python treats as truthy) must not sail past the gate as an escalation."""
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -125,6 +126,18 @@ def clip(text: str, limit: int = READ_CLIP) -> str:
     head = tail = limit // 2
     dropped = len(text) - head - tail
     return f"{text[:head]}\n...({dropped} characters omitted)...\n{text[-tail:]}"
+
+
+_ANSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
+
+
+def oneline(text, n=None) -> str:
+    """Someone else's text (a registry name, a mail subject, a calendar title): whole ANSI sequences out,
+    whitespace to one space, every non-printable character (controls, bidi marks, zero-width) dropped, at most
+    `n` characters. Everything such text hands the model or the screen goes through this."""
+    text = _ANSI_RE.sub("", str(text))
+    text = "".join(" " if ch.isspace() else ch for ch in text if ch.isspace() or ch.isprintable())
+    return " ".join(text.split())[:n]
 
 
 def clip_for_ledger(value, limit: int = LEDGER_CLIP):

@@ -96,6 +96,8 @@ class Today:
 class State:
     def __init__(self, path: Path):
         self.path = Path(path)
+        if str(self.path) != ":memory:":
+            self.path.touch(mode=0o600, exist_ok=True)  # born 0600: SQLite gives -wal and -shm the db's mode
         # isolation_level=None: transactions are explicit (BEGIN IMMEDIATE in apply), so the
         # cursor check and the projection are one atomic step even with a second process.
         self.db = sqlite3.connect(self.path, check_same_thread=False, isolation_level=None)

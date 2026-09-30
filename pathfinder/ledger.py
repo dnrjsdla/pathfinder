@@ -6,6 +6,7 @@ the daemon and any CLI process (e.g. `pathfinder config set`) that append
 while the daemon is running."""
 import fcntl
 import json
+import os
 import threading
 import time
 from datetime import datetime, timezone
@@ -44,10 +45,10 @@ def _clean(value):
 class Ledger:
     def __init__(self, root: Path):
         self.dir = Path(root) / "events"
-        self.dir.mkdir(parents=True, exist_ok=True)
+        self.dir.mkdir(mode=0o700, parents=True, exist_ok=True)
         self._thread_lock = threading.Lock()  # guards this instance's threads
         self._lock_path = self.dir / ".lock"
-        self._lock_path.touch(exist_ok=True)
+        self._lock_path.touch(mode=0o600, exist_ok=True)
         self.last_seq, self._known_tail = self._recover_last_seq()
 
     def _files(self):
@@ -110,7 +111,7 @@ class Ledger:
                         f.seek(-1, 2)
                         if f.read(1) != b"\n":
                             line = "\n" + line
-                with path.open("a") as f:
+                with open(os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600), "a") as f:
                     f.write(line)
                     f.flush()
                     # ponytail: no fsync here - a crash can still lose the last buffered line;

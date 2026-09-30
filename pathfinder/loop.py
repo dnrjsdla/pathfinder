@@ -8,6 +8,9 @@ import threading
 from dataclasses import dataclass
 
 from .broker import Gate
+from .llm import LLMError
+from .signals import AGENDA_HEADER
+from .tools import oneline
 
 
 @dataclass
@@ -16,6 +19,7 @@ class Outcome:
     text: str = ""
     steps: int = 0
     usage: dict | None = None
+    check: str | None = None  # the second look (D51): "passed" | "flagged" | "failed"; None = not checked
 
 
 class TurnControl:
@@ -39,6 +43,30 @@ class TurnControl:
 # whole thing from the start. Copied verbatim from bench/m2_steer.py.
 STEER_ENVELOPE = ("[The user interrupted mid-answer with the instruction below. Apply it and continue "
                   "from exactly where the answer above stopped; do not repeat what was already written.]\n")
+
+# The second look (D51) - measured in m10 (HISTORY.md). Copied verbatim from
+# bench/m10_unsupported.py; U17's test_second_look_matches_the_bench will hold them byte-identical.
+VERIFIER_PROMPT = (
+    "You check an assistant's draft answer before the user sees it. The assistant lives on the "
+    "user's computer and can do exactly what the tools below do; MCP servers installed through "
+    "propose_install become its own tools (mcp__<server>__<tool>). Answer with closed JSON only, "
+    'no other text: {"unsupported_state": true|false, "unsupported_done": true|false, '
+    '"empty_promise": true|false, "false_incapability": true|false, "why": "one short sentence"}\n'
+    "- unsupported_state: the draft says what the calendar, reminders, schedules, mail, files, "
+    "memory or the MCP registry hold (\"nothing\" included) and no tool result in this turn shows "
+    "it. The agenda, when given, shows the next 24 hours only.\n"
+    "- unsupported_done: the draft says it did, changed, added, completed, deleted, installed or "
+    "checked something and no tool result in this turn shows it.\n"
+    "- empty_promise: the draft says it will do something instead of doing it now.\n"
+    "- false_incapability: the draft says it cannot do something, or has no tool for it, while a "
+    "tool below could do it.\n"
+    "A claim a tool result in this turn shows is supported: false. Greeting, explaining, "
+    "recounting what was said earlier in the conversation, and asking the user a question: false.")
+FLAG_WORDS = {"unsupported_state": "says what the calendar, reminders, memory or registry hold",
+              "unsupported_done": "says something was done", "empty_promise": "promises to do something",
+              "false_incapability": "says a tool or capability is missing"}
+RERUN_NOTE = ("[Your draft answer was not shown to the user: it {what}, and no tool result in this "
+              "turn supports it ({why}). Call the tool now, or say plainly that you cannot.]")
 
 
 def _sum_usage(total, delta):
@@ -101,19 +129,61 @@ def settle(messages, call_tool, control=None):
         messages.append({"role": "tool", "tool_call_id": tc_id, "content": json.dumps(result, ensure_ascii=False)})
 
 
-def run(step, messages, *, call_tool, emit, budget=8, control=None, resume=False, final_step=None):
-    usage = None
-    said = []  # everything streamed to the user this turn: what was said must reach history
+def verifier_input(tools, messages):
+    """What the second look sees, as bench m10 built it: the tool names, the agenda, the answer
+    before the turn's user message, that message, and the draft (`messages[-1]`)."""
+    u = max(k for k, m in enumerate(messages) if m["role"] == "user")
+    before = [m for m in messages[:u] if m["role"] == "assistant"]
+    agenda = next((p for p in messages[1]["content"].split("\n\n") if p.startswith(AGENDA_HEADER)), "")
+    lines = [f"Tools: {', '.join(tools)}"]
+    if agenda:
+        lines.append("Agenda the system gave this turn:\n" + agenda)
+    if before:
+        lines.append("The assistant's previous answer: " + before[-1]["content"][:600])
+    lines += ["The user: " + messages[u]["content"][:1000], "No tool was called in this turn.",
+              "Draft: " + messages[-1]["content"]]
+    return "\n\n".join(lines)
 
-    def gated(g):
-        g.said = "".join(said)  # the gate question the user just read must reach the ledger too
-        return g
+
+def _second_look(verify_step, tools, messages):
+    """(flags, why, usage) - flags None when the look failed: an LLMError, bad JSON, a cancel,
+    anything. A failed look lets the draft stand; its usage still counts."""
+    raw, usage = "", None
+    try:
+        ask = [{"role": "system", "content": VERIFIER_PROMPT},
+               {"role": "user", "content": verifier_input(tools, messages)}]
+        for kind, payload in verify_step(ask):
+            if kind == "text":
+                raw += payload
+            elif kind == "usage":
+                usage = _sum_usage(usage, payload)
+            elif kind == "cancelled":
+                return None, "", usage
+        parsed = json.loads(raw[raw.index("{"):raw.rindex("}") + 1])
+        # `why` is the verifier's words about text that may be a third party's (the agenda): one line, cut
+        return [k for k in FLAG_WORDS if parsed.get(k) is True], oneline(parsed.get("why") or "", 200), usage
+    except Exception:  # caught here alone: the look is the harness's own call, never the turn's end
+        return None, "", usage
+
+
+def run(step, messages, *, call_tool, emit, budget=8, control=None, resume=False, final_step=None,
+        second_look=None):
+    """`second_look`: the tool names offered this turn; when given, a final answer that came with
+    no tool result is checked once by `final_step` (D51)."""
+    usage, check = None, None
+    called = resume  # a tool ran in this turn: the second look never reads a tool-backed answer
+    said = []  # everything streamed this turn reaches the ledger; only a withdrawn draft leaves it
+
+    def with_said(e, parts=()):
+        e.said = "".join(said + list(parts))  # a gate question, or text a model error cut, must reach the ledger
+        e.check = check  # a re-run that gates or fails still owes turn_end its check
+        return e
 
     if resume:
         try:
             settle(messages, call_tool, control)  # finish the calls the gate left outstanding first
         except Gate as g:
-            raise gated(g)
+            raise with_said(g)
 
     i = 0
     while i < budget:
@@ -123,31 +193,34 @@ def run(step, messages, *, call_tool, emit, budget=8, control=None, resume=False
             if control.interrupt.is_set():
                 # The real adapter only notices `cancel` between chunks - after the request went
                 # out and the first token came back. Check here so no request is spent.
-                return Outcome("cancelled", text="".join(said), steps=i, usage=usage)
+                return Outcome("cancelled", text="".join(said), steps=i, usage=usage, check=check)
         i += 1
 
         text_parts = []
         tool_calls = None
         cut = None  # None | "interrupt" | "steer"
-        for kind, payload in step(messages):
-            if kind == "text":
-                text_parts.append(payload)
-                emit("delta", payload)
-            elif kind == "tool_calls":
-                tool_calls = payload
-            elif kind == "usage":
-                usage = _sum_usage(usage, payload)
-            elif kind == "cancelled":
-                # No control at all behaves like an interrupt (partition 1's only case):
-                # only a live TurnControl with steer_cut set, not interrupt, is a steer.
-                cut = "steer" if (control is not None and control.steer_cut.is_set()) else "interrupt"
-                break
-            # "reasoning" is deliberately ignored: never echoed into history
+        try:
+            for kind, payload in step(messages):
+                if kind == "text":
+                    text_parts.append(payload)
+                    emit("delta", payload)
+                elif kind == "tool_calls":
+                    tool_calls = payload
+                elif kind == "usage":
+                    usage = _sum_usage(usage, payload)
+                elif kind == "cancelled":
+                    # No control at all behaves like an interrupt (partition 1's only case):
+                    # only a live TurnControl with steer_cut set, not interrupt, is a steer.
+                    cut = "steer" if (control is not None and control.steer_cut.is_set()) else "interrupt"
+                    break
+                # "reasoning" is deliberately ignored: never echoed into history
+        except LLMError as e:
+            raise with_said(e, text_parts)
 
         text = "".join(text_parts)
 
         if cut == "interrupt":
-            return Outcome("cancelled", text="".join(said + [text]), steps=i, usage=usage)
+            return Outcome("cancelled", text="".join(said + [text]), steps=i, usage=usage, check=check)
 
         if cut == "steer":
             if text:
@@ -168,12 +241,31 @@ def run(step, messages, *, call_tool, emit, budget=8, control=None, resume=False
         messages.append(assistant_msg)
 
         if not tool_calls:
-            return Outcome("answer", text="".join(said), steps=i, usage=usage)
+            if second_look is not None and check is None and not called and text.strip() and i < budget:
+                if control is not None:
+                    control.in_tool = True  # a steer typed during the look waits for it; an interrupt still cuts
+                flags, why, used = _second_look(final_step, second_look, messages)
+                if control is not None:
+                    control.in_tool = False
+                usage = _sum_usage(usage, used)  # the harness's own call, like D30's: not a step
+                check = "failed" if flags is None else "flagged" if flags else "passed"
+                if flags:
+                    # Already on the screen, so withdrawn in the open (D35): out of `said` and
+                    # `messages`, a note says why, and the step re-runs once - never re-checked.
+                    what = " and ".join(FLAG_WORDS[f] for f in flags)
+                    messages.pop()
+                    said.pop()
+                    emit("retract", {"draft": text, "flags": flags, "what": what, "why": why})
+                    messages.append({"role": "system",
+                                     "content": RERUN_NOTE.format(what=what, why=why or "no reason given")})
+                    continue
+            return Outcome("answer", text="".join(said), steps=i, usage=usage, check=check)
 
+        called = True
         try:
             settle(messages, call_tool, control)  # a Gate propagates out of here
         except Gate as g:
-            raise gated(g)
+            raise with_said(g)
 
     if final_step is not None:
         # D30: the budget is spent and the last reply was still a tool call. One more request
@@ -181,17 +273,21 @@ def run(step, messages, *, call_tool, emit, budget=8, control=None, resume=False
         # `user` message is left dangling for the next turn to keep answering. Live: three
         # turns in a row exhausted on repeated searches and said nothing.
         if control is not None and control.interrupt.is_set():
-            return Outcome("cancelled", text="".join(said), steps=budget, usage=usage)
+            return Outcome("cancelled", text="".join(said), steps=budget, usage=usage, check=check)
         text_parts = []
-        for kind, payload in final_step(messages):
-            if kind == "text":
-                text_parts.append(payload)
-                emit("delta", payload)
-            elif kind == "usage":
-                usage = _sum_usage(usage, payload)
-            elif kind == "cancelled":
-                return Outcome("cancelled", text="".join(said + text_parts), steps=budget, usage=usage)
+        try:
+            for kind, payload in final_step(messages):
+                if kind == "text":
+                    text_parts.append(payload)
+                    emit("delta", payload)
+                elif kind == "usage":
+                    usage = _sum_usage(usage, payload)
+                elif kind == "cancelled":
+                    return Outcome("cancelled", text="".join(said + text_parts), steps=budget, usage=usage,
+                                   check=check)
+        except LLMError as e:
+            raise with_said(e, text_parts)
         if text_parts:
             said.append("".join(text_parts))
             messages.append({"role": "assistant", "content": "".join(text_parts)})
-    return Outcome("exhausted", text="".join(said), steps=budget, usage=usage)
+    return Outcome("exhausted", text="".join(said), steps=budget, usage=usage, check=check)

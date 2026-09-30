@@ -491,7 +491,8 @@ class Daemon:
     async def turn(self, s, turn, text, trailing=None):
         """`text` is a new user message; `trailing` is steer text already in the ledger that no
         model call has seen yet (it arrived after the last drain of the previous turn)."""
-        reply = text is not None and chat_approval(self.state, s.id, text)  # D52: before this user line is recorded
+        reply = text is not None and chat_approval(  # D52: before this user line is recorded
+            self.state, s.id, text, config.load(self.home)["session_resume_s"])
         if text is not None:
             self.record("user", session=s.id, turn=turn, origin="user", trust="user", text=text)
         self.record("turn_start", session=s.id, turn=turn, origin="user")

@@ -2219,6 +2219,27 @@ class SessionLifetimeTest(DaemonHarness):
         for text in texts:
             self.assertNotRegex(text, "[\x1b\u202e]")
 
+    def test_a_notice_held_by_the_rate_limit_goes_out_later_clean(self):
+        """U32's review: the release of a notice the rate limit held (`signal_ready`) carries the
+        clean summaries recorded with its decision."""
+        async def scenario(daemon):
+            daemon.rules = dataclasses.replace(daemon.rules, quiet_hours="0-0", min_interval_s=1, burst_limit=999)
+            c = await Client.open(self.home)
+            c.send({"type": "attach"})
+            await c.until("attached")
+            for i, summary in enumerate(["Scheduled note: one\n\ttwo", "Scheduled note: \x1b[31mred\u202e"]):
+                daemon.push_signal(Signal(sense="schedule", kind="schedule_due", key=f"held-{i}", fields={"id": str(i)},
+                                          summary=summary, trust="user"))
+                await asyncio.sleep(0.05)
+            texts = [(await c.until("notice"))[-1]["text"] for _ in range(2)]
+            c.close()
+            return texts
+
+        texts = self.run_with(fake_model(""), scenario)
+        self.assertEqual(texts, ["Scheduled note: one\n\ttwo", "Scheduled note: red"])
+        held = [e for e in self.events() if e["type"] == "decision" and e["signal_key"] == "held-1"]
+        self.assertEqual(held[0]["text"], "Scheduled note: red")
+
 
 class AgendaTest(DaemonHarness):
     def test_every_turn_carries_the_agenda(self):

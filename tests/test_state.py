@@ -245,11 +245,11 @@ class StateTest(unittest.TestCase):
                      args={}, messages=[])
         self._record("approval_pending", session="s2", origin="job", id="job", call_id="c3", tool="x", args={},
                      messages=[{"role": "user", "content": "x"}], job="j1")
-        self.assertEqual([p["id"] for p in self.state.open_approvals("s2")], ["gate", "job"])
+        self.assertEqual([p["id"] for p in self.state.open_approvals("s2", 7200)], ["gate", "job"])
         # no user line yet; a job's gate counts from any session (D63)
-        self.assertEqual([p["id"] for p in self.state.open_approvals("s3")], ["other", "job"])
+        self.assertEqual([p["id"] for p in self.state.open_approvals("s3", 7200)], ["other", "job"])
         self._record("user", session="s2", turn="t2", origin="user", trust="user", text="something else")
-        self.assertEqual(self.state.open_approvals("s2"), [])
+        self.assertEqual(self.state.open_approvals("s2", 7200), [])
 
     def test_presence_is_the_newest_row_across_sessions(self):
         """5a: the owner has one pair of hands - a screen moved into a new session typed in the old one."""
@@ -338,9 +338,21 @@ class StateTest(unittest.TestCase):
                      args={}, messages=[{"role": "user", "content": "x"}], job="j1")
         self._record("approval_pending", session="old", origin="user", id="sg", call_id="c2", tool="x",
                      args={}, messages=[])  # not a job's: it stays in its own session
-        self.assertEqual([p["id"] for p in self.state.open_approvals("new")], ["jg"])
+        self.assertEqual([p["id"] for p in self.state.open_approvals("new", 7200)], ["jg"])
         self._record("user", session="new", turn="t2", origin="user", trust="user", text="응")  # got the line
-        self.assertEqual(self.state.open_approvals("new"), [])  # said again: it goes to the model
+        self.assertEqual(self.state.open_approvals("new", 7200), [])  # said again: it goes to the model
+
+    def test_a_stale_job_gate_from_another_session_is_not_open(self):
+        """U32's review: a job gate left open for days would swallow the first reply of every new
+        session; from another session it counts only while it is fresh (`session_resume_s`)."""
+        self._record("session_start", session="A")
+        self._record("session_start", session="C")
+        for id, age in (("stale", 3 * 86400), ("fresh", 600)):
+            self._record("approval_pending", session="A", origin="job", id=id, call_id=id, tool="write_file",
+                         args={}, messages=[{"role": "user", "content": "x"}], job="j-" + id)
+            self.state.db.execute("UPDATE approvals SET ts = ts - ? WHERE id = ?", (age, id))
+        self.assertEqual([p["id"] for p in self.state.open_approvals("C", 7200)], ["fresh"])
+        self.assertEqual([p["id"] for p in self.state.open_approvals("A", 7200)], ["stale", "fresh"])  # its own
 
     def test_apply_is_idempotent_where_it_can_actually_break(self):
         """history() cannot double up (INSERT OR IGNORE); the turn counter can."""

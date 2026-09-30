@@ -254,8 +254,9 @@ words and leaves no dangling `user` message (D30).
   no peek). Lane items: `("say", text)`, `("resume", approval_id)`, `("continue", steer_text)`,
   `("signal", Signal)`. `attach` resumes the latest session younger than `session_resume_s`.
   **D41: a session is its conversation** - `sessions.last_ts` moves on every session event except
-  a screen's `presence` heartbeat, a memory pass's own, and a signal's triage (of a signal turn only
-  the delivered notice, its `assistant` event, counts). A `say` on a session older than that
+  a screen's `presence` heartbeat, a memory pass's own, a signal's triage (of a signal turn only
+  the delivered notice, its `assistant` event, counts), and a job (D63): its own events, a steer to
+  it and the approval of its gate. A `say` on a session older than that
   re-attaches to the current one (new if none); a signal that opens a new session takes every idle
   screen (`control is None`) with it, or its notice would reach nobody; a connection whose writer
   was moved follows it before handling its next line, and a closing connection leaves every

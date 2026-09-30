@@ -411,13 +411,15 @@ class State:
         return [{"id": r[0], "session": r[1], "turn": r[2], "tool": r[3], "args": json.loads(r[4]), "ts": r[5],
                 "job": r[6]} for r in rows]
 
-    def open_approvals(self, session: str) -> list:
+    def open_approvals(self, session: str, max_age_s: float) -> list:
         """D52: `session`'s pending approvals newer than its last user message - a gate the owner
-        has talked past is not open. A job's gate counts from any session (D63)."""
+        has talked past is not open. A job's gate counts from any session (D63) while it is younger
+        than `max_age_s` (`session_resume_s`): a forgotten one must not swallow a new session's reply."""
         last = self.db.execute("SELECT MAX(ts) FROM messages WHERE session = ? AND role = 'user'",
                                (session,)).fetchone()[0]
         return [p for p in self.pending()
-                if (p["session"] == session or p["job"]) and (last is None or p["ts"] > last)]
+                if (p["session"] == session or p["job"] and time.time() - p["ts"] <= max_age_s)
+                and (last is None or p["ts"] > last)]
 
     def pending_memory(self) -> list:
         """The pending approvals whose tool is `edit_memory` - `pathfinder approvals`'s memory view."""

@@ -154,7 +154,7 @@ class ChatApprovalTest(unittest.TestCase):
         def __init__(self, rows):
             self.rows = rows
 
-        def open_approvals(self, session):
+        def open_approvals(self, session, max_age_s):
             return self.rows
 
     def test_chat_approval_phrases(self):
@@ -167,26 +167,26 @@ class ChatApprovalTest(unittest.TestCase):
                        "진행해줘", "네", "예", "응", "ㅇㅇ", "좋아", "그래", "ok", "okay", "yes", "y", "approve",
                        "approved", "i approve", "i'll approve", "go ahead", "do it",
                        "거부", "거절", "취소", "아니", "아니요", "no", "n", "deny", "cancel"):
-            self.assertEqual(chat_approval(open_, "s", phrase).splitlines(),
+            self.assertEqual(chat_approval(open_, "s", phrase, 7200).splitlines(),
                              [line, line.replace("a1", "b2").replace("install_server", "edit_memory") + WAY_OUT],
                              phrase)
         for typed in ("  YES!! ", "Ｙｅｓ", "I'll   approve.", "I’ll approve", "승인~", "OK.", "Go\tAhead!~", "ㅇㅇ!",
                       "Do it . !"):
-            self.assertIsNotNone(chat_approval(open_, "s", typed), typed)
+            self.assertIsNotNone(chat_approval(open_, "s", typed, 7200), typed)
         for near in ("yes, and also add X", "yess", "승인해주세요", "approve it", "no way", "ok ok", "!!!", "?",
                      "yes?", "네 그리고 메일도"):
-            self.assertIsNone(chat_approval(open_, "s", near), near)
-        self.assertIsNone(chat_approval(self.Open([]), "s", "yes"))  # no open gate: the model answers
+            self.assertIsNone(chat_approval(open_, "s", near, 7200), near)
+        self.assertIsNone(chat_approval(self.Open([]), "s", "yes", 7200))  # no open gate: the model answers
 
     def test_chat_approval_line_says_how_to_get_past_it(self):
         """U32: a short reply to the assistant's own question is swallowed once - the line says how
         to get past it, once, at the end of the last gate's line."""
-        one = chat_approval(self.Open([{"id": "a1", "tool": "write_file"}]), "s", "응")
+        one = chat_approval(self.Open([{"id": "a1", "tool": "write_file"}]), "s", "응", 7200)
         self.assertEqual(one, "승인은 채팅으로 받지 않습니다 · approvals are not taken in chat: /approve a1 or /deny a1 "
                               "(write_file; shell: pathfinder approve|deny a1) - if you meant something else, say it "
                               "again · 다른 뜻이었다면 다시 말해 주세요")
         two = chat_approval(self.Open([{"id": "a1", "tool": "write_file"}, {"id": "b2", "tool": "edit_memory"}]),
-                            "s", "no").splitlines()
+                            "s", "no", 7200).splitlines()
         self.assertEqual(two, [one.removesuffix(WAY_OUT), one.replace("a1", "b2").replace("write_file", "edit_memory")])
 
 

@@ -101,12 +101,12 @@ CHAT_APPROVAL = tuple(map(_said, (
     "거부", "거절", "취소", "아니", "아니요", "no", "n", "deny", "cancel")))
 
 
-def chat_approval(state, session, text):
+def chat_approval(state, session, text, max_age_s):
     """D52: an approval phrase typed while a gate is open is answered by the harness, one line per
     open gate, and the gate stays pending. None: the message goes to the model."""
     if _said(text) not in CHAT_APPROVAL:
         return None
     lines = "\n".join(f"승인은 채팅으로 받지 않습니다 · approvals are not taken in chat: /approve {p['id']} or /deny "
                       f"{p['id']} ({p['tool']}; shell: pathfinder approve|deny {p['id']})"
-                      for p in state.open_approvals(session))
+                      for p in state.open_approvals(session, max_age_s))
     return f"{lines} - if you meant something else, say it again · 다른 뜻이었다면 다시 말해 주세요" if lines else None

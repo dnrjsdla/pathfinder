@@ -203,5 +203,59 @@ class CrashRecoveryTest(unittest.TestCase):
         self.assertEqual(read_back[-1]["text"], "must not be glued to the fragment")
 
 
+class SurrogateTest(unittest.TestCase):
+    """A lone surrogate from a JSON client or a model's tool arguments made SQLite refuse the
+    projection, so catch_up at every daemon start and reindex failed on that line forever."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.home = Path(self._tmp.name)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _state(self, name="state.db"):
+        from pathfinder.state import State
+        state = State(self.home / name)
+        self.addCleanup(state.close)
+        return state
+
+    def test_lone_surrogate_replaced_at_append(self):
+        led = Ledger(self.home)
+        led.append("session_start", session="s")
+        event = led.append("user", session="s", origin="user", trust="user", text="hi \ud83d there",
+                           args={"q\udc00": ["a\ude00", ("b\ud800",)]})
+        on_disk = next((self.home / "events").glob("*.jsonl")).read_text()
+        self.assertNotRegex(on_disk, r"\\ud[89a-f]")  # no surrogate escape reaches the file
+        self.assertEqual(event["text"], "hi � there")  # exactly one per lone surrogate
+        self.assertEqual(event["args"], {"q�": ["a�", ["b�"]]})
+        state = self._state()
+        state.catch_up(led)  # raised UnicodeEncodeError: surrogates not allowed
+        self.assertEqual(state.history("s")[0]["content"], "hi � there")
+
+    def test_old_ledger_with_a_lone_surrogate_catches_up_and_reindexes(self):
+        (self.home / "events").mkdir()
+        lines = [{"seq": 1, "ts": 1_700_000_000.0, "type": "session_start", "session": "s",
+                  "turn": "", "origin": "system", "trust": "self"},
+                 {"seq": 2, "ts": 1_700_000_001.0, "type": "user", "session": "s", "turn": "t",
+                  "origin": "user", "trust": "user", "text": "hi \ud83d"}]
+        raw = "".join(json.dumps(e) + "\n" for e in lines)  # written the old way, unclean
+        self.assertIn('"hi \\ud83d"', raw)
+        (self.home / "events" / f"{ledger_mod.partition(1_700_000_000)}.jsonl").write_text(raw)
+        led = Ledger(self.home)
+        state = self._state()
+        self.assertEqual(state.catch_up(led), 2)
+        self.assertRegex(state.history("s")[0]["content"], "^hi �+$")
+        self.assertEqual(self._state("rebuilt.db").rebuild(led), 2)  # reindex
+
+    def test_astral_characters_untouched(self):
+        led = Ledger(self.home)
+        led.append("user", session="s", origin="user", trust="user", text="ok \U0001f600")
+        path = next((self.home / "events").glob("*.jsonl"))
+        with path.open("a") as f:  # a valid pair written as two JSON escapes
+            f.write(json.dumps({"seq": 2, "ts": 0, "type": "user", "text": "😀"}) + "\n")
+        self.assertEqual([e["text"] for e in Ledger(self.home).read()], ["ok \U0001f600", "\U0001f600"])
+
+
 if __name__ == "__main__":
     unittest.main()

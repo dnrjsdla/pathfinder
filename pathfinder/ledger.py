@@ -31,6 +31,16 @@ def partition(ts: float) -> str:
     return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d")
 
 
+def _clean(value):
+    """Every string in an event with a lone surrogate replaced by U+FFFD: SQLite refuses to
+    bind one, so one such line stopped catch_up and reindex forever. A valid pair is untouched."""
+    if isinstance(value, str):
+        return value.encode("utf-16", "surrogatepass").decode("utf-16", "replace")
+    if isinstance(value, dict):
+        return {_clean(k): _clean(v) for k, v in value.items()}
+    return [_clean(v) for v in value] if isinstance(value, (list, tuple)) else value
+
+
 class Ledger:
     def __init__(self, root: Path):
         self.dir = Path(root) / "events"
@@ -87,10 +97,10 @@ class Ledger:
                     self.last_seq, self._known_tail = self._recover_last_seq()
                 ts = time.time()
                 self.last_seq += 1
-                event = {
+                event = _clean({
                     "seq": self.last_seq, "ts": ts, "type": type, "session": session,
                     "turn": turn, "origin": origin, "trust": trust, **data,
-                }
+                })
                 path = self.dir / f"{partition(ts)}.jsonl"
                 line = json.dumps(event) + "\n"
                 # A crash mid-write leaves a fragment without a newline. Appending straight
@@ -119,4 +129,4 @@ class Ledger:
                 except (ValueError, KeyError, TypeError):
                     continue  # truncated line - skipped, not fatal
                 if seq > after:
-                    yield event
+                    yield _clean(event)

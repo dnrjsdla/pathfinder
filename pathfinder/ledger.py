@@ -12,6 +12,8 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+from . import keychain
+
 TYPES = frozenset({
     "session_start", "user", "assistant", "tool_call", "tool_result",
     "turn_start", "turn_end", "error", "config_set",
@@ -50,6 +52,10 @@ class Ledger:
         self._lock_path = self.dir / ".lock"
         self._lock_path.touch(mode=0o600, exist_ok=True)
         self.last_seq, self._known_tail = self._recover_last_seq()
+        self._index = Path(root) / "pasted.json"  # D53: pasted tokens' handles and times
+        with self._lock_path.open("r+") as lockf:  # every daemon start sweeps expired pastes
+            fcntl.flock(lockf, fcntl.LOCK_EX)
+            keychain.sweep(self._index, time.time())
 
     def _files(self):
         return sorted(self.dir.glob("*.jsonl"))  # YYYY-MM-DD names sort chronologically
@@ -102,6 +108,9 @@ class Ledger:
                     "seq": self.last_seq, "ts": ts, "type": type, "session": session,
                     "turn": turn, "origin": origin, "trust": trust, **data,
                 })
+                # D53: a token-shaped string enters the Keychain here and the event, written and
+                # returned, carries only its handle - so state, history and the record do too
+                event = keychain.vault(event, self._index)
                 path = self.dir / f"{partition(ts)}.jsonl"
                 line = json.dumps(event) + "\n"
                 # A crash mid-write leaves a fragment without a newline. Appending straight

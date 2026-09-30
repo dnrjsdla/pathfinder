@@ -8,11 +8,14 @@ Run `python3 scripts/scan_personal.py --selfcheck` to test the patterns.
 import re
 import subprocess
 import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from pathfinder.keychain import TOKEN_RE  # noqa: E402 - one pattern with the ledger door (D53)
 
 ALLOWED_EMAIL_DOMAINS = {"example.com", "example.org", "example.net", "users.noreply.github.com", "anthropic.com"}
 PATTERNS = [
-    ("api-key", re.compile(r"sk-[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AIza[0-9A-Za-z_-]{30,}|xox[abprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}")),
-    ("private-key", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")),
+    ("token", TOKEN_RE),
     ("home-path", re.compile(r"/(?:Users|home)/(?!\.\.\.|<|\$|USER\b|user\b|you\b|name\b)[A-Za-z0-9._-]+/")),
     ("phone-kr", re.compile(r"\b01[016789][- .]?\d{3,4}[- .]?\d{4}\b")),
 ]

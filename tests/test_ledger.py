@@ -2,12 +2,14 @@ import json
 import os
 import tempfile
 import threading
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
 
 from pathfinder import ledger as ledger_mod
 from pathfinder.ledger import Ledger
+from pathfinder.state import State
 
 
 class LedgerClosedVocabTest(unittest.TestCase):
@@ -276,3 +278,101 @@ class FileModeTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PastedTokenTest(unittest.TestCase):
+    """D53's backstop. The Keychain is a dict here: no test touches the real one."""
+    TOKEN = "ntn_" + "x" * 40  # built by concatenation, so the scanner never flags this file
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.home = Path(self._tmp.name)
+        self.items = {}
+        self.deletable = True
+        for name, fake in (("store", self._store), ("delete", self._delete), ("secret", None)):
+            patch = mock.patch(f"pathfinder.keychain.{name}", side_effect=fake)
+            patch.start()
+            self.addCleanup(patch.stop)
+        self.ledger = Ledger(self.home)
+        self.state = State(self.home / "state.db")
+        self.addCleanup(self.state.close)
+
+    def _store(self, service, account, value):
+        self.items[(service, account)] = value
+
+    def _delete(self, service, account):
+        if self.deletable:
+            self.items.pop((service, account), None)
+        return self.deletable
+
+    def _record(self, type, **kw):
+        event = self.ledger.append(type, **kw)
+        self.state.apply(event)
+        return event
+
+    def _on_disk(self):
+        return "".join(p.read_text() for p in (self.home / "events").glob("*.jsonl"))
+
+    def _index(self):
+        return json.loads((self.home / "pasted.json").read_text())
+
+    def test_paste_vaulted_and_handle_returned(self):
+        other = "sk-" + "y" * 30
+        self._record("session_start", session="s")
+        event = self._record("user", session="s", origin="user", trust="user",
+                             text=f"use {self.TOKEN} then {self.TOKEN}", extra={"k": [other]})
+        self.assertEqual(event["text"], "use [secret:pasted-1] then [secret:pasted-1]")  # one handle
+        self.assertEqual(event["extra"], {"k": ["[secret:pasted-2]"]})
+        self.assertEqual(self.items, {("pathfinder-pasted", "pasted-1"): self.TOKEN,
+                                      ("pathfinder-pasted", "pasted-2"): other})
+        disk = self._on_disk()
+        self.assertNotIn(self.TOKEN, disk)
+        self.assertNotIn(other, disk)
+        self.assertIn("[secret:pasted-1]", disk)
+        self.assertEqual(self.state.history("s"), [{"role": "user", "content": event["text"]}])
+        self.assertEqual(sorted(self._index()), ["pasted-1", "pasted-2"])  # handles and times only
+        self.assertNotIn(self.TOKEN, (self.home / "pasted.json").read_text())
+        self.assertEqual((self.home / "pasted.json").stat().st_mode & 0o777, 0o600)
+        plain = self._record("user", session="s", origin="user", trust="user", text="no token here")
+        self.assertEqual(plain["text"], "no token here")
+        self.assertEqual(len(self.items), 2)
+
+    def test_unbound_paste_expires_after_24h(self):
+        now = time.time()
+        (self.home / "pasted.json").write_text(json.dumps({"pasted-1": now - 25 * 3600, "pasted-2": now - 3600}))
+        self.items = {("pathfinder-pasted", "pasted-1"): "a", ("pathfinder-pasted", "pasted-2"): "b"}
+        Ledger(self.home)  # a daemon start sweeps
+        self.assertEqual(list(self.items), [("pathfinder-pasted", "pasted-2")])
+        self.assertEqual(list(self._index()), ["pasted-2"])
+
+        (self.home / "pasted.json").write_text(json.dumps({"pasted-2": now - 25 * 3600}))
+        self.deletable = False  # a locked keychain: the entry stays for the next sweep
+        Ledger(self.home)
+        self.assertEqual(list(self._index()), ["pasted-2"])
+        self.deletable = True
+        self._record("user", text=self.TOKEN)  # a new paste sweeps too
+        self.assertNotIn(("pathfinder-pasted", "pasted-2"), self.items)
+        self.assertEqual(len(self._index()), 1)
+        self.assertEqual(list(self.items.values()), [self.TOKEN])
+
+    def test_keychain_failure_falls_back_to_redaction(self):
+        mock.patch.stopall()  # the real store(), over a `security` that is missing or refuses
+        for failure in (FileNotFoundError(), mock.Mock(returncode=51, stdout="", stderr="")):
+            with mock.patch("pathfinder.keychain.subprocess.run",
+                            **({"side_effect": failure} if isinstance(failure, BaseException)
+                               else {"return_value": failure})):
+                event = self._record("user", text=f"key {self.TOKEN}")
+            self.assertEqual(event["text"], "key [redacted]")
+        self.assertNotIn(self.TOKEN, self._on_disk())
+        self.assertEqual(self._on_disk().count("key [redacted]"), 2)  # the appends landed
+        self.assertFalse((self.home / "pasted.json").exists())
+
+    def test_pasted_token_reaches_the_record_as_a_handle(self):
+        self._record("session_start", session="s")
+        self._record("user", session="s", turn="t1", origin="user", trust="user", text="save it")
+        for type_, extra in (("tool_call", {"args": {"token": self.TOKEN}}), ("tool_result", {"ok": True, "result": "done"})):
+            self._record(type_, session="s", turn="t1", origin="user", id="c1", name="remember", **extra)
+        (record,) = [m["content"] for m in self.state.history("s") if m["role"] == "system"]
+        self.assertIn('remember {"token":"[secret:pasted-1]"} ok', record)
+        self.assertNotIn(self.TOKEN, record)

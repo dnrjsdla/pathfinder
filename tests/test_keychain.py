@@ -1,7 +1,9 @@
 import contextlib
+import importlib.util
 import io
 import tempfile
 import unittest
+from pathlib import Path
 from unittest import mock
 
 from pathfinder import keychain
@@ -132,6 +134,19 @@ class SecretCliTest(unittest.TestCase):
                 self.assertEqual(self._main("easy-notion", "NOTION_TOKEN", answer=answer), 1)
                 self.assertNotIn("Traceback", self.err.getvalue())
             run.assert_not_called()
+
+
+class TokenPatternTest(unittest.TestCase):
+    def test_scanner_uses_the_package_pattern(self):
+        path = Path(__file__).resolve().parents[1] / "scripts" / "scan_personal.py"
+        spec = importlib.util.spec_from_file_location("scan_personal", path)
+        scan = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(scan)
+        self.assertIn(("token", keychain.TOKEN_RE), scan.PATTERNS)
+        for token in ("ntn_" + "a1" * 12, "secret_" + "B2" * 12, "sk-" + "c" * 24):
+            self.assertEqual(scan.hits_in(f"x {token} y", set()), ["token"])
+            self.assertEqual(keychain.TOKEN_RE.search(f"x {token} y")[0], token)
+
 
 if __name__ == "__main__":
     unittest.main()

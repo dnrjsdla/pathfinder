@@ -1195,6 +1195,20 @@ class PushDoorValidationTest(DaemonHarness):
         self.assertEqual(reply["type"], "error")
         self.assertEqual(seen[-1]["kind"], "answer")
 
+    def test_close_does_not_wait_for_a_client_that_only_pushed(self):
+        """F5: a push sense's connection (a hook's `signal`, never `attach`) is in no session - close()
+        closes it too, or wait_closed() hangs a `service stop`."""
+        config.set(self.home, "senses", {"shell": {}})
+
+        async def main():
+            daemon = Daemon(self.home, step_factory=fake_model("ok"))
+            await daemon.start()
+            c = await Client.open(self.home)
+            c.send({"type": "signal", "sense": "shell", "fields": {"cmd": "ls", "exit": 0, "seconds": 1, "cwd": "/x"}})
+            await asyncio.sleep(0.2)  # the daemon has read it; the client stays connected
+            await asyncio.wait_for(daemon.close(), 10)
+        asyncio.run(main())
+
     def test_signal_fields_over_4kb_refused(self):
         config.set(self.home, "senses", {"shell": {}})
 

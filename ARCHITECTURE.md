@@ -792,7 +792,10 @@ python3 -m pathfinder memory undo                  # replay the last memory_appl
   silence - the deliver state machine's typing and away branches (§8) had no live source from
   partition 3 to 6. `tui.render(msg)` is the one renderer; `listen` prints through it too. Fixed
   strings are bilingual side by side in one table (D6, no setting); notice text and job goals pass
-  `mcp.protocol.sanitize`. The terminal is restored in a `finally` on every path.
+  `mcp.protocol.sanitize` (`tools.clean`). An approval line - the `gate` and `job.gate` lines, `say`'s
+  gate line, `pathfinder approvals` and the names `pathfinder tools` prints - passes `tools.visible`
+  instead: what is shown is what runs, so a hidden character is escaped (`\u200b`), never dropped.
+  The terminal is restored in a `finally` on every path.
 - **`llm/anthropic.py`** (§4; D2, D37): experimental, recorded tests only, never run live (D7).
   `providers.<name>.api = "anthropic"` selects it; every existing config resolves to `openai`.
 - **README.md / README.ko.md** carry the ten-minute path (Homebrew prerequisites, the Ollama

@@ -17,7 +17,7 @@ import logging
 import re
 from typing import Any
 
-from ..tools import ToolSpec, clean, map_strings, oneline
+from ..tools import ToolSpec, clean, map_strings
 from . import protocol
 
 _log = logging.getLogger("pathfinder.mcp")
@@ -39,22 +39,32 @@ def specs(entries, servers, pins_report) -> dict[str, ToolSpec]:
     for entry in entries:
         if entry.qualified_name not in pins_report.passed:
             continue
-        if not _NAME_OK.match(entry.qualified_name):
-            _log.warning("%s: qualified name %r does not fit the provider naming rule - skipped",
-                        entry.server_id, entry.qualified_name)
-            continue
-        schema = entry.definition.get("inputSchema")
-        if isinstance(schema, dict) and "control" in (schema.get("properties") or {}):
-            _log.warning("%s: tool %r has an argument named 'control' (the broker's own keyword) - skipped",
-                        entry.server_id, entry.tool_name)
-            continue
-        # the model sends back the name it was shown, and the server expects its own: never renamed
-        if isinstance(schema, dict) and any(name != oneline(name) for name in (schema.get("properties") or {})):
-            _log.warning("%s: tool %r has an argument name the character filter would change - skipped",
-                        entry.server_id, entry.tool_name)
+        why = refused(entry)
+        if why:
+            _log.warning("%s: tool %r %s - skipped", entry.server_id, entry.qualified_name, why)
             continue
         out[entry.qualified_name] = _to_spec(servers, entry)
     return out
+
+
+def refused(entry) -> str:
+    """Why this tool will never be registered ("" if it will) - `installer._trial` asks the same, so a
+    trial never counts, grants or pins a tool the loader then drops."""
+    if not _NAME_OK.match(entry.qualified_name):
+        return "does not fit the provider naming rule"
+    schema = entry.definition.get("inputSchema")
+    names = (schema.get("properties") or {}) if isinstance(schema, dict) else {}
+    if "control" in names:
+        return "has an argument named 'control' (the broker's own keyword)"
+    # the model sends back the name it was shown, and the server expects its own: never renamed
+    if any(name != _schema_text(name) for name in names):
+        return "has an argument name the character filter or the length cap would change"
+    return ""
+
+
+def _schema_text(text: str) -> str:
+    """A string of a server's parameter schema as the model sees it: the one rule, then the cap."""
+    return clean(text)[:MAX_DESCRIPTION]
 
 
 def _to_spec(servers, entry) -> ToolSpec:
@@ -72,8 +82,8 @@ def _to_spec(servers, entry) -> ToolSpec:
     return ToolSpec(
         name=qualified,
         description=_describe(entry.server_id, entry.tool_name, entry.definition.get("description")),
-        params=map_strings(params, clean),  # descriptions and enum values are the server's words
-        required=map_strings(required, clean),
+        params=map_strings(params, _schema_text),  # descriptions and enum values are the server's words
+        required=map_strings(required, _schema_text),
         handler=handler,
         write=True, network=True,
     )
@@ -124,4 +134,4 @@ def read_only(entry) -> bool:
     return isinstance(annotations, dict) and annotations.get("readOnlyHint") is True
 
 
-__all__ = ["specs", "flatten", "read_only", "McpToolError", "MAX_DESCRIPTION"]
+__all__ = ["specs", "refused", "flatten", "read_only", "McpToolError", "MAX_DESCRIPTION"]

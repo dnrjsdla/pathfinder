@@ -318,6 +318,12 @@ class AgendaContextTest(unittest.TestCase):
             lines = calendar_sense.context(now) + reminders_sense.context(now)
         title = ("회의 " + "x" * 100)[:80]
         self.assertEqual(lines, [f"- event 2026-09-29 09:00: {title}", f"- reminder 2026-09-29 09:00: {title}"])
+        events[0]["title"] = "\u200b\u202e"  # nothing left after the filter: said so, not an empty line
+        with mock.patch.object(calendar_sense.ek, "list_events", return_value=events), \
+                mock.patch.object(reminders_sense.ek, "list_reminders", return_value=[{"id": "r", "title": "", "due": start}]), \
+                mock.patch.object(calendar_sense.ek, "authorized", return_value=True):
+            lines = calendar_sense.context(now) + reminders_sense.context(now)
+        self.assertEqual(lines, ["- event 2026-09-29 09:00: (untitled)", "- reminder 2026-09-29 09:00: (untitled)"])
 
     def test_agenda_never_prompts_for_access(self):
         """Review: an undetermined permission would make every turn wait for the prompt (2 x 60 s)."""

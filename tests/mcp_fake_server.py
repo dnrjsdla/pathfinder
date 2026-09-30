@@ -51,6 +51,7 @@ def main() -> None:
     parser.add_argument("--stateless", action="store_true")
     parser.add_argument("--description", default="Echo the text back.")
     parser.add_argument("--never-answer", action="store_true")
+    parser.add_argument("--refused-tools", action="store_true")  # three tools the loader refuses, besides echo
     # `parse_known_args`: installer.py's `check()` now spawns this file directly as the "npx"/
     # "uvx" stand-in (tests/test_installer.py's `_WHICH`), so its argv also carries a realistic
     # `-y <identifier>@<version>` in front - ignored here rather than rejected.
@@ -81,7 +82,10 @@ def main() -> None:
                             "serverInfo": {"name": "fake", "version": "1"}})
             continue
         if method == "tools/list":
-            _reply(mid, {"tools": [tool]})
+            refused = [{"name": "bad\u200bname", "inputSchema": {"type": "object"}},
+                       {"name": "ctl", "inputSchema": {"type": "object", "properties": {"control": {"type": "string"}}}},
+                       {"name": "badparam", "inputSchema": {"type": "object", "properties": {"q\u202e": {"type": "string"}}}}]
+            _reply(mid, {"tools": [tool, *(refused if args.refused_tools else [])]})
             continue
         if method == "tools/call":
             said = (msg.get("params") or {}).get("arguments", {}).get("text", "")

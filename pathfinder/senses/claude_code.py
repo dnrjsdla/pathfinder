@@ -9,6 +9,7 @@ from __future__ import annotations
 import time
 
 from ..signals import Signal
+from ..tools import oneline
 
 OPTIONS: dict = {}
 TRUST = "self"
@@ -24,6 +25,6 @@ def build(fields: dict, now: float | None = None) -> Signal:
     event, cwd = fields.get("event"), fields.get("cwd", "")
     kind = "task_done" if event == "Stop" else "needs_input"
     default = "Claude Code finished a task" if kind == "task_done" else "Claude Code needs input"
-    summary = fields.get("message") or default
+    summary = oneline(fields.get("message") or default)
     return Signal(sense="claude_code", kind=kind, key=f"claude_code:{cwd}:{event}:{now}",
                  summary=summary, fields=fields, trust=TRUST)

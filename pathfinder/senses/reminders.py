@@ -52,7 +52,7 @@ def context(now):
         return ["- reminders: not readable (access not granted yet)"]
     rems = sorted(ek.list_reminders(due_before_ts=now + _AGENDA_S), key=lambda r: r["due"])
     lines = [f"- reminder {clock.format_local(r['due'])}{' (overdue)' if r['due'] < now else ''}: "
-             f"{oneline(r['title'], 80)}" for r in rems[:_AGENDA_MAX]]
+             f"{oneline(r['title'], 80) or '(untitled)'}" for r in rems[:_AGENDA_MAX]]
     if len(rems) > _AGENDA_MAX:
         lines.append(f"- {len(rems) - _AGENDA_MAX} more reminders (list_reminders)")
     return lines or ["- reminders due within 24 h or overdue: none"]

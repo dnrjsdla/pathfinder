@@ -761,8 +761,10 @@ python3 -m pathfinder memory undo                  # 최근 memory_apply 를 그
   유일한 실제 생산자다**: 타이핑 중 `{idle_s: 0}` 을 1초에 최대 한 번, 침묵 30초마다 `{idle_s: n}` —
   전달 상태기계의 타이핑 · 자리비움 분기(§8)는 구획 3부터 6까지 라이브 출처가 없었다. `tui.render(msg)`
   가 렌더러 하나; `listen` 도 그것으로 찍는다. 고정 문구는 표 하나에 한국어 · 영어 나란히(D6, 설정
-  없음); 알림 글과 작업 목표는 `mcp.protocol.sanitize` 를 거친다. 터미널은 모든 경로에서 `finally` 로
-  복원된다.
+  없음); 알림 글과 작업 목표는 `mcp.protocol.sanitize`(`tools.clean`)를 거친다. 승인 줄 — `gate` · `job.gate`
+  줄, `say` 의 게이트 줄, `pathfinder approvals`, `pathfinder tools` 가 찍는 이름 — 은 대신 `tools.visible`
+  을 거친다: 보이는 것이 실행되는 것이므로 숨은 문자는 버리지 않고 이스케이프(`\u200b`)로 보인다.
+  터미널은 모든 경로에서 `finally` 로 복원된다.
 - **`llm/anthropic.py`**(§4; D2, D37): 실험적, 녹화 테스트만, 라이브로 돌리지 않음(D7).
   `providers.<name>.api = "anthropic"` 이 고른다; 기존 설정은 전부 `openai` 로 풀린다.
 - **README.md / README.ko.md** 는 10분 경로(Homebrew 준비물, Ollama 계정, `git clone` + `pipx install .` —

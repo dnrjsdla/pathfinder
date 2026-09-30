@@ -58,7 +58,7 @@ def context(now):
         return ["- calendar: not readable (access not granted yet)"]
     events = [ev for ev in ek.list_events(now, now + _AGENDA_S) if ev["start"] is not None]
     lines = [f"- event {clock.format_local(ev['start'])}{' (all day)' if ev['all_day'] else ''}: "
-             f"{oneline(ev['title'], 80)}" for ev in events[:_AGENDA_MAX]]
+             f"{oneline(ev['title'], 80) or '(untitled)'}" for ev in events[:_AGENDA_MAX]]
     if len(events) > _AGENDA_MAX:
         lines.append(f"- {len(events) - _AGENDA_MAX} more events (list_events)")
     return lines or ["- calendar, next 24 h: nothing"]

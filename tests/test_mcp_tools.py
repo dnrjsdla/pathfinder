@@ -194,6 +194,17 @@ class SchemaFilterTest(unittest.TestCase):
         with self.assertLogs("pathfinder.mcp", level="WARNING"):
             self.assertEqual(mcp_tools.specs([bad], FakeServers([bad]), report), {})
 
+    def test_every_schema_string_is_capped(self):
+        """F4/F10: a 100 kB parameter description would ride every turn - every schema string is cut at
+        MAX_DESCRIPTION after the filter, and a name the cut would change refuses the tool."""
+        big = "D" * 100_000
+        spec = _spec_for(_entry(schema={"type": "object", "properties": {"x": {"type": "string", "description": big}}}))
+        self.assertEqual(spec.params["x"]["description"], "D" * mcp_tools.MAX_DESCRIPTION)
+        long = _entry(tool="long", schema={"type": "object", "properties": {"n" * 5000: {"type": "string"}}})
+        self.assertIn("length cap", mcp_tools.refused(long))
+        with self.assertLogs("pathfinder.mcp", level="WARNING"):
+            self.assertEqual(mcp_tools.specs([long], FakeServers([long]), mcp_pins.PinReport(passed={long.qualified_name})), {})
+
     def test_sanitize_is_the_one_rule(self):
         """U33: `sanitize` was a second rule (it dropped tabs and left ANSI remnants) - now `clean`."""
         from pathfinder.mcp.protocol import sanitize

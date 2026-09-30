@@ -22,6 +22,7 @@ from pathlib import Path
 
 from .daemon import SOCKET
 from .mcp.protocol import sanitize
+from .tools import visible
 
 PROMPT = "> "
 SELECT_TIMEOUT = 0.05           # how often the main loop wakes up to check the timers below
@@ -63,9 +64,9 @@ def render(msg: dict) -> str | None:
     if kind == "tool":
         key = "tool_ok" if msg.get("ok") else "tool_fail"
         return STRINGS[key].format(name=msg.get("name"))
-    if kind == "gate":  # json.dumps escapes C0 only: a bidi override or a C1 control would reach the screen
-        return sanitize(STRINGS["gate"].format(id=msg.get("id"), tool=msg.get("tool"),
-                                                args=json.dumps(msg.get("args"), ensure_ascii=False)))
+    if kind == "gate":  # what is shown is what runs: a hidden character is escaped, never dropped
+        return visible(STRINGS["gate"].format(id=msg.get("id"), tool=msg.get("tool"),
+                                               args=json.dumps(msg.get("args"), ensure_ascii=False)))
     if kind == "retract":  # D51: harness words only - the verifier's `why` never reaches the screen
         return NOTICE_DIM + STRINGS["retract"].format(what=msg.get("what")) + RESET
     if kind == "notice":
@@ -74,9 +75,9 @@ def render(msg: dict) -> str | None:
     if kind == "job.start":
         return STRINGS["job_start"].format(id=msg.get("id"), goal=sanitize(msg.get("goal") or ""))
     if kind == "job.gate":
-        return sanitize(STRINGS["job_gate"].format(id=msg.get("id"), approval=msg.get("approval"),
-                                                    tool=msg.get("tool"),
-                                                    args=json.dumps(msg.get("args"), ensure_ascii=False)))
+        return visible(STRINGS["job_gate"].format(id=msg.get("id"), approval=msg.get("approval"),
+                                                   tool=msg.get("tool"),
+                                                   args=json.dumps(msg.get("args"), ensure_ascii=False)))
     if kind == "job.end":
         return STRINGS["job_end"].format(id=msg.get("id"), state=msg.get("state"))
     if kind == "error":

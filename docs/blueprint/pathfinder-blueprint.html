@@ -83,13 +83,13 @@ footer p{max-width:50em}
     <h3>v3 에서 바뀐 것 — "한 단계 멀리"로 v2 의 축소를 다시 걸렀다</h3>
     <p>대표의 원칙(D8): PATHFINDER 는 문제 해결 도구가 아니라 실질적인 AI 비서다. "아직 쓰임이 없다"만으로 비서다움에 직결되는 능력을 자르지 않는다. v2 가 걷어낸 스물을 이 눈으로 다시 봤다.</p>
     <p><b>되살린 것</b> — 임베딩과 벡터 색인(D10) · 턴 도중 사용자의 말을 반영하는 steer(D12) · 예약 신호(아침 브리핑 · "내일 9시에 알려줘" — 비서의 기본기) · 새 검증 도구를 하루 한 번 확인하는 catalog 감각(능동 제안의 계기가 없으면 제품의 핵심 문장 "지금 하시는 작업에 이런 도구가 나왔습니다"가 성립하지 않는다).</p>
-    <p><b>그대로 걷어낸 것</b> — 역할 다섯(D9) · 코드 모드 우선(D11) · 말 걸기 분류 · <code>meter</code> 모듈 · 낮/밤 두 통과 · <code>SCHEMA.md</code> · <code>notes/</code> · <code>skills/</code> · 설정 파일 둘 · 참조 서버 · 공유 렌더 층 · 에이전트 여섯. 이것들은 없어도 비서 경험이 줄지 않는다.</p>
+    <p><b>그대로 걷어낸 것</b> — 역할 다섯(D9) · 코드 모드 우선(D11) · 말 걸기 분류 · <code>meter</code> 모듈 · 낮/밤 두 통과 · <code>SCHEMA.md</code> · <code>notes/</code> · <s><code>skills/</code></s>(D58 · D61 로 되살림 — 대표가 승인한 절차를 모은 폴더 하나) · 설정 파일 둘 · 참조 서버 · 공유 렌더 층 · 에이전트 여섯. 이것들은 없어도 비서 경험이 줄지 않는다.</p>
     <p><b>실측으로 확인한 것</b> — 이 계정의 Ollama 무료 플랜에서 네이티브 tool calling 이 실제로 성공한 cloud 모델은 세 계열: <code>gpt-oss</code>(20b · 120b) · <code>gemma4</code>(31b) · <code>nemotron-3</code>(nano 30b · super). <code>glm</code> · <code>deepseek</code> · <code>kimi</code> · <code>qwen3.5</code> · <code>minimax</code> 는 HTTP 402(무료 사용량 미포함). <b>새 위험</b>: 무료 플랜은 스타터 모델 + 월 단위 소량 크레딧(액수 비공개) + 동시 요청 1 이다 — 상주 비서가 크레딧을 태울 수 있어, m6 은 하루 소모량을 재고 구조는 "모델이 막혀도 산다"를 불변조건으로 갖는다.</p>
   </div>
   <div class="chg">
     <h3>v2 에서 바뀐 것 (기록) — 같은 근본원인을 이 문서에 다시 들이댔다</h3>
     <p>대표의 지적("역할 다섯이 꼭 필요한가, Mark.5 레거시를 너무 많이 받는 것 아닌가")으로 v1 을 다시 봤다. lead 의 자체 검토와 독립 검토(opus)가 구조 요소 37개를 출처로 갈랐다 — 요구 9 · 실측 8 · <b>레거시 8 · 추측 12</b>. 뒤의 스물은 쓰임이 생기기 전에 판 자리였고, 절반 이상은 Mark.5 가 아니라 조사를 읽고 얹은 것이었다.</p>
-    <p><b>걷어낸 것</b> — 모델 역할 다섯 → <code>model</code> 하나(+선택 <code>worker_model</code>) · 임베딩과 벡터 색인 · 코드 모드 우선 → 네이티브 tool calling 우선 · 큐 모드 셋 → 하나 · 판정 3단 → 규칙 하나 · Notify/Question/Review 분류 · <code>meter</code> 모듈 → 조회 하나와 규칙 한 줄 · 낮 통과 · 밤의 절차 · 코드 단계 · 위키 lint · <code>SCHEMA.md</code> · <code>notes/</code> · <code>cron/</code> · <code>skills/</code> · <code>pins.json</code> 과 <code>capabilities.json</code> 파일 → 설정 파일 하나 · 서버가 미는 catalog 감각 · 참조 서버 프로세스 · 결과 전송 · 공유 렌더 층 · 에이전트 여섯 → 셋.</p>
+    <p><b>걷어낸 것</b> — 모델 역할 다섯 → <code>model</code> 하나(+선택 <code>worker_model</code>) · 임베딩과 벡터 색인 · 코드 모드 우선 → 네이티브 tool calling 우선 · 큐 모드 셋 → 하나 · 판정 3단 → 규칙 하나 · Notify/Question/Review 분류 · <code>meter</code> 모듈 → 조회 하나와 규칙 한 줄 · 낮 통과 · 밤의 절차 · 코드 단계 · 위키 lint · <code>SCHEMA.md</code> · <code>notes/</code> · <code>cron/</code> · <s><code>skills/</code></s>(D58 · D61 로 되살림 — 대표가 승인한 절차를 모은 폴더 하나) · <code>pins.json</code> 과 <code>capabilities.json</code> 파일 → 설정 파일 하나 · 서버가 미는 catalog 감각 · 참조 서버 프로세스 · 결과 전송 · 공유 렌더 층 · 에이전트 여섯 → 셋.</p>
     <p><b>고친 모순</b> — 구획 0 에서 잴 수 없는 실측을 제 구획의 입구로 옮김 · "하루 8회" 발화 하한 삭제(침묵 우선과 충돌) · 코어 상한에 모듈별 배분 · 새 신호에 라벨이 없는 옛 벤치로 통과선을 재던 것 · 쓰는 이가 둘이던 설정 파일 · 존재를 확인 못 한 "더 작은 cloud 모델" 탈출구.</p>
     <p class="note">이 중 임베딩 · 벡터 색인, steer, 예약, catalog 감각은 v3 에서 되살렸다(위). 나머지는 §17 에 되살리는 조건과 함께 있다.</p>
   </div>
@@ -335,7 +335,7 @@ footer p{max-width:50em}
     <tr><th>살린다 — 실측이나 요구가 가리키는 것</th><th>버린다</th></tr>
     <tr><td><code>brain/mcp/</code> 1,858줄과 해시 고정 · <code>policy.py</code> · <code>broker.py</code> · 루프 · 셸 샌드박스 · gate 패턴</td><td>스크립트 실행기(코드 모드) · 역할 표 · <code>gateway/store</code> 의 bind 경로 · 접두사 없는 모델명을 Ollama 로 읽는 규칙</td></tr>
     <tr><td><code>rules.py</code>(precision 1.00) · <code>index.py</code> 의 FTS + 벡터 하이브리드 · calendar 다리(발화 50건 중 23건)</td><td>2단 모델 판정(실패 29.6%) · 앱 집중 감각(발화 0) · telegram 표면</td></tr>
-    <tr><td>신호 봉투와 검색 블록 위치 실측 · <code>bench/injection</code></td><td>낮/밤 두 통과와 밤 5단계 · <code>SCHEMA.md</code> · <code>cron/</code> 폴더(예약은 감각 하나로) · <code>notes/</code> · <code>skills/</code></td></tr>
+    <tr><td>신호 봉투와 검색 블록 위치 실측 · <code>bench/injection</code></td><td>낮/밤 두 통과와 밤 5단계 · <code>SCHEMA.md</code> · <code>cron/</code> 폴더(예약은 감각 하나로) · <code>notes/</code> · <s><code>skills/</code></s>(D58 · D61 로 되살림 — 대표가 승인한 절차를 모은 폴더 하나)</td></tr>
     <tr><td>파일이 진실 · 생성/평가 분리 · 전달 상태기계 · "세는 법" 문서 규율</td><td>죽은 표 13개 · 장부 넷이 같은 사실을 적는 구조 · 시계 넷 · 설정 자리 열한 곳 · <code>.env</code> 의 평문 비밀값</td></tr>
   </table></div>
   <p class="note"><code>bench/proactive</code> 의 말뭉치는 Mark.5 의 감각 넷으로 만든 것이라 새 신호에는 라벨이 없다. 틀만 가져오고 말뭉치는 구획 3 에서 새로 만든다.</p>

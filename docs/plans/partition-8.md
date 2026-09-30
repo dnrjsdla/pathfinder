@@ -150,8 +150,10 @@ the token only produces a handle with a key to guard.
     returns headers only.
   - Gmail's web page still shows those messages unread.
   - A second restart announces no old unread mail.
-- (16) **Skills (D58),** if the owner confirms the proposal.
-  - On a fresh home, `read_skill`'s description lists `connect-gmail` from the first run.
+- (16) **Skills (D58, D61).**
+  - On a fresh home, the seed is copied: `<home>/skills/connect-gmail.md` exists after the first
+    start, and `read_skill`'s description lists it.
+  - A skill the owner has edited survives a restart and an upgrade unchanged.
   - "Connect my Gmail" makes the model call `read_skill` and walk the steps.
   - An `edit_memory` aimed at `skills/` from a signal, job or memory origin is refused.
   - From a user turn the same edit goes to the approval box, even with `grants` allowing
@@ -184,9 +186,13 @@ Decisions this partition rests on:
 - D56: `mirror.py`'s ceiling is 200, and a file past it is cut, not raised.
 - D57: Gmail comes through the mail sense over IMAP with an app password, reading and searching.
   A local Google server is the fallback. Google Calendar and a generic MCP OAuth client are out.
-- D58: skills are a wiki of their own, shipped with a default set (a proposal below; it amends
-  the blueprint).
+- D58: skills are a wiki of their own, shipped with a default set; it amends the blueprint.
 - D59: mail is read and searched, not sent.
+- D60: D36's foreign-file helper lives in `config.py` (U30).
+- D61: skills live in one place, `<home>/skills/`; shipped skills are seeds copied when missing;
+  the index rides in `read_skill`'s description; the assistant may propose a skill from a user
+  turn, always through the approval box.
+- D62: every tool result passes `tools.clean` on its way to the model (U31).
 - The owner's direction for the server (D44/D45): the server hands over packages, not single
   services. See the skills section.
 
@@ -243,13 +249,13 @@ Counts are `splitlines()` on `partition-8` at 939c831; "with U2" is the review w
 
 | Module | Now | Ceiling | After this plan |
 |---|---|---|---|
-| `daemon.py` | **779** | 780 | ~770 (U3 −21, U4 −10, U6 +7, U7a +6, U16 +9) |
+| `daemon.py` | **779** | 780 | ~771 (U3 −21, U4 −10, U6 +7, U7a +6, U16 +9, U27 +1) |
 | `state.py` | 681 | 780 (added) | ~688 (U6 +6, U14a +1) |
 | `memory.py` | 710 | 780 | ~711 (U23) |
 | `loop.py` | 197 | 520 (added) | ~244 (U7a) |
-| `broker.py` + `policy.py` | 84 + 57 | 455 (added) | ~110 + 57 (U6) |
+| `broker.py` + `policy.py` | 84 + 57 | 455 (added) | ~116 + 57 (U6 +26, U31 +6) |
 | `ledger.py` | 122 | 520 (added) | ~142 (U24 +8, U15a +12) |
-| `tools.py` | 212 | 390 (added) | ~220 (U21: `oneline` moves here) |
+| `tools.py` | 212; 225 after U21 | 390 (added) | ~230 (U21 moved `oneline` here; U31 +5) |
 | `signals.py` + `rules.py` | 201 + 220 | 585 (added) | ~205 + 220 (U21) |
 | `jobs.py` | 267 | 350 | ~283 (U4 +15, U23 +1) |
 | `exec.py`, `deliver.py` | 217, 86 | 390, 325 (added) | unchanged |
@@ -257,13 +263,13 @@ Counts are `splitlines()` on `partition-8` at 939c831; "with U2" is the review w
 | `catalog.py` | 275; 278 with U2 | 300 | ~272 (U21 moves `oneline` out) |
 | `installer.py` | 674; 677 with U2 | **700** | ~698 (U3 +15, U10 +5, U16 +1; U22 net 0) |
 | `senses/catalog.py` | 141; 137 with U2 | 150 | 137 |
-| `senses/mail.py` | **148** | 150 | ~118 (U25 moves the IMAP code out) |
+| `senses/mail.py` | **148**; 141 with U25 | 150 | ~140 (U25 moves the IMAP code out; U31 −1) |
 | `senses/_imap.py` | new | 250 (adapters, U17) | ~65 (U25) |
 | `senses/_eventkit.py` | 210 | none today; 250 (U17) | 210 |
 | `mcp/tools.py` | 116 | `mcp/` 1,858 | ~119 (U22) |
 | `tui.py` | 314 | 400 | ~357 |
 | `init.py` | **297** | 300 | 297 |
-| `skills.py` | new | 120 (new, if D58's proposal is confirmed) | ~80 |
+| `skills.py` | new | 120 (new, D61) | ~80 (U27) |
 | `keychain.py`, `config.py`, `__main__.py` | 14, 169, 455 (463 with U2) | none | ~82, ~179, ~490 |
 
 **`installer.py` lands at about 698/700.** If it crosses, the only movable block is D36's
@@ -815,7 +821,7 @@ call errors.
   - Why fix the read rather than refuse non-ASCII at `store`: the same reader serves entries the
     owner sets by hand, which a store-side refusal never sees.
 
-## Found by the reviews: four units and the known limits
+## Found by the reviews: five units and the known limits
 
 **U21. The signal envelope filters third-party text.**
 - **The defect.** `signals.render_block` dumps a signal's `fields` with
@@ -893,6 +899,42 @@ call errors.
   - `test_old_ledger_with_a_lone_surrogate_catches_up_and_reindexes`
   - `test_astral_characters_untouched`
 
+**U31. Every tool result passes a character filter (D62).**
+- **The defect.** Every tool result reaches the model through `broker._clip_for_model`
+  (`loop.settle` sends `json.dumps` of what it returns), and it only clips for length. Bidi
+  marks, zero-width characters, ANSI sequences and control characters from web pages, mail
+  bodies and MCP servers reach the model as they came. U21 filters only the signal envelope
+  ("disagree" 14, found at U22's review).
+- **The fix:**
+  - `tools.clean(text)`: whole ANSI sequences out, every non-printable character (controls, bidi
+    marks, zero-width) dropped, a newline and a tab kept, any other whitespace character (a
+    carriage return, a no-break space) one space. Nothing is collapsed, so code and page text
+    keep their shape.
+  - `oneline` becomes `" ".join(clean(text).split())[:n]`: one character rule, and `oneline`'s
+    output is unchanged.
+  - `_clip_for_model` passes a string result through `clean` before `clip`, and every string in
+    a structured result (keys too, however deep) before it is measured. The error text of a
+    failed call is a string and takes the same path.
+  - The mail body's per-line `oneline` (U25), which collapses runs of spaces, becomes `clean`.
+- **What the ledger keeps is unchanged.**
+  - The broker emits `tool_result` with what the tool returned, before `_clip_for_model` runs,
+    so the ledger keeps the raw result. The filter is on the way to the model.
+  - No model reads that raw result: the memory pass's slice skips tool events, and Invariant 1's
+    record keeps names, arguments and states only.
+  - This is a choice; the reviewer confirms it against Invariant 1.
+- **Files and size:** `tools.py` +5 (`clean` +7, `oneline` −2), `broker.py` +6 (the walk, as
+  `signals._clean` walks `fields`), `senses/mail.py` −1.
+- **After:** U25 (the body filter it replaces) and U6 (`broker.py`).
+- **Tests:**
+  - `test_broker.test_tool_result_loses_bidi_zero_width_ansi_and_controls` (a string and a
+    structured result)
+  - `test_tool_result_keeps_newlines_tabs_and_spacing`
+  - `test_error_text_passes_the_filter`
+  - `test_ledger_keeps_the_raw_result`
+  - `test_oneline_is_clean_then_flatten` (the U21 envelope tests pass unchanged)
+- **Reversal (D62):** a character a tool's legitimate output needs is allowed back in `clean`,
+  in one place.
+
 **Known limits** (listed, not units):
 - **The summary call's usage is lost when it errors (U9).** `memory_pass`'s `usage` sums both
   calls only when the summary call returns.
@@ -939,7 +981,8 @@ call errors.
     localized.
 - **Third-party text passes the same filter as U21.** `from`, `subject` and `date` in
   `list_mail`, `read_mail` and `search_mail` pass `oneline(…, 300)`. A body keeps its newlines
-  but loses controls, bidi and zero-width characters, and is still cut at 8,000.
+  but loses controls, bidi and zero-width characters, and is still cut at 8,000. (U31 turns the
+  body's per-line `oneline` into `clean`, which keeps runs of spaces.)
 - **The tools read the sense's bound `HOME`,** as `schedule.py`'s do. Today `list_mail` and
   `read_mail` call `config.home()`, which `signals.load` says a sense must not do.
 - **The process-local defect** (`_last_uid`, noted in `mail.py`).
@@ -1020,21 +1063,31 @@ costs:
 - **The administrator can block this too.** A Workspace administrator can refuse third-party
   OAuth clients. Then D57's reversal applies: Gmail waits for the external server's design.
 
-## Skills (D58) — a proposal for the next session to confirm with the owner
+## Skills (D58, D61)
 
-This amends the blueprint, which cut `skills/`: §12 and lines 86, 92 and 338 of
-`docs/blueprint/pathfinder-blueprint.html` list it among the things taken out. Nothing here is
-built until the owner confirms it and answers the three questions below.
+This amends the blueprint, which cut `skills/`: lines 86, 92 and 338 (§12) of
+`docs/blueprint/pathfinder-blueprint.html` listed it among the things taken out. Since D61 those
+three places say D58 and D61 brought it back, as one directory of procedures the owner approved.
 
 **What a skill is.** A procedure the owner has checked, which the assistant reads when asked to
 do that thing, so it stops inventing one. On 2026-09-26 it invented a way to get a Slack token.
 A skill is an instruction, so it is trusted in a way a wiki page (knowledge, data) is not.
 
-**Where skills live.**
-- **Shipped:** `pathfinder/skills/<name>.md`, package data next to `prompts/`. `pyproject.toml`'s
-  `package-data` gains `"skills/*.md"`. Read-only; an upgrade replaces them.
-- **The owner's:** `<home>/skills/<name>.md` (0600, like the rest of the home). A file here with
-  the same name as a shipped skill is the owner's copy and wins.
+**Where skills live: one place (D61).**
+- **Every skill is `<home>/skills/<name>.md`** (0600, like the rest of the home), whatever its
+  source: the owner's hand, an approved proposal, or a seed.
+- **Seeds:** `pathfinder/skills/<name>.md`, package data next to `prompts/`. `pyproject.toml`'s
+  `package-data` gains `"skills/*.md"`. Nothing reads a seed except the copy below.
+- **The seed copy** is the mechanism `rules.load` uses for `RULES.md` and `USER.md`: at daemon
+  start, a missing file is written from the shipped one (`if not path.exists():
+  path.write_text(...)`), and an existing file is never touched.
+  - It lives in `skills.bind(home)`, which the daemon calls once at start, next to
+    `memory.bind` and `jobs.bind`. It copies every seed whose file is missing.
+  - A new shipped skill therefore arrives on upgrade, and a skill the owner edited is left alone.
+  - A seed file the owner deletes comes back at the next start, as a deleted `RULES.md` does.
+  - The cost (D61): a fix to a shipped skill does not reach a home that already has that file.
+    Nothing marks that a newer seed exists; D61's reversal adds a marker if this becomes a real
+    cost.
 
 **The file format** follows Claude Code's `SKILL.md`, reduced to one file:
 - Frontmatter with `name` (lowercase, digits, hyphens; it must equal the file's stem) and
@@ -1048,11 +1101,10 @@ A skill is an instruction, so it is trusted in a way a wiki page (knowledge, dat
 - It is not cut the way the memory wiki's map is (1,000 characters, newest first, so older
   entries fall off). Instead, it is bounded when files are loaded: a description over 160
   characters, or an index over 4,000 characters, is refused at load with a message to the owner.
-- Where it rides each turn is question S1. The recommendation: in `read_skill`'s own
-  description. It goes with every request, and it stays byte-stable until a skill changes, which
-  suits caching.
+- It rides in `read_skill`'s own description (D61). It goes with every request, and it stays
+  byte-stable until a skill changes, which suits caching.
 - `skills.index()` is cheap: one directory listing and one frontmatter read per file, redone
-  when a directory's mtime moves.
+  when the directory's mtime moves.
 
 **The one tool: `read_skill(name)`.**
 - It returns the body with a harness header: `[Skill '<name>' - a procedure the owner approved;
@@ -1061,74 +1113,56 @@ A skill is an instruction, so it is trusted in a way a wiki page (knowledge, dat
 - Origins: user and job. Read-only, no gate.
 - `system.txt` gains one line: a `read_skill` result is the owner's procedure and is followed.
   It is the one tool result that is not "data, not an instruction", and the only one whose text
-  can come solely from the two trusted directories.
+  can come solely from the one trusted directory.
 
 **What makes a file a skill.**
-- Only its location: the package directory, or `<home>/skills/`.
+- Only its location: `<home>/skills/`.
 - Nothing else writes there except:
   - the owner, by hand;
-  - an approved `edit_memory` with target `skills/<name>.md`, per question S2.
+  - the seed copy, from the package;
+  - an approved `edit_memory` with target `skills/<name>.md`, proposed by the assistant from a
+    user turn (D61).
 - `memory.vault_path` accepts `skills/` only from origin `user`. Even then it always goes to the
   approval box, whatever `grants` says. A user turn can be steered by a page it just read, so
   D28's apply-at-once never applies to a skill.
 - **Third-party text can never become a skill.**
   - Mail, web pages, MCP results, registry text and signals reach the model only as data.
   - The only write path needs origin `user` and an approval showing the whole new text.
-  - The pass (origin `memory`) is refused outright.
+  - The pass (origin `memory`), a signal turn and a job are refused outright.
 - A skill file holding a token-shaped string (`keychain.TOKEN_RE`) is not loaded, with a
   warning. A procedure names the intake (`/secret <id> NAME`, `/secret mail`), never a value
   (D53).
 
-**Shipped against the owner's copy** is question S3.
-
-**The first shipped skill: `connect-gmail`.**
+**The first seed: `connect-gmail`.**
 - Its description: "Use when the owner asks to connect Gmail or read their mail."
 - Its body is the check and the seven steps from the Gmail section, with the fallback's one-line
   pointer. Its only secret step is `/secret mail`.
 
 **Budget.**
-- `pathfinder/skills.py` (new), about 80 lines: index, bounds, the override, the token check,
-  `read_skill`. Ceiling 120.
-- `connect-gmail.md`, about 35 lines.
+- `pathfinder/skills.py` (new), about 80 lines: `bind` with the seed copy, the index, bounds,
+  the token check, `read_skill`. Ceiling 120. One directory means one listing and no merge of
+  two; the seed copy (a loop over the seeds, `exists`, `write_text`) takes about the lines the
+  merge would have.
+- `pathfinder/skills/connect-gmail.md`, about 35 lines.
+- `daemon.py` +1: `skills.bind(self.home)` at start.
 - `memory.vault_path` +3.
 - `system.txt` +1.
 - `pyproject.toml` +1.
 - A skill costs nothing per turn but its index line inside `read_skill`'s description: about 40
   tokens each.
 
-**Units** (after confirmation):
-- **U27:** `skills.py`, `pyproject.toml` and tests.
+**Units:**
+- **U27:** `skills.py`, `pyproject.toml`, `daemon.py` (`skills.bind`) and tests.
 - **U28:** `memory.vault_path` (the `skills/` target, user-only, always approved) and
   `system.txt`, plus tests.
-- **U29:** `skills/connect-gmail.md`, after U25 and U26.
+- **U29:** `pathfinder/skills/connect-gmail.md`, after U25 and U26.
 
 **Tie to the owner's direction for the server (D44/D45).** A package the server hands over is
 tools plus the skill that uses them. This file format is what the server would deliver beside
-the connection spec: installing a package would place its skill in `<home>/skills/` under the
-same one approval as the install (D3), with its source named in the frontmatter. The server's
-design starts from that pair and is not designed here.
-
-**Questions for the owner** (at most three, each with its cost):
-- **S1. Where the index rides each turn.**
-  - (a) In `read_skill`'s description. It is sent with every request and cache-stable, and it
-    costs about 40 tokens per skill. **Recommended.**
-  - (b) Only behind a `list_skills` call. It costs nothing per turn, but the model must think to
-    look, which is exactly the failure D58's reversal names.
-  - (c) In the per-turn second system message, as the wiki map is. It is uncached every turn,
-    and it is what D58's reversal keeps for the case where (a) fails.
-- **S2. Who writes a skill.**
-  - (a) The owner by hand only. Zero write code, but the assistant cannot keep a procedure it
-    just worked out.
-  - (b) Also the assistant, by proposal from a user turn: always the approval box, never
-    `grants`, never the memory pass. +3 lines in `vault_path`. **Recommended.**
-  - (c) The memory pass may propose too. That puts third-party-read slices one approval away
-    from trusted text.
-- **S3. A shipped skill the owner has edited, when an upgrade changes it.**
-  - (a) The owner's copy wins, silently. Zero code, but the owner never learns of the fix.
-  - (b) The owner's copy wins, and the index marks it "(a newer shipped version exists)". This
-    uses a `shipped_sha` field the copy keeps from the version it was made from, for +6 lines.
-    **Recommended.**
-  - (c) The shipped version wins. The owner's edits are lost on upgrade.
+the connection spec: installing a package would place its skill in the same `<home>/skills/`
+(one directory, whatever the source; D61) under the same one approval as the install (D3), with
+its source named in the frontmatter. The server's design starts from that pair and is not
+designed here.
 
 ## ARCHITECTURE.md / ARCHITECTURE.ko.md, README pair (doc debt)
 
@@ -1156,8 +1190,7 @@ paragraph covering 1-8.
 - **§14:** `secret`, and `search` reading the copy.
 
 - **§8:** `search_mail`, the filter, `/secret mail`, and `_imap.py`.
-- **§1 and a new section:** `<home>/skills/`, and the shipped skills (if D58's proposal is
-  confirmed).
+- **§1 and a new section:** `<home>/skills/`, and the seeds and their copy (D61).
 
 Both languages, one commit.
 
@@ -1198,8 +1231,8 @@ README's upgrade note says to run `pathfinder reindex` once.
    error or a refusal as a result string: MCP `isError`, `propose_install`, `edit_memory`'s vet,
    and `start_job`'s refusals. U22 and U23 fix them.
 10. **D58 against the blueprint,** which cut `skills/` (lines 86, 92 and 338 of
-    `pathfinder-blueprint.html`). The skills section is a proposal that amends those lines once
-    the owner confirms it.
+    `pathfinder-blueprint.html`). Resolved on 2026-09-30 by D61: the owner confirmed the design,
+    and those three places now say skills came back as one directory of approved procedures.
 11. **D53 against the mail password.** D53's main path is the harness asking. Resolved on
     2026-09-30: the daemon asks at start when the mail sense is configured and its Keychain item
     is missing (U26). A model-callable ask that any procedure could use is later work.
@@ -1209,9 +1242,10 @@ README's upgrade note says to run `pathfinder reindex` once.
 14. **MCP tool results against the envelope filter (found at U22's review).** `mcp/tools.py`
     clips a tool result's text at `READ_CLIP` and passes everything else raw: bidi marks, ANSI
     sequences, newlines and `trust:` lines reach the model as a tool result. U21 filters only
-    the signal envelope. Whether a tool result gets `oneline`'s character filter (not its
-    one-line flattening, which would destroy page text) is the owner's call; it is not built
-    here.
+    the signal envelope. Resolved on 2026-09-30 by D62: every tool result and error string
+    passes `tools.clean` in `broker._clip_for_model` (U31). Newlines are kept on purpose (a
+    result may be code or a page); a tool result is its own `tool` message, apart from the
+    signal block whose `trust:` line U21 protects.
 13. **The mail tools against `signals.load`'s rule.** `list_mail` and `read_mail` read
     `config.home()`, where the rule says a sense uses the home it was loaded with. U25 fixes it.
 
@@ -1336,11 +1370,17 @@ README's upgrade note says to run `pathfinder reindex` once.
   - `test_lone_surrogate_replaced_at_append`
   - `test_old_ledger_with_a_lone_surrogate_catches_up_and_reindexes`
   - `test_astral_characters_untouched`
+- **U31 (tool results):**
+  - `test_tool_result_loses_bidi_zero_width_ansi_and_controls`
+  - `test_tool_result_keeps_newlines_tabs_and_spacing`
+  - `test_error_text_passes_the_filter`
+  - `test_ledger_keeps_the_raw_result`
+  - `test_oneline_is_clean_then_flatten`
 - **U25, U26 (Gmail):** as listed in the Gmail section.
-- **U27-U29 (skills, if confirmed):**
-  - `test_index_lists_shipped_and_owner_skills_sorted_and_uncut`
+- **U27-U29 (skills):**
+  - `test_seed_is_copied_when_missing_and_never_overwrites`
+  - `test_index_lists_every_skill_sorted_and_uncut`
   - `test_index_over_bound_is_refused_at_load`
-  - `test_owner_copy_wins_and_marks_a_newer_shipped_version`
   - `test_read_skill_header_and_clip`
   - `test_skill_with_a_token_is_not_loaded`
   - `test_skills_target_user_only_and_always_approved`
@@ -1349,7 +1389,7 @@ README's upgrade note says to run `pathfinder reindex` once.
   - 1.3x for every §6 row
   - `mirror.py` <= 200
   - `senses/_*.py` <= 250
-  - `skills.py` <= 120, if built
+  - `skills.py` <= 120
   - plus the invariant tests listed above
 
 ## Units and build order
@@ -1386,10 +1426,11 @@ parallel. **Deploy gate: U15a and U21.**
 | U15b | not started | Binding a handle | `__main__.py` (`secret --from`), `tui.py` (`/secret --from`; the masked prompt lists live handles) | +7 | U15a, U11, U14b | `test_bind_moves_and_deletes_the_pasted_item` |
 | U16 | not started | D53's main path: the harness asks | `daemon.py` (`record` hook, `secret` handler), `tui.py` (`secret.ask`), `installer.py` (event fields) | daemon +9, tui +12, installer +1 | U15b | `test_secret_value_never_reaches_ledger_or_state` |
 | U25 | not started | Gmail: `search_mail`, the filter, `HOME`, the watermark, the IMAP move | `senses/_imap.py` (new), `senses/mail.py` | +65 / −30 | U21 | `test_query_goes_as_a_literal_utf8`, `test_first_poll_takes_the_watermark_silently` |
+| U31 | not started | Every tool result passes `tools.clean` (D62); `oneline` is `clean` plus flattening; the mail body filter becomes `clean` | `tools.py`, `broker.py`, `senses/mail.py` | tools +5, broker +6, mail −1 | U25, U6 | `test_tool_result_loses_bidi_zero_width_ansi_and_controls`, `test_tool_result_keeps_newlines_tabs_and_spacing`, `test_error_text_passes_the_filter`, `test_ledger_keeps_the_raw_result`, `test_oneline_is_clean_then_flatten` |
 | U26 | not started | The mail password intake; the daemon asks at start when the item is missing | `keychain.py` (`target`), `tui.py`, `__main__.py`, `daemon.py` | +12, daemon +4 | U16, U15b | `test_secret_mail_resolves_service_and_user`, `test_missing_mail_password_is_asked_at_start` |
-| U27 | **proposal**: the owner confirms D58's design first | Skills: index, `read_skill` | `skills.py` (new), `pyproject.toml` | ~80 | confirmation | `test_index_lists_shipped_and_owner_skills_sorted_and_uncut` |
-| U28 | **proposal** | Skills: the write path | `memory.py` (`vault_path`), `prompts/system.txt` | +4 | U27, U8 | `test_skills_target_user_only_and_always_approved` |
-| U29 | **proposal** | The first shipped skill | `pathfinder/skills/connect-gmail.md` | ~35 | U27, U25, U26 | `test_connect_gmail_is_shipped_and_parses` |
+| U27 | not started | Skills (D58, D61): the seed copy, the index, `read_skill` | `skills.py` (new), `pyproject.toml`, `daemon.py` (`skills.bind`) | ~80, +1, daemon +1 | — | `test_seed_is_copied_when_missing_and_never_overwrites`, `test_index_lists_every_skill_sorted_and_uncut` |
+| U28 | not started | Skills: the write path (a proposal from a user turn, always approved) | `memory.py` (`vault_path`), `prompts/system.txt` | +4 | U27, U8 | `test_skills_target_user_only_and_always_approved` |
+| U29 | not started | The first seed | `pathfinder/skills/connect-gmail.md` | ~35 | U27, U25, U26 | `test_connect_gmail_is_shipped_and_parses` |
 | U17 | not started | Ceilings and invariant tests | `tests/test_invariants.py` | — | last | the U17 list above |
 | U18 | not started | Exit runs: m9 on the split pass (~40k tokens), m10 on the adopted prompt with the record and the second look (~215k tokens), each with the lead's go-ahead | `bench/m9_memory_write.py`, `bench/m10_unsupported.py` | — | U5, U7a, U8, U9 | — |
 | Lead | — | Live (1)-(16); both doc pairs, `docs/senses.md`; HISTORY; the reviewer (opus, read-only); the scan; the commit on `build`; deploy only past the gate | — | — | all | — |

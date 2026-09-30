@@ -146,6 +146,9 @@ class BrokerTest(unittest.TestCase):
         self.assertEqual(event["result"], raw)
 
 
+WAY_OUT = " - if you meant something else, say it again · 다른 뜻이었다면 다시 말해 주세요"
+
+
 class ChatApprovalTest(unittest.TestCase):
     class Open:
         def __init__(self, rows):
@@ -165,7 +168,8 @@ class ChatApprovalTest(unittest.TestCase):
                        "approved", "i approve", "i'll approve", "go ahead", "do it",
                        "거부", "거절", "취소", "아니", "아니요", "no", "n", "deny", "cancel"):
             self.assertEqual(chat_approval(open_, "s", phrase).splitlines(),
-                             [line, line.replace("a1", "b2").replace("install_server", "edit_memory")], phrase)
+                             [line, line.replace("a1", "b2").replace("install_server", "edit_memory") + WAY_OUT],
+                             phrase)
         for typed in ("  YES!! ", "Ｙｅｓ", "I'll   approve.", "I’ll approve", "승인~", "OK.", "Go\tAhead!~", "ㅇㅇ!",
                       "Do it . !"):
             self.assertIsNotNone(chat_approval(open_, "s", typed), typed)
@@ -173,6 +177,17 @@ class ChatApprovalTest(unittest.TestCase):
                      "yes?", "네 그리고 메일도"):
             self.assertIsNone(chat_approval(open_, "s", near), near)
         self.assertIsNone(chat_approval(self.Open([]), "s", "yes"))  # no open gate: the model answers
+
+    def test_chat_approval_line_says_how_to_get_past_it(self):
+        """U32: a short reply to the assistant's own question is swallowed once - the line says how
+        to get past it, once, at the end of the last gate's line."""
+        one = chat_approval(self.Open([{"id": "a1", "tool": "write_file"}]), "s", "응")
+        self.assertEqual(one, "승인은 채팅으로 받지 않습니다 · approvals are not taken in chat: /approve a1 or /deny a1 "
+                              "(write_file; shell: pathfinder approve|deny a1) - if you meant something else, say it "
+                              "again · 다른 뜻이었다면 다시 말해 주세요")
+        two = chat_approval(self.Open([{"id": "a1", "tool": "write_file"}, {"id": "b2", "tool": "edit_memory"}]),
+                            "s", "no").splitlines()
+        self.assertEqual(two, [one.removesuffix(WAY_OUT), one.replace("a1", "b2").replace("write_file", "edit_memory")])
 
 
 if __name__ == "__main__":

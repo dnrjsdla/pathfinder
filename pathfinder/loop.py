@@ -244,9 +244,11 @@ def run(step, messages, *, call_tool, emit, budget=8, control=None, resume=False
             if second_look is not None and check is None and not called and text.strip() and i < budget:
                 if control is not None:
                     control.in_tool = True  # a steer typed during the look waits for it; an interrupt still cuts
-                flags, why, used = _second_look(final_step, second_look, messages)
-                if control is not None:
-                    control.in_tool = False
+                try:
+                    flags, why, used = _second_look(final_step, second_look, messages)
+                finally:  # a cancel (BaseException) must not leave steers held for good
+                    if control is not None:
+                        control.in_tool = False
                 usage = _sum_usage(usage, used)  # the harness's own call, like D30's: not a step
                 check = "failed" if flags is None else "flagged" if flags else "passed"
                 if flags:

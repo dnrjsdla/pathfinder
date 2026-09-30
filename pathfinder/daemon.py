@@ -314,7 +314,7 @@ class Daemon:
                     decision = "approved" if kind == "approve" else "denied"
                     if row.get("job"):  # a job's own thread (D24), not a session turn
                         self.record("approval", session=row["session"], turn=row["turn"], origin="user",
-                                    id=approval_id, decision=decision)
+                                    id=approval_id, decision=decision, job=row["job"])
                         self.jobs_mgr.resume(approval_id, decision)
                         _write(writer, {"type": "turn.end", "turn": "", "kind": "resumed"})
                         continue
@@ -454,14 +454,13 @@ class Daemon:
                 await self.run_signal_turn(s, [payload] + s.queue.drain_signals())
                 continue
             if item_kind == "signal_ready":
-                # a `speak` set (notice_id, to_speak) whose rate-limit hold has (or may have)
-                # elapsed - re-check rather than re-triage: already decided and recorded.
-                notice_id, to_speak = payload
+                # a `speak` set (notice_id, to_speak, summaries) whose rate-limit hold has (or may
+                # have) elapsed - re-check rather than re-triage: already decided and recorded.
                 wait = signals.hold_for(self.state, self.rules)
                 if wait > 0:
                     asyncio.get_running_loop().call_later(wait, s.queue.put_nowait, ("signal_ready", payload))
                 else:
-                    await self._signal_model_turn(s, notice_id, to_speak)
+                    await self._signal_model_turn(s, *payload)
                 continue
             turn = uuid.uuid4().hex[:12]
             leftover = []
@@ -574,22 +573,24 @@ class Daemon:
         # but that richer text reaches the ledger through `delivery`/`assistant`, not this row.
         notice_id = uuid.uuid4().hex[:12]
         keys = [sig.key for sig, _why in to_speak]
-        summaries = "\n".join(sig.summary for sig, _why in to_speak)
+        # D62: every sense's summary reaches the screen; cleaned once, so the live notice, the one
+        # rebuilt after a restart (`undelivered`, from this row), and history hold the same text.
+        summaries = tools.clean("\n".join(sig.summary for sig, _why in to_speak))
         for sig, why in to_speak:
             self.record("decision", session=s.id, origin="signal", signal_key=sig.key, action="speak",
                         why=why, notice_id=notice_id, text=summaries, signal_keys=keys)
         wait = signals.hold_for(self.state, self.rules)
         if wait > 0:
             asyncio.get_running_loop().call_later(
-                wait, s.queue.put_nowait, ("signal_ready", (notice_id, to_speak)))
+                wait, s.queue.put_nowait, ("signal_ready", (notice_id, to_speak, summaries)))
         else:
-            await self._signal_model_turn(s, notice_id, to_speak)
+            await self._signal_model_turn(s, notice_id, to_speak, summaries)
 
-    async def _signal_model_turn(self, s, notice_id, to_speak) -> None:
+    async def _signal_model_turn(self, s, notice_id, to_speak, summaries) -> None:
         """D20: origin signal, no history, budget 4. Delivered text is the sense summaries
         joined, plus the model's one or two sentences when it answers - the summaries alone on
-        a gate, an LLMError, or an empty answer. `notice_id` and the `decision speak` rows for
-        `to_speak` were already recorded by the caller, before any rate-limit hold."""
+        a gate, an LLMError, or an empty answer. `notice_id`, the clean `summaries` and the
+        `decision speak` rows for `to_speak` came from the caller, before any rate-limit hold."""
         turn = uuid.uuid4().hex[:12]
         sigs = [sig for sig, _why in to_speak]
         self.record("turn_start", session=s.id, turn=turn, origin="signal")
@@ -650,7 +651,6 @@ class Daemon:
         finally:
             s.control, s.turn, s.origin = None, "", None
 
-        summaries = "\n".join(sig.summary for sig in sigs)
         text = f"{summaries}\n{answer}".strip() if answer and not gated else summaries
         keys = [sig.key for sig in sigs]
         self.record("turn_end", session=s.id, turn=turn, origin="signal", **ending)

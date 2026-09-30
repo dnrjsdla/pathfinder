@@ -106,6 +106,7 @@ def chat_approval(state, session, text):
     open gate, and the gate stays pending. None: the message goes to the model."""
     if _said(text) not in CHAT_APPROVAL:
         return None
-    return "\n".join(f"승인은 채팅으로 받지 않습니다 · approvals are not taken in chat: /approve {p['id']} or /deny "
-                     f"{p['id']} ({p['tool']}; shell: pathfinder approve|deny {p['id']})"
-                     for p in state.open_approvals(session)) or None
+    lines = "\n".join(f"승인은 채팅으로 받지 않습니다 · approvals are not taken in chat: /approve {p['id']} or /deny "
+                      f"{p['id']} ({p['tool']}; shell: pathfinder approve|deny {p['id']})"
+                      for p in state.open_approvals(session))
+    return f"{lines} - if you meant something else, say it again · 다른 뜻이었다면 다시 말해 주세요" if lines else None

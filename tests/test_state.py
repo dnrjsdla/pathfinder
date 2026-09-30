@@ -246,7 +246,8 @@ class StateTest(unittest.TestCase):
         self._record("approval_pending", session="s2", origin="job", id="job", call_id="c3", tool="x", args={},
                      messages=[{"role": "user", "content": "x"}], job="j1")
         self.assertEqual([p["id"] for p in self.state.open_approvals("s2")], ["gate", "job"])
-        self.assertEqual([p["id"] for p in self.state.open_approvals("s3")], ["other"])  # no user line yet
+        # no user line yet; a job's gate counts from any session (D63)
+        self.assertEqual([p["id"] for p in self.state.open_approvals("s3")], ["other", "job"])
         self._record("user", session="s2", turn="t2", origin="user", trust="user", text="something else")
         self.assertEqual(self.state.open_approvals("s2"), [])
 
@@ -310,6 +311,36 @@ class StateTest(unittest.TestCase):
         self._record("session_summary", session="s1", origin="memory", upto=1, text="summary")
         after = self.state.session("s1")["last_ts"]
         self.assertEqual(before, after)  # a pass's own writing must not look like the user is still there
+
+    def test_job_events_do_not_keep_a_session_alive(self):
+        """D63: a job's own events, and the owner acting on a job - a steer, a gate's approval -
+        are not conversation; a job no longer revives a session D41 ended."""
+        self._record("session_start", session="s1")
+        self._record("user", session="s1", turn="t1", origin="user", trust="user", text="hi")
+        before = self.state.session("s1")["last_ts"]
+        self._record("job_start", session="s1", origin="job", id="j1", goal="research")
+        self._record("user", session="s1", origin="user", job="j1", trust="user", text="shorter", steer=True)
+        self._record("approval_pending", session="s1", origin="job", id="g1", call_id="c1", tool="write_file",
+                     args={}, messages=[{"role": "user", "content": "x"}], job="j1")
+        self._record("approval", session="s1", turn="", origin="user", id="g1", decision="approved", job="j1")
+        self._record("job_done", session="s1", origin="job", id="j1", summary="found it", steps=2, usage={})
+        self.assertEqual(self.state.session("s1")["last_ts"], before)
+        said = self._record("user", session="s1", turn="t2", origin="user", trust="user", text="and?")
+        self.assertEqual(self.state.session("s1")["last_ts"], said["ts"])  # the owner's own word still counts
+
+    def test_open_approvals_includes_a_job_gate_from_another_session(self):
+        """D63: a job's gate is answered by the harness from the screen's session; the asking
+        session's last user message still decides whether it has been talked past."""
+        self._record("session_start", session="old")
+        self._record("session_start", session="new")
+        self._record("user", session="new", turn="t1", origin="user", trust="user", text="hi")
+        self._record("approval_pending", session="old", origin="job", id="jg", call_id="c1", tool="write_file",
+                     args={}, messages=[{"role": "user", "content": "x"}], job="j1")
+        self._record("approval_pending", session="old", origin="user", id="sg", call_id="c2", tool="x",
+                     args={}, messages=[])  # not a job's: it stays in its own session
+        self.assertEqual([p["id"] for p in self.state.open_approvals("new")], ["jg"])
+        self._record("user", session="new", turn="t2", origin="user", trust="user", text="응")  # got the line
+        self.assertEqual(self.state.open_approvals("new"), [])  # said again: it goes to the model
 
     def test_apply_is_idempotent_where_it_can_actually_break(self):
         """history() cannot double up (INSERT OR IGNORE); the turn counter can."""

@@ -70,13 +70,23 @@ class Signal:
     exempt: bool = False
 
 
+def _clean(value):
+    """Every string inside a signal's `fields`, keys too, however deep, through `tools.oneline`."""
+    if isinstance(value, dict):
+        return {_clean(k): _clean(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_clean(v) for v in value]
+    return tools.oneline(value, 300) if isinstance(value, str) else value
+
+
 def render_block(signal: Signal) -> str:
-    # One line per field: a summary carrying newlines (a job's result, model-written from what it
-    # read) could otherwise forge a whole extra block with its own `trust:` line. Single-line
-    # summaries stay byte-identical to the m3-measured shape.
-    summary = signal.summary.replace("\n", "\\n")
-    return (f"kind: {signal.kind}\ntrust: {signal.trust}\nkey: {signal.key}\n"
-            f"summary: {summary}\nfields: {json.dumps(signal.fields, ensure_ascii=False)}")
+    # Someone else's text (a mail subject, a calendar title, a registry description, a hook
+    # message) reaches the model here, so every string passes `oneline` and a clip: one line per
+    # field (a newline could otherwise forge a whole extra block with its own `trust:` line), no
+    # bidi, zero-width or ANSI. A clean single-line summary stays byte-identical to the m3 shape.
+    fields = json.dumps(_clean(signal.fields), ensure_ascii=False)[:2000]
+    return (f"kind: {signal.kind}\ntrust: {signal.trust}\nkey: {tools.oneline(signal.key, 200)}\n"
+            f"summary: {tools.oneline(signal.summary, 2200)}\nfields: {fields}")
 
 
 def render_envelope(signals: list) -> str:

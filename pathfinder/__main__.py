@@ -288,9 +288,10 @@ def secret_cmd(id, name):
     if not config._MCP_SERVER_ID.match(id) or not (name.isidentifier() and name.isascii()):
         print("pathfinder: secret ID NAME takes a server id and an env variable name", file=sys.stderr)
         return 2
-    value = getpass.getpass(f"{name} for {id} (hidden; stored in the Keychain): ")
-    if not value:
-        print("nothing entered - nothing stored", file=sys.stderr)
+    try:
+        value = getpass.getpass(f"{name} for {id} (hidden; stored in the Keychain): ")
+    except (EOFError, KeyboardInterrupt):
+        print("\nnothing stored", file=sys.stderr)
         return 1
     try:
         keychain.store(f"pathfinder-mcp-{id}", name, value)

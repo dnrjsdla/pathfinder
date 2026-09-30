@@ -318,19 +318,29 @@ class InstallerTest(unittest.TestCase):
         self.assertEqual(cand["install"]["needs"], [])
         self.assertEqual(cand["install"]["env_from_keychain"], ["SLACK_TOKEN"])
 
-    def test_missing_required_secret_stops_before_the_trial(self):
-        env = [{"name": "NOTION_TOKEN", "secret": True, "required": True}]
+    def _stopped(self, env):
         with mock.patch("pathfinder.installer.keychain.secret", return_value=None), \
                 mock.patch.object(Installer, "_trial") as trial:
             cand = self.installer.check(_candidate(env=env), run=_fake_run())
         trial.assert_not_called()
         self.assertEqual(cand["outcome"], "install_failed")
         self.assertEqual(cand["verification"]["failed_step"], "secrets")
-        sid = self.installer._server_id(cand["name"])
-        reason = cand["verification"]["reason"]
-        self.assertTrue(reason.startswith("needs NOTION_TOKEN - "))
-        self.assertIn(f"/secret {sid} NOTION_TOKEN", reason)
-        self.assertIn(f"pathfinder secret {sid} NOTION_TOKEN", reason)
+        return cand["verification"], self.installer._server_id(cand["name"])
+
+    def test_missing_required_secret_stops_before_the_trial(self):
+        vf, sid = self._stopped([{"name": "NOTION_TOKEN", "secret": True, "required": True}])
+        self.assertEqual(vf["names"], ["NOTION_TOKEN"])
+        self.assertTrue(vf["reason"].startswith("needs NOTION_TOKEN - store it "))
+        self.assertIn(f"/secret {sid} NOTION_TOKEN", vf["reason"])
+        self.assertIn(f"pathfinder secret {sid} NOTION_TOKEN", vf["reason"])
+
+    def test_every_missing_required_name_at_once(self):
+        vf, sid = self._stopped([{"name": "API_KEY", "secret": True, "required": True},
+                                 {"name": "OPTIONAL_TOKEN", "secret": True, "required": False},
+                                 {"name": "WORKSPACE", "secret": False, "required": True}])
+        self.assertEqual(vf["names"], ["API_KEY", "WORKSPACE"])  # the optional one is not a stop
+        self.assertTrue(vf["reason"].startswith("needs API_KEY, WORKSPACE - store each "))
+        self.assertIn(f"/secret {sid} NAME", vf["reason"])
 
     def test_missing_optional_secret_still_trials(self):
         env = [{"name": "TOKEN", "secret": True, "required": False}]

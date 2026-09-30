@@ -241,9 +241,10 @@ class Installer:
 
         # 4. secrets (D40): every secret or required variable comes from the Keychain - the registry
         # omits `isSecret` when false, and some required tokens are not marked - and a missing
-        # required one stops here, before the trial; a missing optional one is listed under `needs`
+        # required one stops here, before the trial, all names at once (`names`, for the asking); a
+        # missing optional one is listed under `needs`
         sid = self._server_id(candidate["name"])
-        needs, resolved_env = [], {}
+        needs, missing, resolved_env = [], [], {}
         for e in pkg["env"]:
             name = e["name"]
             if not (e.get("secret") or e.get("required")):
@@ -251,11 +252,14 @@ class Installer:
             val = keychain.secret(f"pathfinder-mcp-{sid}", name)
             if val is not None:
                 resolved_env[name] = val
-            elif e.get("required"):
-                return fail("secrets", f"needs {name} - store it with /secret {sid} {name} in the screen, or "
-                            f"pathfinder secret {sid} {name}, then ask again; the value never goes through the chat")
             else:
-                needs.append(name)
+                (missing if e.get("required") else needs).append(name)
+        if missing:
+            verification["names"] = missing
+            one = missing[0] if len(missing) == 1 else ""
+            return fail("secrets", f"needs {', '.join(missing)} - store {'it' if one else 'each'} with /secret {sid} "
+                        f"{one or 'NAME'} in the screen, or pathfinder secret {sid} {one or 'NAME'}, then ask "
+                        "again; the value never goes through the chat")
         candidate["install"] = {"id": sid, "needs": needs}  # S2: decided once, here - never re-picked at install
 
         # 5. trial launch, in the sandbox

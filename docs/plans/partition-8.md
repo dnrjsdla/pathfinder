@@ -1,9 +1,10 @@
 # Partition 8 — trust in the answer and the security bundle: the rewritten prompt and a second look, a record of what was done, the registry copy, the split memory pass, secrets only through the Keychain, a private home, Gmail, skills
 
 **Where this stands (2026-09-30).**
-- **Code:** branch `partition-8` (worktree `.claude/worktrees/partition-8`) at 429752d, with U0,
-  U1, U2, U5 (U5b folded in), U9 and U13 merged, each after review. 533 offline tests pass there.
-- **Everything else:** not started.
+- **Code:** branch `partition-8` (worktree `.claude/worktrees/partition-8`), with U0, U1, U2,
+  U5 (U5b folded in), U9, U13, and since 2026-09-30 U21, U22 and U24 merged, each after two
+  review rounds. 542 offline tests pass there.
+- **Everything else:** not started. Next: U3, U4, U23, U6 (the daemon moves), then U7a.
 
 The unit table at the end is where the next session starts. Every row carries its state, its
 files, its size, what it waits for, and its tests.
@@ -822,7 +823,8 @@ call errors.
   for every sense that carries someone else's text: catalog candidates, mail subjects and
   senders, calendar titles, Claude Code hook messages.
 - **The fix** sits at that one place:
-  - `summary` passes `oneline(…, 1000)`, `key` passes `oneline(…, 200)`, and every string inside
+  - `summary` passes `oneline(…, 2200)` (raised from 1,000 at review: a `job_done` summary
+    carries up to about 2,000 characters of result), `key` passes `oneline(…, 200)`, and every string inside
     `fields` passes `oneline(…, 300)`, recursively.
   - The fields' JSON is then cut to 2,000 characters.
   - `oneline` already turns a newline into a space, so a summary can still never forge a
@@ -878,7 +880,8 @@ call errors.
   projection raises, so `catch_up` at every daemon start, and `reindex`, fail on that line
   forever.
 - **The fix** is at the ledger. One `_clean(value)` walks strings in the event and replaces a
-  lone surrogate with U+FFFD (`encode("utf-8", "surrogatepass").decode("utf-8", "replace")`). It
+  lone surrogate with exactly one U+FFFD (`encode("utf-16", "surrogatepass").decode("utf-16",
+  "replace")`; the utf-8 route gives three per surrogate and was dropped at review). It
   runs in `append`, before the line is written, and in `read`, after each line is parsed, so a
   ledger written before the fix also catches up. A valid pair is untouched, because `json.loads`
   already joins it into one character.
@@ -963,10 +966,13 @@ call errors.
   it returns the mail sense's `keychain_service` and `user`; otherwise
   `("pathfinder-mcp-" + id, name)`. If the mail sense is not configured, it says "turn the mail
   sense on first".
-- **The assistant asks in words, from the skill's step.** The harness takes the value masked,
-  and the value never passes through the chat, the ledger or the model. The installer's harness
-  ask (U16) is for MCP servers; a model-callable ask for any procedure is later work
-  ("disagree" 11).
+- **The harness asks (owner's decision, 2026-09-30).** At daemon start, a configured mail sense
+  whose Keychain item is missing makes the daemon send `secret.ask {name: "mail"}` to every
+  attached screen, the same line U16 sends for an MCP secret; the masked prompt reads "app
+  password for <user> (hidden; stored in the Keychain, never shown to the assistant)". The
+  skill's step still names `/secret mail` for the case where no screen is attached. The value
+  never passes through the chat, the ledger or the model. A model-callable ask for any procedure
+  stays later work ("disagree" 11). Cost: `daemon.py` +~4, after U3 and U4 have made room.
 
 **What the owner does by hand: 7 steps, 3 of them on Google's pages.**
 1. The check above (`myaccount.google.com/apppasswords`).
@@ -1193,13 +1199,18 @@ README's upgrade note says to run `pathfinder reindex` once.
 10. **D58 against the blueprint,** which cut `skills/` (lines 86, 92 and 338 of
     `pathfinder-blueprint.html`). The skills section is a proposal that amends those lines once
     the owner confirms it.
-11. **D53 against the mail password.** D53's main path is the harness asking. For mail, the
-    assistant asks in words for `/secret mail`, from the skill's step, and the harness takes the
-    value masked. The value never touches the chat, but the ask itself is not the harness's. A
-    model-callable ask that any procedure could use would close this. It is later work.
+11. **D53 against the mail password.** D53's main path is the harness asking. Resolved on
+    2026-09-30: the daemon asks at start when the mail sense is configured and its Keychain item
+    is missing (U26). A model-callable ask that any procedure could use is later work.
 12. **D36 against `installer.py`'s ceiling.** This plan lands the installer at about 698/700. The
     only block large enough to move is D36's foreign-file helper, which D36 keeps in the
     installer until a third caller appears. Moving it needs the owner's word.
+14. **MCP tool results against the envelope filter (found at U22's review).** `mcp/tools.py`
+    clips a tool result's text at `READ_CLIP` and passes everything else raw: bidi marks, ANSI
+    sequences, newlines and `trust:` lines reach the model as a tool result. U21 filters only
+    the signal envelope. Whether a tool result gets `oneline`'s character filter (not its
+    one-line flattening, which would destroy page text) is the owner's call; it is not built
+    here.
 13. **The mail tools against `signals.load`'s rule.** `list_mail` and `read_mail` read
     `config.home()`, where the rule says a sense uses the home it was loaded with. U25 fixes it.
 
@@ -1354,9 +1365,9 @@ parallel. **Deploy gate: U15a and U21.**
 | U9 | **done, merged** | The split pass, 5e | `memory.py`, `consolidate.txt`, `summarize.txt` | 710 | — | `test_memory.*` |
 | U13 | **done, merged** | 5c: one EventKit store under a lock | `senses/_eventkit.py` | 210 | — | `test_calendar.*` |
 | U2 | **done**, merged at 429752d | Readers of the copy | `senses/catalog.py`, `installer.propose_by_name`, `__main__.search_cmd` (and `mirror.py`/`catalog.py` touches) | mirror 191, catalog 278, installer 680, sense 139 | U1 | `test_catalog.*`, `test_installer.*` |
-| U24 | not started | Lone surrogates | `ledger.py` | +8 | — | `test_old_ledger_with_a_lone_surrogate_catches_up_and_reindexes` |
-| U21 | not started | The envelope filter (**deploy gate**) | `tools.py`, `catalog.py`, `signals.py` | +6 net | U2 | `test_envelope_strips_bidi_zero_width_and_ansi_from_fields` |
-| U22 | not started | MCP error and failed proposal as failed calls | `mcp/tools.py`, `installer.py` | +3 | U2 | `test_mcp_is_error_is_a_failed_call` |
+| U24 | **done, merged** | Lone surrogates (one U+FFFD each, utf-16 route) | `ledger.py` | 132 (+10) | — | `test_old_ledger_with_a_lone_surrogate_catches_up_and_reindexes` |
+| U21 | **done, merged** | The envelope filter (**deploy gate**); summary cap 2,200 | `tools.py`, `catalog.py`, `signals.py` | 225, 268, 211 | U2 | `test_envelope_strips_bidi_zero_width_and_ansi_from_fields` |
+| U22 | **done, merged** | MCP error and failed proposal as failed calls | `mcp/tools.py`, `installer.py` | 122, 682 (+2; the contract's net 0 was not reachable) | U2 | `test_mcp_is_error_is_a_failed_call` |
 | U3 | not started | Move 1: `install`/`uninstall` into the installer | `installer.py`, `daemon.py` | daemon −21, installer +15 | U22 | `test_handle_install_and_uninstall_replies` |
 | U4 | not started | Move 2, 5b | `jobs.py`, `daemon.py` | daemon −10, jobs +15 | U3 | `test_job_lines_reach_a_moved_screen` |
 | U23 | not started | Refusals as failed calls | `memory.py`, `jobs.py` | +2 | U4 | `test_start_job_refusal_is_a_failed_call` |
@@ -1373,7 +1384,7 @@ parallel. **Deploy gate: U15a and U21.**
 | U15b | not started | Binding a handle | `__main__.py` (`secret --from`), `tui.py` (`/secret --from`; the masked prompt lists live handles) | +7 | U15a, U11, U14b | `test_bind_moves_and_deletes_the_pasted_item` |
 | U16 | not started | D53's main path: the harness asks | `daemon.py` (`record` hook, `secret` handler), `tui.py` (`secret.ask`), `installer.py` (event fields) | daemon +9, tui +12, installer +1 | U15b | `test_secret_value_never_reaches_ledger_or_state` |
 | U25 | not started | Gmail: `search_mail`, the filter, `HOME`, the watermark, the IMAP move | `senses/_imap.py` (new), `senses/mail.py` | +65 / −30 | U21 | `test_query_goes_as_a_literal_utf8`, `test_first_poll_takes_the_watermark_silently` |
-| U26 | not started | The mail password intake | `keychain.py` (`target`), `tui.py`, `__main__.py` | +12 | U16, U15b | `test_secret_mail_resolves_service_and_user` |
+| U26 | not started | The mail password intake; the daemon asks at start when the item is missing | `keychain.py` (`target`), `tui.py`, `__main__.py`, `daemon.py` | +12, daemon +4 | U16, U15b | `test_secret_mail_resolves_service_and_user`, `test_missing_mail_password_is_asked_at_start` |
 | U27 | **proposal**: the owner confirms D58's design first | Skills: index, `read_skill` | `skills.py` (new), `pyproject.toml` | ~80 | confirmation | `test_index_lists_shipped_and_owner_skills_sorted_and_uncut` |
 | U28 | **proposal** | Skills: the write path | `memory.py` (`vault_path`), `prompts/system.txt` | +4 | U27, U8 | `test_skills_target_user_only_and_always_approved` |
 | U29 | **proposal** | The first shipped skill | `pathfinder/skills/connect-gmail.md` | ~35 | U27, U25, U26 | `test_connect_gmail_is_shipped_and_parses` |

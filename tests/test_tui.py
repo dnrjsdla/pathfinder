@@ -329,10 +329,15 @@ class TuiCase(unittest.TestCase):
             state = State(Path(tmp) / "state.db")
             state.apply(Ledger(Path(tmp)).append("approval_pending", session="s1", origin="user", id="a2",
                                                 call_id="c1", tool="send\u200b", args=args, messages=[]))
+            memory = {"target": "memory", "op": "replace", "old": "typed \\u200b", "new": "real \u200b"}
+            state.apply(Ledger(Path(tmp)).append("approval_pending", session="s1", origin="memory", id="a3",
+                                                call_id="c2", tool="edit_memory", args=memory, messages=[]))
             state.close()
             out = io.StringIO()
             with contextlib.redirect_stdout(out):
                 cli.approvals(Path(tmp))
+        # typed text and the real character stay apart, as in the args rows
+        self.assertIn('a3  edit_memory  memory replace: "typed \\\\u200b" -> "real \\u200b"', out.getvalue())
         lines.append(out.getvalue())
         for line in lines:
             self.assertFalse(set(line) & set("\u200b\u202e\x9b\x1b"), repr(line))

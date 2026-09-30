@@ -61,7 +61,7 @@ class Attach:
     def register(self, entries, *, server_id=None) -> None:
         """Pin-check; replace stale `mcp__` keys (scoped to `server_id`, never accumulating); propose+signal each held server."""
         store = mcp_pins.PinStore.load(self.state)
-        report = mcp_pins.check(entries, store)
+        report = mcp_pins.check([e for e in entries if not mcp_tools.refused(e)], store)  # never held, never pinned
         store.save(self.record)
         for name in [n for n in tools.TOOLS if n.startswith("mcp__")
                     and (server_id is None or n.startswith(f"mcp__{server_id}__"))]:

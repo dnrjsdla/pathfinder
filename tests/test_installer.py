@@ -278,6 +278,8 @@ class InstallerTest(unittest.TestCase):
         self.assertEqual([t["name"] for t in trial["tools"]], ["echo"])
         self.assertEqual(trial["skipped"], ["bad\\u200bname", "ctl", "badparam"])
         self.assertEqual([p["tool"] for p in out["install"]["permissions"]], ["echo"])
+        self.assertIn("trial ok, 1 tools (1 read-only), 3 skipped (bad\\u200bname, ctl, badparam)",
+                      render_row({"id": "a1", "args": out}))  # the owner approving sees what will not load
 
     def test_trial_timeout_fails(self):
         cand = _candidate(args=["-y", "widget@1.0.0", "--never-answer"])

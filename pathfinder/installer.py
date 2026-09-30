@@ -105,6 +105,8 @@ def brief(c: dict) -> str:
     n, k = len(tools), sum(1 for t in tools if t.get("read_only_hint"))
     parts = [f"license {lic['spdx']} {lic['verdict']}", f"integrity {integrity}",
             f"trial ok, {n} tools ({k} read-only)"]
+    if trial.get("skipped"):  # what the loader will refuse, its names escaped where the trial read them
+        parts[-1] += f", {len(trial['skipped'])} skipped ({', '.join(trial['skipped'])[:120]})"
     if install.get("needs"):
         parts.append("needs: " + ", ".join(install["needs"]))
     if lic.get("warning"):

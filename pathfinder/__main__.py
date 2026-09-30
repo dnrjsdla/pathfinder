@@ -92,8 +92,8 @@ def approvals(home):
         for row in state.pending():
             if row["tool"] == "edit_memory":
                 a = row["args"]
-                print(visible(f"{row['id']}  edit_memory  {a['target']} {a['op']}: "
-                              f"{_clip60(a['old'])} -> {_clip60(a['new'])}"))
+                old, new = (json.dumps(_clip60(a[k]), ensure_ascii=False) for k in ("old", "new"))  # as the args rows
+                print(visible(f"{row['id']}  edit_memory  {a['target']} {a['op']}: {old} -> {new}"))
                 continue
             if row["tool"] == "accept_pins":
                 a = row["args"]

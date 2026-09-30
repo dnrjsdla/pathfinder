@@ -37,11 +37,11 @@ def specs(entries, servers, pins_report) -> dict[str, ToolSpec]:
     tool is never registered."""
     out: dict[str, ToolSpec] = {}
     for entry in entries:
-        if entry.qualified_name not in pins_report.passed:
-            continue
         why = refused(entry)
-        if why:
+        if why:  # before the pin check's verdict: `attach.register` never pin-checks a refused tool
             _log.warning("%s: tool %r %s - skipped", entry.server_id, entry.qualified_name, why)
+            continue
+        if entry.qualified_name not in pins_report.passed:
             continue
         out[entry.qualified_name] = _to_spec(servers, entry)
     return out

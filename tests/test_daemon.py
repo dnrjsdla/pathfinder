@@ -1663,6 +1663,24 @@ class McpDaemonTest(DaemonHarness):
         self.assertNotIn("mcp__fake__echo", tools_mod.TOOLS)  # closed: the key is gone
         self.assertIsNotNone(proc.poll())  # and the child is dead
 
+    def test_a_refused_tool_is_never_held(self):
+        """U33: the install pinned only what its trial kept; at load the tools the loader refuses are
+        dropped before the pin check - no `accept_pins` proposal, no `tool_held`, never pinned."""
+        cmd = [sys.executable, str(FAKE_SERVER)]
+        config.set(self.home, "mcp_servers", {"fake": {"transport": "stdio", "command": cmd}})
+        self.run_with(fake_model("ok"), lambda daemon: _noop())  # the pins an install writes: echo only
+        config.set(self.home, "mcp_servers", {"fake": {"transport": "stdio", "command": [*cmd, "--refused-tools"]}})
+
+        async def scenario(daemon):
+            await daemon.mcp.loaded
+            return sorted(n for n in tools_mod.TOOLS if n.startswith("mcp__"))
+
+        self.assertEqual(self.run_with(fake_model("ok"), scenario), ["mcp__fake__echo"])
+        events = self.events()
+        self.assertEqual([e for e in events if e["type"] == "approval_pending" and e["tool"] == "accept_pins"], [])
+        self.assertEqual([e for e in events if e["type"] == "signal" and e["kind"] == "tool_held"], [])
+        self.assertEqual([e["tool"] for e in events if e["type"] == "pin_accept"], ["echo"])
+
     def test_rug_pull_holds(self):
         config.set(self.home, "mcp_servers",
                    {"fake": {"transport": "stdio", "command": [sys.executable, str(FAKE_SERVER)]}})

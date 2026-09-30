@@ -2,21 +2,23 @@
 
 **Where this stands (2026-09-30).**
 - **Code:** branch `partition-8` (worktree `.claude/worktrees/partition-8`), with U0, U1, U2,
-  U5 (U5b folded in), U9, U13, and since 2026-09-30 U21, U22, U24, U3, U4, U23 and U30 merged,
-  each after two review rounds. 548 offline tests pass there. `daemon.py` 748/780,
+  U5 (U5b folded in), U9, U13, and since 2026-09-30 U21, U22, U24, U3, U4, U23, U30, U6 and U12
+  merged, each after review. 556 offline tests pass there. `daemon.py` 755/780,
   `installer.py` 655/700 (D60 moved the foreign-file helper to `config.py`, 215).
-- **Everything else:** not started. Next: U6 and U12, U25, then U7a, U7b and U8.
+- **In review:** U25 (branch `p8-u25`). **Next:** U7a, U7b and U8, then U31.
 
 The unit table at the end is where the next session starts. Every row carries its state, its
 files, its size, what it waits for, and its tests.
 
-**Deploy gate.** Nothing from partition 8 reaches the owner's daemon until both U15a and U21 have
+**Deploy gate.** Nothing from partition 8 reaches the owner's daemon until U15a, U21 and U31 have
 landed:
 - **U15a (the pasted-token handle at the ledger door).** The tool record (U5, merged) re-sends up
   to 120 characters of every call's arguments to the cloud model on every later turn. A token
   inside an argument would ride along each time until the handle replaces it at the door.
 - **U21 (the envelope filter).** Without it, third-party text reaches the model unfiltered and
   unclipped through a signal's `fields`.
+- **U31 (the tool-result filter, D62).** A tool result is the larger path for the same text; the
+  gate's purpose is that third-party text is filtered before the model.
 
 ## The secret path (D53, decided)
 
@@ -915,7 +917,11 @@ call errors.
   - `_clip_for_model` passes a string result through `clean` before `clip`, and every string in
     a structured result (keys too, however deep) before it is measured. The error text of a
     failed call is a string and takes the same path.
-  - The mail body's per-line `oneline` (U25), which collapses runs of spaces, becomes `clean`.
+  - One walker, `tools.map_strings(value, fn)`: `signals._clean` (U21) and the broker both use
+    it, so the walk over dicts, lists and tuples exists once outside the ledger. `ledger._clean`
+    stays its own: the ledger imports nothing above it.
+  - The mail body's per-line `oneline` (U25), which collapses runs of spaces, is deleted: the
+    body reaches the model only as a tool result, which the broker now filters.
 - **What the ledger keeps is unchanged.**
   - The broker emits `tool_result` with what the tool returned, before `_clip_for_model` runs,
     so the ledger keeps the raw result. The filter is on the way to the model.
@@ -1396,7 +1402,7 @@ README's upgrade note says to run `pathfinder reindex` once.
 
 Each unit is one implementer call: 1-3 files plus their tests, briefed from a file in the session
 scratchpad. Units that share a file run one after another, in table order; the rest may run in
-parallel. **Deploy gate: U15a and U21.**
+parallel. **Deploy gate: U15a, U21 and U31.**
 
 | # | State | Unit | Files | Size | After | Key tests |
 |---|---|---|---|---|---|---|
@@ -1413,13 +1419,13 @@ parallel. **Deploy gate: U15a and U21.**
 | U4 | **done, merged** | Move 2, 5b | `jobs.py`, `daemon.py` | daemon −10, jobs +15 | U3 | `test_job_lines_reach_a_moved_screen` |
 | U30 | **done, merged** | D60: the foreign-file helper moves to `config.py` | `config.py`, `installer.py`, `init.py` | installer −40, config +40 | U3 | the existing `merge_json_file` tests, import path changed |
 | U23 | **done, merged** | Refusals as failed calls | `memory.py`, `jobs.py` | +2 | U4 | `test_start_job_refusal_is_a_failed_call` |
-| U6 | not started | Approvals typed in chat (D52-2) | `broker.py`, `state.py` (`open_approvals`), `daemon.py` (`turn`) | daemon +7, broker +26, state +6 | U4 | `test_chat_approval_answered_without_a_model_call` |
+| U6 | **done, merged** | Approvals typed in chat (D52-2) | `broker.py`, `state.py` (`open_approvals`), `daemon.py` (`turn`) | daemon +7, broker +26, state +6 | U4 | `test_chat_approval_answered_without_a_model_call` |
 | U7a | not started | The second look (D51), plus a mid-stream error's text | `loop.py`, `daemon.py` (`_run_turn`) | loop +47, daemon +6 | U6 | `test_flagged_draft_is_withdrawn_and_rerun_once`, `test_every_streamed_delta_is_in_the_ledger` |
 | U7b | not started | The `retract` line | `tui.py` (`render`), `__main__.py` (`_stream`) | +4 | U7a | `test_retract_rendered` |
 | U8 | not started | The adopted prompt | `prompts/system.txt` | — | before U18 | `test_second_look_matches_the_bench` (in U17) |
 | U10 | not started | Intake, D40, 5f | `keychain.py` (`store`, fixed `secret`), `installer.py` (`check` step 4), `__main__.py` (`secret`) | +36 | U3, U7b | `test_store_escapes_backslash_then_quote`, `test_missing_required_secret_stops_before_the_trial` |
 | U11 | not started | `/secret`, 5d | `tui.py` | +22 | U7b, U10 | `test_slash_secret_masks_and_never_touches_the_socket` |
-| U12 | not started | 5a | `state.py`, `deliver.py`, `daemon.py` line 573 | ~0 | U6 | `test_presence_is_the_newest_row_across_sessions` |
+| U12 | **done, merged** | 5a | `state.py`, `deliver.py`, `daemon.py` line 573 | ~0 | U6 | `test_presence_is_the_newest_row_across_sessions` |
 | U14a | not started | Born private | `ledger.py`, `state.py` | +1 | U12, U24 | `test_partition_and_lock_born_0600_dir_0700` |
 | U14b | not started | Existing files private | `config.py` (`make_private`), `__main__.py` (daemon branch), `init.py` (literals) | +11 | U10 | `test_make_private_drops_group_other_keeps_owner_x_skips_symlinks_and_workspace` |
 | U15a | not started | D53's backstop: the vault at the ledger door (**deploy gate**) | `ledger.py`, `keychain.py` (`TOKEN_RE`, vault, sweep, index), `scripts/scan_personal.py` | +45 | U14a, U10 | `test_paste_vaulted_and_handle_returned`, `test_pasted_token_reaches_the_record_as_a_handle` |

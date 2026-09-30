@@ -117,7 +117,8 @@ class ChatApprovalTest(unittest.TestCase):
     def test_chat_approval_phrases(self):
         """D52 part 2: the whole message, normalized, is one of the closed phrases."""
         open_ = self.Open([{"id": "a1", "tool": "install_server"}, {"id": "b2", "tool": "edit_memory"}])
-        line = "승인은 채팅으로 받지 않습니다 · approvals are not taken in chat: /approve a1 or /deny a1 (install_server)"
+        line = ("승인은 채팅으로 받지 않습니다 · approvals are not taken in chat: /approve a1 or /deny a1 "
+                "(install_server; shell: pathfinder approve|deny a1)")
         self.assertEqual(len(CHAT_APPROVAL), 35)
         for phrase in ("승인", "승인해", "승인해줘", "승인합니다", "승인할게", "승인할게요", "허락", "허용", "진행해",
                        "진행해줘", "네", "예", "응", "ㅇㅇ", "좋아", "그래", "ok", "okay", "yes", "y", "approve",
@@ -125,7 +126,8 @@ class ChatApprovalTest(unittest.TestCase):
                        "거부", "거절", "취소", "아니", "아니요", "no", "n", "deny", "cancel"):
             self.assertEqual(chat_approval(open_, "s", phrase).splitlines(),
                              [line, line.replace("a1", "b2").replace("install_server", "edit_memory")], phrase)
-        for typed in ("  YES!! ", "Ｙｅｓ", "I'll   approve.", "승인~", "OK.", "Go\tAhead!~", "ㅇㅇ!", "Do it . !"):
+        for typed in ("  YES!! ", "Ｙｅｓ", "I'll   approve.", "I’ll approve", "승인~", "OK.", "Go\tAhead!~", "ㅇㅇ!",
+                      "Do it . !"):
             self.assertIsNotNone(chat_approval(open_, "s", typed), typed)
         for near in ("yes, and also add X", "yess", "승인해주세요", "approve it", "no way", "ok ok", "!!!", "?",
                      "yes?", "네 그리고 메일도"):

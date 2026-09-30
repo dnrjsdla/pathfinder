@@ -86,8 +86,8 @@ class Broker:
 
 
 def _said(text: str) -> str:
-    """How a chat message is compared: NFKC, lowercase, spaces collapsed, trailing `.!~` dropped."""
-    return " ".join(unicodedata.normalize("NFKC", text).lower().split()).rstrip(".!~ ")
+    """How a chat message is compared: NFKC, ’ as ', lowercase, spaces collapsed, trailing `.!~` dropped."""
+    return " ".join(unicodedata.normalize("NFKC", text).replace("’", "'").lower().split()).rstrip(".!~ ")
 
 
 # D52: a whole message that only approves or denies. Normalized like the message, because NFKC
@@ -104,5 +104,6 @@ def chat_approval(state, session, text):
     open gate, and the gate stays pending. None: the message goes to the model."""
     if _said(text) not in CHAT_APPROVAL:
         return None
-    return "\n".join(f"승인은 채팅으로 받지 않습니다 · approvals are not taken in chat: /approve {p['id']} "
-                     f"or /deny {p['id']} ({p['tool']})" for p in state.open_approvals(session)) or None
+    return "\n".join(f"승인은 채팅으로 받지 않습니다 · approvals are not taken in chat: /approve {p['id']} or /deny "
+                     f"{p['id']} ({p['tool']}; shell: pathfinder approve|deny {p['id']})"
+                     for p in state.open_approvals(session)) or None

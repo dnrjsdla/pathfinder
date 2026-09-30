@@ -1732,7 +1732,8 @@ class ChatApprovalTest(DaemonHarness):
 
         seen, decision = self.run_with(factory, scenario)
         self.assertEqual([m["type"] for m in seen], ["turn.start", "delta", "turn.end"])
-        self.assertTrue(seen[1]["text"].endswith(": /approve a1 or /deny a1 (edit_memory)"), seen[1]["text"])
+        self.assertTrue(seen[1]["text"].endswith(": /approve a1 or /deny a1 (edit_memory; shell: pathfinder "
+                                                 "approve|deny a1)"), seen[1]["text"])
         self.assertEqual(seen[-1]["kind"], "answer")
         self.assertEqual(factory.seen, [])  # no model request
         self.assertIsNone(decision)  # still pending

@@ -1006,7 +1006,25 @@ line says how to get past it.**
 - **The fix:** each of these passes `tools.oneline` (one line) or `tools.clean` (text that keeps
   its lines); `sanitize` becomes a call to the one rule with its own flattening and length kept.
   No new function.
-- **Left as they are** (the review's nits, recorded): variation selectors and a few blank-looking
+- **As built, beyond the list above:**
+  - **An approval line shows exactly what runs.** `tools.visible(text)` writes every
+    non-printable character as an escape (`\u200b`, `\n`); it is used for the `gate` and
+    `job.gate` lines, the `say` client's gate line, `pathfinder approvals`, the pin-mismatch
+    argument list and `pathfinder tools`' names. `clean` drops those characters, so the owner
+    would approve `boss@…` while the call ran with a zero-width character inside it. Notice
+    text and a job's goal still pass `clean`.
+  - **One predicate, `mcp.tools.refused(entry)`, at every door:** the trial, the pin check and
+    `specs()`. A tool is refused when its name breaks the provider's rule, it takes a `control`
+    argument, or a top-level parameter name changes under `clean` or the 1,200-character cut.
+    A refused tool is never counted, granted, pinned or held; the proposal names it as skipped.
+  - Every string in a parameter schema is cut at `MAX_DESCRIPTION`.
+  - `Daemon.close()` closes every connection, not only attached ones: a push sense's
+    connection could make `wait_closed()` wait forever (a `service stop` that never returns).
+  - `senses/claude_code.py`'s summary passes `oneline`.
+- **Left as they are** (the review's nits, recorded): a nested key, an `enum` or a `const` value
+  with a hidden character is cleaned, not refused, so the server receives the cleaned form; a
+  server installed before this partition whose tool is now refused shows only a log warning
+  (an `error` event), not a notice; the model's own `delta` is printed as it comes; variation selectors and a few blank-looking
   letters survive `clean`; a zero-width non-joiner is lost (Persian, Hindi); a result nested a
   thousand deep raises; `clean` runs before `clip` on the whole result (0.13 s for 5 MB).
 - **Files and size:** `senses/calendar.py`, `senses/reminders.py` (or their shared
@@ -1523,7 +1541,7 @@ parallel. **Deploy gate: U15a, U21, U31 and U33.**
 | U31 | **done, merged** | Every tool result passes `tools.clean` (D62); `oneline` is `clean` plus flattening; the mail body filter becomes `clean` | `tools.py`, `broker.py`, `senses/mail.py` | tools +5, broker +6, mail −1 | U25, U6 | `test_tool_result_loses_bidi_zero_width_ansi_and_controls`, `test_tool_result_keeps_newlines_tabs_and_spacing`, `test_error_text_passes_the_filter`, `test_ledger_keeps_the_raw_result`, `test_oneline_is_clean_then_flatten` |
 | U26 | not started | The mail password intake; the daemon asks at start when the item is missing | `keychain.py` (`target`), `tui.py`, `__main__.py`, `daemon.py` | +12, daemon +4 | U16, U15b | `test_secret_mail_resolves_service_and_user`, `test_missing_mail_password_is_asked_at_start` |
 | U32 | **done, merged** | D63: only the owner's activity keeps a session alive; notice text passes `clean`; the approval line's way out | `state.py`, `daemon.py`, `jobs.py`, `broker.py` | +6 | U7a, U31 | `test_say_after_a_job_gate_in_an_aged_session_lands_in_the_new_session` |
-| U33 | not started | The remaining raw exits: the agenda, sense summaries, MCP parameter schemas, gate lines, `sanitize` (**deploy gate**) | `senses/*.py`, `mcp/tools.py`, `mcp/protocol.py`, `tui.py` | +10 | U31, U7b | `test_agenda_lines_pass_the_filter` |
+| U33 | **done, merged** | The remaining raw exits: the agenda, sense summaries, MCP parameter schemas, gate lines, `sanitize` (**deploy gate**) | `senses/*.py`, `mcp/tools.py`, `mcp/protocol.py`, `tui.py` | +10 | U31, U7b | `test_agenda_lines_pass_the_filter` |
 | U27 | not started | Skills (D58, D61): the seed copy, the index, `read_skill` | `skills.py` (new), `pyproject.toml`, `daemon.py` (`skills.bind`) | ~80, +1, daemon +1 | — | `test_seed_is_copied_when_missing_and_never_overwrites`, `test_index_lists_every_skill_sorted_and_uncut` |
 | U28 | not started | Skills: the write path (a proposal from a user turn, always approved) | `memory.py` (`vault_path`), `prompts/system.txt` | +4 | U27, U8 | `test_skills_target_user_only_and_always_approved` |
 | U29 | not started | The first seed | `pathfinder/skills/connect-gmail.md` | ~35 | U27, U25, U26 | `test_connect_gmail_is_shipped_and_parses` |

@@ -218,7 +218,8 @@ class JobLinesTest(JobsHarness):
         lines = []
         mgr = jobs.Manager(self.home, self.record, self.push, None, rules_mod.Rules(), send=lines.append)
         self._managers.append(mgr)
-        with mock.patch("pathfinder.keychain.store"), mock.patch("pathfinder.keychain.delete"):
+        with mock.patch("pathfinder.keychain.store"), mock.patch("pathfinder.keychain.delete"), \
+                mock.patch("pathfinder.keychain.secret", return_value=None):
             mgr.record("job_start", session="s1", origin="job", id="j1", goal=f"post with {token}")
             mgr.record("approval_pending", session="s1", origin="job", id="a1", call_id="c1", tool="post",
                        args={"key": token}, messages=[], job="j1")
@@ -308,6 +309,43 @@ class JobControlTest(JobsHarness):
         steer_events = [e for e in self.events("user") if e.get("steer")]
         self.assertEqual(len(steer_events), 1)
         self.assertEqual((steer_events[0]["origin"], steer_events[0]["job"]), ("user", job_id))
+
+    def test_a_pasted_token_never_reaches_the_job(self):
+        """D53: the job keeps a masked goal and masked steers for its model and its notice; the
+        ledger's own copies get handles."""
+        token = "ntn_" + "g" * 40  # built by concatenation, so the scanner never flags this file
+        for name, fake in (("store", None), ("delete", None), ("secret", lambda s, a: None)):
+            patch = mock.patch(f"pathfinder.keychain.{name}", side_effect=fake)
+            patch.start()
+            self.addCleanup(patch.stop)
+        seen = []
+        proceed = threading.Event()
+        self.addCleanup(proceed.set)
+        tools_mod.TOOLS["job_mask_tool"] = ToolSpec(
+            name="job_mask_tool", description="", params={}, required=[], handler=lambda control=None: proceed.wait(2) and {})
+        self.addCleanup(tools_mod.TOOLS.pop, "job_mask_tool", None)
+
+        def factory(cfg, control, tools):
+            def step(messages):
+                seen.append([dict(m) for m in messages])
+                if len(seen) == 1:
+                    yield ("tool_calls", [{"id": "c1", "name": "job_mask_tool", "arguments": {}}])
+                else:
+                    yield ("text", "done")
+            return step
+
+        mgr = self.manager(factory)
+        job_id = mgr.start(f"post with {token}", "s1").split()[-1]
+        self.assertTrue(_wait_until(lambda: mgr.jobs[job_id].control.in_tool))
+        mgr.steer(job_id, f"use {token}")
+        proceed.set()
+        self.assertTrue(_wait_until(lambda: mgr.jobs[job_id].state == "done"))
+
+        self.assertIn("Goal: post with [redacted]", repr(seen[0]))
+        self.assertIn("use [redacted]", repr(seen[1]))
+        self.assertNotIn(token, repr(seen) + repr(self.pushed) + repr(self.events()))
+        self.assertEqual(self.events("job_start")[0]["goal"], "post with [secret:pasted-1]")
+        self.assertEqual([e["text"] for e in self.events("user") if e.get("steer")], ["use [secret:pasted-2]"])
 
 
 class JobGateTest(JobsHarness):

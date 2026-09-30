@@ -71,7 +71,7 @@ def all_tracked_lines():
 
 def selfcheck():
     h = {"somehandle"}
-    bad = ["key " + "sk-" + "a" * 24, "mail someone" + "@" + "corp.co.kr", "/Us" + "ers/someone/x", "call 010" + "-1234-5678", "repo SomeHandle/thing"]
+    bad = ["key " + "sk-" + "Ab1" * 8, "mail someone" + "@" + "corp.co.kr", "/Us" + "ers/someone/x", "call 010" + "-1234-5678", "repo SomeHandle/thing"]
     ok = ["admin@example.com", "1+bot@users.noreply.github.com", "/Users/<name>/x", "~/.pathfinder/state.db", "version 0.1.0"]
     assert all(hits_in(s, h) for s in bad), [s for s in bad if not hits_in(s, h)]
     assert not any(hits_in(s, h) for s in ok), [s for s in ok if hits_in(s, h)]

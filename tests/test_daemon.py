@@ -1901,7 +1901,7 @@ class PastedTokenScreenTest(DaemonHarness):
         super().setUp()
         self.items = {}
         for name, fake in (("store", lambda s, a, v: self.items.__setitem__(a, v)),
-                           ("delete", lambda s, a: True), ("secret", None)):
+                           ("delete", lambda s, a: True), ("secret", lambda s, a: None)):
             patch = mock.patch(f"pathfinder.keychain.{name}", side_effect=fake)
             patch.start()
             self.addCleanup(patch.stop)

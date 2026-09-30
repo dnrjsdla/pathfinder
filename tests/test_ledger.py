@@ -291,7 +291,7 @@ class PastedTokenTest(unittest.TestCase):
         self.home = Path(self._tmp.name)
         self.items = {}
         self.deletable = True
-        for name, fake in (("store", self._store), ("delete", self._delete), ("secret", None)):
+        for name, fake in (("store", self._store), ("delete", self._delete), ("secret", self._secret)):
             patch = mock.patch(f"pathfinder.keychain.{name}", side_effect=fake)
             patch.start()
             self.addCleanup(patch.stop)
@@ -301,6 +301,9 @@ class PastedTokenTest(unittest.TestCase):
 
     def _store(self, service, account, value):
         self.items[(service, account)] = value
+
+    def _secret(self, service, account):
+        return self.items.get((service, account))
 
     def _delete(self, service, account):
         if self.deletable:
@@ -319,7 +322,7 @@ class PastedTokenTest(unittest.TestCase):
         return json.loads((self.home / "pasted.json").read_text())
 
     def test_paste_vaulted_and_handle_returned(self):
-        other = "sk-" + "y" * 30
+        other = "sk-" + "Y9" * 15
         self._record("session_start", session="s")
         event = self._record("user", session="s", origin="user", trust="user",
                              text=f"use {self.TOKEN} then {self.TOKEN}", extra={"k": [other]})
@@ -364,9 +367,31 @@ class PastedTokenTest(unittest.TestCase):
         index = self._index()
         index["pasted"]["pasted-1"] -= 25 * 3600
         (self.home / "pasted.json").write_text(json.dumps(index))
-        self.assertEqual(self._record("user", text="sk-" + "n" * 30)["text"], "[secret:pasted-2]")
+        self.assertEqual(self._record("user", text="sk-" + "N7" * 15)["text"], "[secret:pasted-2]")
         self.assertEqual(list(self._index()["pasted"]), ["pasted-2"])
         self.assertNotIn(("pathfinder-pasted", "pasted-1"), self.items)
+
+    def test_an_unusable_index_never_stops_an_append(self):
+        index = self.home / "pasted.json"
+        for state in (None, "", "not json{", "{}", "null", "[]", '{"last": 3}', '{"pasted": {}}'):
+            with self.subTest(state):
+                index.unlink(missing_ok=True)
+                if state is not None:
+                    index.write_text(state)
+                ledger = Ledger(self.home)  # a daemon start, or any CLI command
+                self.assertEqual(ledger.append("user", text="plain")["text"], "plain")
+                self.assertRegex(ledger.append("user", text=self.TOKEN)["text"], r"^\[secret:pasted-\d+\]$")
+        self.assertNotIn(self.TOKEN, self._on_disk())
+
+    def test_a_lost_index_never_overwrites_a_live_item(self):
+        self.items = {("pathfinder-pasted", "pasted-1"): "the value an old handle points to"}
+        self.assertEqual(self._record("user", text=self.TOKEN)["text"], "[secret:pasted-2]")
+        self.assertEqual(self.items[("pathfinder-pasted", "pasted-1")], "the value an old handle points to")
+
+    def test_an_unwritable_index_redacts_and_leaves_no_orphan(self):
+        (self.home / "pasted.json").mkdir()  # nothing can be written there
+        self.assertEqual(self._record("user", text=self.TOKEN)["text"], "[redacted]")
+        self.assertEqual(self.items, {})
 
     def test_failed_read_back_leaves_no_orphan(self):
         def differs(service, account, value):  # stored, then read back as something else

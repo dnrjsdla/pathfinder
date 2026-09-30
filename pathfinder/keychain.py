@@ -1,5 +1,7 @@
 """The macOS Keychain. A secret never sits in the config file or the ledger - this is the one
 place a secret enters or leaves the process."""
+from __future__ import annotations  # `str | None` on the system python3 (3.9), which runs the scanner
+
 import json
 import os
 import re
@@ -8,14 +10,17 @@ import time
 from pathlib import Path
 
 # One pattern for the ledger door and the pre-commit scan (D53): a private key (the whole block
-# when its END line is there), then vendor-prefixed keys and tokens, a JWT and a Telegram bot
-# token - each only at the start of a word, so `task-management-...` is not an `sk-` key.
+# when its END line comes before the next BEGIN), then vendor-prefixed keys and tokens, a JWT and
+# a Telegram bot token - each only at the start of a word, so `task-management-...` is not an
+# `sk-` key. It stays linear, since it runs under the ledger's lock: a body that could run on
+# with no terminator either needs none, or starts only where its run of characters starts.
 TOKEN_RE = re.compile(
-    r"-----BEGIN [A-Z ]*PRIVATE KEY-----(?:[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----)?"
-    r"|(?<![A-Za-z0-9])(?:sk-[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}"
-    r"|AIza[0-9A-Za-z_-]{30,}|xox[abprs]-[A-Za-z0-9-]{10,}|xapp-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}"
-    r"|ntn_[A-Za-z0-9]{20,}|secret_[A-Za-z0-9]{40,}|[sr]k_(?:live|test)_[A-Za-z0-9]{20,}"
-    r"|eyJ[A-Za-z0-9_-]{7,}\.eyJ[A-Za-z0-9_-]{7,}\.[A-Za-z0-9_-]{10,}|\d{8,10}:[A-Za-z0-9_-]{35}(?![A-Za-z0-9_-]))")
+    r"-----BEGIN [A-Z ]*PRIVATE KEY-----(?:(?:(?!-----BEGIN )[\s\S])*?-----END [A-Z ]*PRIVATE KEY-----)?"
+    r"|(?<![A-Za-z0-9_-])(?:sk-(?=[A-Za-z0-9_-]*[0-9])(?=[A-Za-z0-9_-]*[A-Z])[A-Za-z0-9_-]{20,}"
+    r"|eyJ[A-Za-z0-9_-]{7,}\.eyJ[A-Za-z0-9_-]{7,}\.[A-Za-z0-9_-]{10,})"
+    r"|(?<![A-Za-z0-9])(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AIza[0-9A-Za-z_-]{30,}"
+    r"|xox[abprs]-[A-Za-z0-9-]{10,}|xapp-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|ntn_[A-Za-z0-9]{20,}"
+    r"|secret_[A-Za-z0-9]{40,}|[sr]k_(?:live|test)_[A-Za-z0-9]{20,}|\d{8,10}:[A-Za-z0-9_-]{35}(?![A-Za-z0-9_-]))")
 PASTED = "pathfinder-pasted"  # a pasted token's service; its account is its handle, pasted-N
 
 
@@ -75,17 +80,27 @@ def delete(service: str, account: str) -> bool:
         return False
 
 
+def mask(text: str) -> str:
+    """`text` with every token-shaped substring as `[redacted]`, and no Keychain call: for a copy
+    that is kept apart from the ledger, such as a job's goal (D53)."""
+    return TOKEN_RE.sub("[redacted]", text)
+
+
 def sweep(index: Path, now: float) -> dict:
     """Delete pasted items older than 24 hours from the Keychain and the index (D53); returns the
-    index: `last`, the highest N ever handed out, so a handle is never reused, and `pasted`,
-    handle -> creation time. A delete the Keychain refuses stays for next time."""
+    index: `last`, the highest N handed out, and `pasted`, handle -> creation time. A delete the
+    Keychain refuses stays for next time. An index that is missing or unusable reads as empty."""
     try:
         held = json.loads(index.read_text())
-    except (OSError, ValueError):
-        return {"last": 0, "pasted": {}}
+        held = {"last": int(held["last"]), "pasted": {str(h): float(t) for h, t in held["pasted"].items()}}
+    except Exception:  # missing, garbage, or the wrong shape: never a reason for an append to fail
+        held = {"last": 0, "pasted": {}}
     live = {h: t for h, t in held["pasted"].items() if now - t < 24 * 3600 or not delete(PASTED, h)}
     if live != held["pasted"]:
-        _save(index, {**held, "pasted": live})
+        try:
+            _save(index, {**held, "pasted": live})
+        except OSError:  # the deletes are done; the next sweep repeats them harmlessly
+            pass
     return {**held, "pasted": live}
 
 
@@ -100,13 +115,16 @@ def _save(index: Path, held: dict) -> None:
 def _paste(token: str, index: Path) -> str:
     now = time.time()
     held = sweep(index, now)  # every new paste sweeps first
-    account = f"pasted-{held['last'] + 1}"
+    n = held["last"] + 1
+    while secret(PASTED, f"pasted-{n}") is not None:  # a lost index never overwrites an item an old handle names
+        n += 1
+    account = f"pasted-{n}"
     try:
         store(PASTED, account, token)
+        _save(index, {"last": n, "pasted": {**held["pasted"], account: now}})
     except (ValueError, RuntimeError, OSError, subprocess.SubprocessError):  # locked, or no `security`
-        delete(PASTED, account)  # a read-back that differed leaves no orphan behind
+        delete(PASTED, account)  # a read-back that differed, or an unwritten index, leaves no orphan
         return "[redacted]"
-    _save(index, {"last": held["last"] + 1, "pasted": {**held["pasted"], account: now}})
     return f"[secret:{account}]"
 
 

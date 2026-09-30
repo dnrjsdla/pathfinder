@@ -2,6 +2,7 @@ import contextlib
 import importlib.util
 import io
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -183,7 +184,17 @@ class TokenPatternTest(unittest.TestCase):
         "xoxo": "hugs xoxo-from-the-team-at-the-office",
         "a timestamp and a longer tail": "at 1727712000:" + "b" * 40,
         "a JWT header alone": "ey" + "JhbGciOiJIUzI1NiJ9",
+        "news slug sk-hynix": "https://example.com/news/sk-hynix-q3-earnings-beat-2026",
+        "sk-telecom": "sk-telecom-6g-partnership-announced",
+        "task_sk-": "task_sk-" + "Listing2026" + "Ab1" * 4,
+        "sk-innovation": "sk-innovation-battery-plant-expansion",
     }
+    # One MiB of each alternative's own prefix with no terminator, and a few near-misses: the
+    # pattern runs under the ledger's lock, so none of these may go quadratic.
+    ADVERSARIAL = ["-----BEGIN " + "PRIVATE KEY-----\n", "-----BEGIN ", "sk-", "sk-A1", "eyJ", "eyJ-",
+                   "eyJ" + "a" * 7 + ".", "eyJ" + "a" * 7 + ".eyJ" + "b" * 7 + ".x ", "gh" + "p_",
+                   "github" + "_pat_", "AI" + "za", "xo" + "xb-", "xa" + "pp-", "AK" + "IA", "nt" + "n_",
+                   "sec" + "ret_", "sk" + "_live_", "12345678" + ":", "1234567890", "_12345678:" + "a" * 36]
 
     def test_token_re_catches_the_known_shapes(self):
         for kind, token in self.MUST_MATCH.items():
@@ -196,6 +207,16 @@ class TokenPatternTest(unittest.TestCase):
         for kind, text in self.MUST_NOT_MATCH.items():
             with self.subTest(kind):
                 self.assertEqual(keychain.TOKEN_RE.findall(text), [])
+
+    def test_token_re_is_linear(self):
+        mib = 1 << 20
+        texts = [(unit * (mib // len(unit) + 1))[:mib] for unit in self.ADVERSARIAL]
+        texts += ["-----BEGIN " + "PRIVATE KEY-----\n" + "x" * mib, "-----BEGIN " + "A " * (mib // 2)]
+        for text in texts:
+            with self.subTest(text[:24]):
+                started = time.perf_counter()
+                keychain.TOKEN_RE.sub("", text)
+                self.assertLess(time.perf_counter() - started, 1.0)
 
     def test_scanner_uses_the_package_pattern(self):
         path = Path(__file__).resolve().parents[1] / "scripts" / "scan_personal.py"

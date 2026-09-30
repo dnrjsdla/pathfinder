@@ -89,11 +89,15 @@ def _describe(server_id: str, tool_name: str, raw: Any) -> str:
 _sanitize = protocol.sanitize
 
 
+class McpToolError(protocol.McpError):
+    """A tool call the server answered with `isError: true` - its text is the message."""
+
+
 def flatten(result: dict) -> str:
     """A `tools/call` result -> the one string PATHFINDER's tool-result channel carries.
 
-    `isError: true` is a result, not an exception (session.py's own rule) - prefixed here so
-    the model reads it as something to fix, not something that broke."""
+    `isError: true` is a result to the session (session.py's own rule) but a failed call to
+    PATHFINDER: raised here, so the broker records `ok: false` and the model reads the text."""
     parts = []
     for block in result.get("content") or []:
         if not isinstance(block, dict):
@@ -103,7 +107,9 @@ def flatten(result: dict) -> str:
         else:
             parts.append(f"[{block.get('type') or 'unknown'} content omitted]")
     text = "\n".join(parts)
-    return f"tool error: {text}" if result.get("isError") else text
+    if result.get("isError"):
+        raise McpToolError(text or "tool call failed")
+    return text
 
 
 def read_only(entry) -> bool:
@@ -113,4 +119,4 @@ def read_only(entry) -> bool:
     return isinstance(annotations, dict) and annotations.get("readOnlyHint") is True
 
 
-__all__ = ["specs", "flatten", "read_only", "MAX_DESCRIPTION"]
+__all__ = ["specs", "flatten", "read_only", "McpToolError", "MAX_DESCRIPTION"]

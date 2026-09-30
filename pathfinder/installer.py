@@ -677,4 +677,6 @@ def propose_install_by_name(name: str, session: str = "", registry: str | None =
     if _installer is None:
         raise RuntimeError("installer not bound (no daemon)")
     result = _installer.propose_by_name(name, origin="user", session=session, registry=registry)
-    return result.get("error") or f"proposed as {result['id']}: {result['line']}"
+    if result.get("error"):
+        raise LookupError(result["error"])  # a failed proposal is a failed call
+    return f"proposed as {result['id']}: {result['line']}"

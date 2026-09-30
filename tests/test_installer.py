@@ -190,6 +190,22 @@ class InstallerTest(unittest.TestCase):
         self.assertEqual(out, {"error": "stop here"})  # found, and it reached the check
         self.assertEqual(self._by_name("io.github.acme/none")[0], {"error": "no such server; try search_tools"})
 
+    def test_propose_install_error_is_a_failed_call(self):
+        """U22: the tool's error is raised, so the broker answers `ok: false` with the same text."""
+        from pathfinder import installer as installer_mod
+        from pathfinder.broker import Broker
+        from pathfinder.senses import catalog as catalog_sense
+        self.addCleanup(installer_mod.bind, installer_mod._installer)
+        installer_mod.bind(self.installer)
+        emitted = []
+        broker = Broker(catalog_sense.TOOLS, "user", {"propose_install": "allow"}, control=None,
+                        emit=lambda kind, payload: emitted.append((kind, payload)))
+        with mock.patch.object(catalog, "latest", return_value=None):
+            out = broker.call("c1", "propose_install", {"name": "io.github.acme/none"})
+        self.assertEqual(out, {"ok": False, "error": "no such server; try search_tools"})
+        self.assertEqual(emitted[-1][0], "tool_result")
+        self.assertFalse(emitted[-1][1]["ok"])
+
     # -- server_id -------------------------------------------------------------------------
     def test_server_id_from_name(self):
         self.assertEqual(server_id("io.github.acme/widget-server", set()), "widget-server")

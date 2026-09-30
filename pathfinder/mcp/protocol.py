@@ -12,7 +12,8 @@ and the dual-era probe in `session.py`).
 
 The two error kinds matter: a tool that failed (`isError: true`) is a normal
 result, not an exception - the model needs to see it to retry with better
-arguments. An exception here means the *protocol* broke, not the tool call.
+arguments (one layer up, `mcp.tools` raises `McpToolError` for it, so the broker
+records a failed call). An exception here means the *protocol* broke, not the tool call.
 """
 from __future__ import annotations
 

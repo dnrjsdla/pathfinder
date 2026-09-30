@@ -149,10 +149,10 @@ class Manager:
     def start(self, goal: str, session: str) -> str:
         with self._lock:
             if any(j.state in ("running", "gated") for j in self.jobs.values()):
-                return "a job is already running; wait for it to finish or stop it first"
-            if self.state.today().jobs >= self.rules.jobs_per_day:
-                return ("the day's job budget is spent; ask again tomorrow or raise "
-                        "jobs_per_day in RULES.md")
+                raise ValueError("a job is already running; wait for it to finish or stop it first")
+            if self.state.today().jobs >= self.rules.jobs_per_day:  # refusals are failed calls, not "ok"
+                raise ValueError("the day's job budget is spent; ask again tomorrow or raise "
+                                 "jobs_per_day in RULES.md")
             id = uuid.uuid4().hex[:8]
             messages = [{"role": "system", "content": JOB_PROMPT},
                        {"role": "system", "content": clock.now_line()},

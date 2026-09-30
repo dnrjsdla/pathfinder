@@ -149,9 +149,29 @@ class JobBudgetTest(JobsHarness):
     def test_job_refuses_over_budget(self):
         rules = dataclasses.replace(rules_mod.Rules(), jobs_per_day=0)
         mgr = self.manager(_steps([[("text", "x")]]), rules=rules)
-        result = mgr.start("goal", "s1")
-        self.assertIn("budget", result)
+        with self.assertRaisesRegex(ValueError, "budget"):
+            mgr.start("goal", "s1")
         self.assertEqual(len(self.events("job_start")), 0)
+
+    def test_start_job_refusal_is_a_failed_call(self):
+        """U23: a refused start raises, so the model gets `ok: false` and the tool record says
+        `failed`, not `ok` for a job that never started."""
+        from pathfinder.broker import Broker
+        from pathfinder.state import RECORD_HEADER
+        self.addCleanup(jobs.bind, jobs._manager)
+        jobs.bind(self.manager(_steps([[("text", "x")]]), rules=dataclasses.replace(rules_mod.Rules(), jobs_per_day=0)))
+        emitted = []
+        broker = Broker(jobs.TOOLS, "user", {"start_job": "allow"}, control=None,
+                        emit=lambda kind, payload: emitted.append((kind, payload)))
+        out = broker.call("c1", "start_job", {"goal": "research"})
+        self.assertFalse(out["ok"])
+        self.assertIn("the day's job budget is spent", out["error"])
+        self.record("session_start", session="s1")
+        for kind, payload in emitted:
+            self.record(kind, session="s1", turn="t1", origin="user", **payload)
+        record = self.state.history("s1")[-1]["content"]
+        self.assertTrue(record.startswith(RECORD_HEADER))
+        self.assertEqual(record.splitlines()[-1], 'start_job {"goal":"research"} failed')
 
     def test_job_one_at_a_time(self):
         block = threading.Event()
@@ -166,8 +186,8 @@ class JobBudgetTest(JobsHarness):
         mgr = self.manager(factory)
         r1 = mgr.start("goal 1", "s1")
         self.assertTrue(r1.startswith("started"))
-        r2 = mgr.start("goal 2", "s1")
-        self.assertIn("already running", r2)
+        with self.assertRaisesRegex(ValueError, "already running"):
+            mgr.start("goal 2", "s1")
 
         block.set()
         job_id = r1.split()[-1]

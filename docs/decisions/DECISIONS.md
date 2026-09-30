@@ -455,6 +455,34 @@ writes files, it does not install, and `init` already imports it. It stays one r
 remains the one writer of PATHFINDER's own config. — *Reversed if* `config.py` needs a ceiling
 the helper crowds: then D36's own reversal applies, a module of its own.
 
+**D61. Skills live in one place, `<home>/skills/<name>.md`; their index rides in `read_skill`'s
+own description; the assistant may propose a skill from a user turn (confirms and amends D58).**
+The package's `pathfinder/skills/*.md` are seeds: a seed is copied into the home when its file is
+missing, the way `rules.load` writes `RULES.md` and `USER.md` at the daemon's first start, and the
+copy never overwrites. A new shipped skill arrives on upgrade; one the owner edited is left alone.
+There is no override rule and no marker for a newer shipped version. The owner proposed this; its
+cost is that a fix to a shipped skill does not reach a home that already has that file. The index
+is every skill's `name` and `description`, sorted, never cut, bounded at load. The owner writes
+skills by hand, and the assistant may propose one from a user turn: always the approval box,
+never `grants`, never the memory pass, never from a signal, job or memory origin. One directory,
+whatever the source, is also where a server package's skill lands (D44/D45). — *Reversed if* two
+weeks of use show the assistant not opening a skill it has: then the matching skill's title
+rides in the turn, as the wiki map does. If shipped fixes failing to reach homes becomes a real
+cost, a marker is added then.
+
+**D62. Every tool result passes a character filter before the model sees it.** Found at U22's
+review: a tool result was clipped for length and otherwise raw, so bidi marks, zero-width
+characters, ANSI sequences and control characters reached the model from web pages, mail bodies
+and MCP servers; U21 filters only the signal envelope. One function, `tools.clean(text)`, removes
+those and keeps newlines and tabs without collapsing whitespace, since a result may be code or a
+page. `oneline` becomes `clean` plus its flattening, so there is one character rule, and the mail
+body's per-line `oneline` becomes `clean`. It runs in `broker._clip_for_model`, which every
+result and every error string already passes. The ledger's `tool_result` keeps what the tool
+returned; the filter is on the way to the model. It is inside partition 8 because the deploy
+gate's purpose is that third-party text is filtered before the model, and a tool result is the
+larger path. — *Reversed if* a tool's legitimate output needs a removed character (a zero-width
+joiner inside an emoji the owner uses): that character is allowed back in `clean`, in one place.
+
 **The owner's direction for the server (D44/D45), recorded so it is not lost:** what the server
 is for is handing over tool PACKAGES that are useful as they arrive - not wiring services one by
 one. Partition 8 connects single services because the secret path and the registry copy need a

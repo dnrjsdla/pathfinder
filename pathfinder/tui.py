@@ -114,6 +114,7 @@ class _Session:
         self.turn_running = False
         self.interrupt_sent = False  # one Ctrl-C interrupts, the second quits
         self._esc = 0  # 1 after ESC, 2 inside ESC [ (CSI), 3 after ESC O (SS3): such keys are dropped
+        self._seq, self._paste = "", None  # the escape's bytes; in a bracketed paste: True once it holds a newline
         self._recv_buf = b""
         self._keys = codecs.getincrementaldecoder("utf-8")("replace")  # a Hangul syllable is 3 bytes (D6)
         now = time.monotonic()
@@ -125,6 +126,12 @@ class _Session:
 
     def send(self, msg):
         self.sock.sendall((json.dumps(msg, ensure_ascii=False) + "\n").encode())
+
+    def _masked(self, target):
+        """Into (`(id, NAME)`) or out of (None) the masked input. Bracketed paste is on only while
+        masked, so a paste comes between marks however slow the link; main() turns it off on exit too."""
+        self.secret, self.buf, self._paste = target, "", None
+        self.out.write("\033[?2004h" if target else "\033[?2004l")
 
     def redraw(self):
         self.out.write("\r\033[K" + (SECRET_PROMPT + "*" * len(self.buf) if self.secret else PROMPT + self.buf))
@@ -181,6 +188,9 @@ class _Session:
             return 0
         chars = self._keys.decode(data)
         for i, ch in enumerate(chars):
+            if self._paste is not None and ch != "\x1b" and not ch.isprintable():  # in a paste no control is a key
+                self._paste = self._paste or ch in "\r\n"
+                continue
             if self.secret and ch in "\r\n":
                 return self._secret_enter(spill=i + 1 < len(chars))
             rc = self._key(ord(ch))
@@ -195,7 +205,8 @@ class _Session:
         while select.select([self.in_fd], [], [], SECRET_DRAIN_S)[0] and os.read(self.in_fd, 1024):
             spill = True
         (id, name), value = self.secret, self.buf
-        self.secret, self.buf, self._esc = None, "", 0
+        self._masked(None)
+        self._esc = 0
         self._keys.reset()
         if spill:
             self.show(STRINGS["secret_one_line"])
@@ -209,7 +220,7 @@ class _Session:
 
     def _ctrl_c(self):
         if self.secret:  # cancels the masked entry and nothing else
-            self.secret, self.buf = None, ""
+            self._masked(None)
             self.show(STRINGS["secret_cancelled"])
             return None
         if self.turn_running and not self.interrupt_sent:
@@ -224,8 +235,14 @@ class _Session:
         if byte == 0x04:  # Ctrl-D
             return 0
         if byte == 0x1b or self._esc:  # ESC [ ... final, ESC O x: arrow and function keys, dropped whole
+            self._seq = "" if byte == 0x1b else self._seq + chr(byte)
             self._esc = (1 if byte == 0x1b else {0x5b: 2, 0x4f: 3}.get(byte, 0) if self._esc == 1 else
                          2 if self._esc == 2 and not 0x40 <= byte <= 0x7e else 0)
+            if self.secret and not self._esc and self._seq in ("[200~", "[201~"):  # a paste's marks
+                if self._seq == "[201~" and self._paste:  # more than one line: all of it goes, unseen
+                    self._masked(None)
+                    self.show(STRINGS["secret_one_line"])
+                self._paste = False if self._seq == "[200~" else None
             return None
         now = time.monotonic()
         self.last_key = now
@@ -269,7 +286,7 @@ class _Session:
         elif cmd == "secret":
             args = rest.split()
             if len(args) == 2 and keychain.valid_target(*args):
-                self.secret = tuple(args)
+                self._masked(tuple(args))
                 self.show(STRINGS["secret_ask"].format(id=args[0], name=args[1]))
             else:
                 self.show(STRINGS["secret_usage"])
@@ -369,3 +386,5 @@ def main(home, *, sock_path=None, in_fd=None, out_fd=None) -> int:
             return _Session(sock, in_fd, out, home).run()
     finally:
         termios.tcsetattr(in_fd, termios.TCSADRAIN, old_attrs)
+        out.write("\033[?2004l")  # the terminal is never left in bracketed paste, however the screen ends
+        out.flush()

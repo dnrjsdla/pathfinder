@@ -1,6 +1,6 @@
 """mail sense - IMAP headers only (the plumbing is `_imap.py`). Never fetches a body in `poll`
 (`BODY.PEEK` + a read-only `SELECT`). The password never lives in config/env - it comes from the
-macOS Keychain per call. What a tool hands the model of someone else's mail passes `oneline`."""
+macOS Keychain per call. Headers a tool hands the model pass `oneline`; a body, the broker's `clean`."""
 from __future__ import annotations
 
 from .. import config
@@ -101,8 +101,7 @@ def _read_mail(id, control=None):
         msg = _imap.fetch(conn, _imap.uid_of(conn, key, id), "(BODY.PEEK[])")
         if msg is None:
             raise LookupError(f"could not fetch mail {id!r}")
-        # keeps its newlines; each line loses what `oneline` drops (controls, bidi, zero-width)
-        text = "\n".join(oneline(line) for line in _imap.plain_text(msg).splitlines())
+        text = _imap.plain_text(msg)  # raw: the broker filters it on its way to the model (D62)
         clipped = text if len(text) <= 8000 else text[:8000] + "...(truncated)"
         return {**_row(id, msg), "body": clipped}
     finally:

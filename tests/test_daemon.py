@@ -382,8 +382,6 @@ class DaemonTest(DaemonHarness):
             calls = {"n": 0}
 
             def step(messages):
-                if messages[0]["content"] == VERIFIER_PROMPT:
-                    return  # the second look: the steer's user message follows the tool, so it runs
                 seen_messages.append([dict(m) for m in messages])
                 n = calls["n"]
                 calls["n"] += 1
@@ -419,7 +417,7 @@ class DaemonTest(DaemonHarness):
 
         seen = self.run_with(factory, scenario)
         self.assertEqual(seen[-1]["kind"], "answer")
-        self.assertEqual(len(seen_messages), 2)
+        self.assertEqual(len(seen_messages), 2)  # no second look: the turn called a tool before the steer (D51)
         steer_msgs = [m for m in seen_messages[1] if m.get("role") == "user" and m.get("content") == "steer now"]
         self.assertEqual(len(steer_msgs), 1)
         steer_events = [e for e in self.events() if e["type"] == "user" and e.get("steer")]
@@ -576,15 +574,18 @@ PASSED = FLAGGED.replace("true", "false")
 
 
 def scripted_model(verdict, draft="Your list is empty.", rerun="Checked: it holds two."):
-    """Answers `draft` first and `rerun` after; the second look answers `verdict`. A user message
-    names another ending: "error" breaks mid-stream, "stop" is interrupted mid-stream, "loop"
-    calls a tool until the budget runs out, "write" stops at the gate."""
+    """Answers `draft` first and `rerun` after; the second look answers `verdict`. A user message,
+    or `rerun`, names another ending: "error" breaks mid-stream, "stop" is interrupted mid-stream,
+    "loop" calls a tool until the budget runs out, "write" stops at the gate."""
     def factory(cfg, control=None, tools=None):
         def step(messages):
             if messages[0]["content"] == VERIFIER_PROMPT:
                 yield ("text", verdict)
                 return
             said = [m["content"] for m in messages if m["role"] == "user"][-1]
+            if said not in ("error", "stop", "loop", "write"):
+                factory.answers += 1
+                said = draft if factory.answers == 1 else rerun
             if said == "error":
                 yield ("text", "half an ans")
                 raise LLMError(500, "upstream went away")
@@ -600,8 +601,7 @@ def scripted_model(verdict, draft="Your list is empty.", rerun="Checked: it hold
                 yield ("text", "writing it. ")
                 yield ("tool_calls", [{"id": "c1", "name": "write_file", "arguments": {"path": "n.txt", "content": "x"}}])
             else:
-                factory.answers += 1
-                yield ("text", draft if factory.answers == 1 else rerun)
+                yield ("text", said)
         return step
     factory.answers = 0
     return factory
@@ -651,7 +651,11 @@ class SecondLookDaemonTest(DaemonHarness):
             checks.append([e.get("check") for e in self.events() if e["type"] == "turn_end"][-1])
         self._say(scripted_model(PASSED), "loop")
         checks.append(self.events()[-1]["check"])  # an answer after tools is never checked
-        self.assertEqual(checks, ["passed", "flagged", "failed", None])
+        for ending in ("write", "error"):  # a flagged draft whose re-run gates or breaks
+            self._say(scripted_model(FLAGGED, rerun=ending), "any reminders?")
+            end = [e for e in self.events() if e["type"] == "turn_end"][-1]
+            checks.append((end["kind"], end["check"]))
+        self.assertEqual(checks, ["passed", "flagged", "failed", None, ("gated", "flagged"), ("error", "flagged")])
 
     def test_every_streamed_delta_is_in_the_ledger(self):
         """Invariant 2: whatever the ending, the turn's assistant events hold every delta sent."""

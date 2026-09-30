@@ -128,14 +128,10 @@ def settle(messages, call_tool, control=None):
         messages.append({"role": "tool", "tool_call_id": tc_id, "content": json.dumps(result, ensure_ascii=False)})
 
 
-def _last_user(messages):
-    return max(k for k, m in enumerate(messages) if m["role"] == "user")
-
-
 def verifier_input(tools, messages):
     """What the second look sees, as bench m10 built it: the tool names, the agenda, the answer
     before the turn's user message, that message, and the draft (`messages[-1]`)."""
-    u = _last_user(messages)
+    u = max(k for k, m in enumerate(messages) if m["role"] == "user")
     before = [m for m in messages[:u] if m["role"] == "assistant"]
     agenda = next((p for p in messages[1]["content"].split("\n\n") if p.startswith(AGENDA_HEADER)), "")
     lines = [f"Tools: {', '.join(tools)}"]
@@ -173,10 +169,12 @@ def run(step, messages, *, call_tool, emit, budget=8, control=None, resume=False
     """`second_look`: the tool names offered this turn; when given, a final answer that came with
     no tool result is checked once by `final_step` (D51)."""
     usage, check = None, None
+    called = resume  # a tool ran in this turn: the second look never reads a tool-backed answer
     said = []  # everything streamed this turn reaches the ledger; only a withdrawn draft leaves it
 
     def with_said(e, parts=()):
         e.said = "".join(said + list(parts))  # a gate question, or text a model error cut, must reach the ledger
+        e.check = check  # a re-run that gates or fails still owes turn_end its check
         return e
 
     if resume:
@@ -241,8 +239,7 @@ def run(step, messages, *, call_tool, emit, budget=8, control=None, resume=False
         messages.append(assistant_msg)
 
         if not tool_calls:
-            if (second_look is not None and check is None and text.strip() and i < budget
-                    and all(m["role"] != "tool" for m in messages[_last_user(messages):])):
+            if second_look is not None and check is None and not called and text.strip() and i < budget:
                 flags, why, used = _second_look(final_step, second_look, messages)
                 usage = _sum_usage(usage, used)  # the harness's own call, like D30's: not a step
                 check = "failed" if flags is None else "flagged" if flags else "passed"
@@ -258,6 +255,7 @@ def run(step, messages, *, call_tool, emit, budget=8, control=None, resume=False
                     continue
             return Outcome("answer", text="".join(said), steps=i, usage=usage, check=check)
 
+        called = True
         try:
             settle(messages, call_tool, control)  # a Gate propagates out of here
         except Gate as g:

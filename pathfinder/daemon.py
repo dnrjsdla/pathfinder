@@ -722,7 +722,7 @@ class Daemon:
             self.record("approval_pending", session=s.id, turn=turn, origin="user", id=approval_id,
                         call_id=g.id, tool=g.name, args=g.arguments, messages=messages)
             self.send(s, {"type": "gate", "id": approval_id, "tool": g.name, "args": g.arguments})
-            self.record("turn_end", session=s.id, turn=turn, origin="user", kind="gated")
+            self.record("turn_end", session=s.id, turn=turn, origin="user", kind="gated", check=g.check)
             return "gated"
         except LLMError as e:
             # Out of credit, rate limited, offline, no model set: the assistant goes quiet,
@@ -731,7 +731,8 @@ class Daemon:
                 self.record("assistant", session=s.id, turn=turn, origin="user", text=e.said, final=True)
             self.record("error", session=s.id, turn=turn, origin="user", status=e.status, message=str(e)[:300])
             self.send(s, {"type": "error", "message": str(e)[:300]})
-            self.record("turn_end", session=s.id, turn=turn, origin="user", kind="error")
+            self.record("turn_end", session=s.id, turn=turn, origin="user", kind="error",
+                        check=getattr(e, "check", None))
             return "error"
 
         if out.kind == "cancelled":

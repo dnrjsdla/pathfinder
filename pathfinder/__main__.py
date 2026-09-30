@@ -413,6 +413,7 @@ def main(argv=None):
     if len(args) == 2 and args[0] == "service" and args[1] in ("start", "stop", "restart", "status"):
         return init_mod.service(home, args[1])
     if args == ["daemon"]:
+        config.make_private(home)  # every upgrade, and launchd's daemon.log
         try:
             asyncio.run(Daemon(home).serve())
         except KeyboardInterrupt:

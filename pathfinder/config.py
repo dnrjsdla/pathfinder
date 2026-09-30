@@ -142,6 +142,19 @@ def home() -> Path:
     return path
 
 
+def make_private(home: Path) -> None:
+    """Drop group and other bits from everything under the home (`mode & 0o700`, so the owner's
+    x stays). A symlink is skipped, never followed, and `workspace/` is not entered: the owner's
+    working files keep their modes. Called once, at daemon start - not in `home()`, which runs on
+    every tool call."""
+    for root, dirs, files in os.walk(home):
+        if root == str(home) and "workspace" in dirs:
+            dirs.remove("workspace")
+        for path in (os.path.join(root, name) for name in dirs + files):
+            if not os.path.islink(path):
+                os.chmod(path, os.stat(path).st_mode & 0o700)
+
+
 def load(home: Path) -> dict:
     cfg = dict(DEFAULTS)
     config_path = Path(home) / "config.json"

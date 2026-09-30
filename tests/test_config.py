@@ -138,6 +138,28 @@ class ConfigTest(unittest.TestCase):
             else:
                 os.environ["PATHFINDER_HOME"] = old
 
+    def test_make_private_drops_group_other_keeps_owner_x_skips_symlinks_and_workspace(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home, outside = Path(tmp) / "home", Path(tmp) / "outside"
+            for d in (home / "events", home / "workspace", outside):
+                d.mkdir(parents=True)
+            ledger, script, mine, theirs = (home / "events" / "0.jsonl", home / "run.sh",
+                                            home / "workspace" / "draft.txt", outside / "f")
+            for f in (ledger, script, mine, theirs):
+                f.write_text("x")
+            for p, mode in ((home / "events", 0o755), (ledger, 0o644), (script, 0o755),
+                            (home / "workspace", 0o755), (mine, 0o644), (outside, 0o755), (theirs, 0o644)):
+                os.chmod(p, mode)
+            (home / "link-file").symlink_to(theirs)
+            (home / "link-dir").symlink_to(outside)
+            config.make_private(home)
+
+            def mode(p):
+                return p.stat().st_mode & 0o777
+            self.assertEqual([mode(home / "events"), mode(ledger), mode(script)], [0o700, 0o600, 0o700])
+            self.assertEqual([mode(home / "workspace"), mode(mine)], [0o755, 0o644])
+            self.assertEqual([mode(outside), mode(theirs)], [0o755, 0o644])  # neither link followed
+
 
 if __name__ == "__main__":
     unittest.main()

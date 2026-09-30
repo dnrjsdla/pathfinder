@@ -599,6 +599,18 @@ fallback.
 
 `state.open_approvals` is ~+6 lines.
 
+**As built (U6, U32).**
+- `state.open_approvals(session, max_age_s)`: the asking session's own pending gates, plus a job's
+  pending gate from any other session while it is fresh (`now - ts <= session_resume_s`, the two
+  hours that end a session), each only if newer than the asking session's last `user` message.
+  A job gate older than that is approved with `/approve <id>`, never by a phrase.
+- The reply, one line per open gate, the way out once at the end:
+  `승인은 채팅으로 받지 않습니다 · approvals are not taken in chat: /approve <id> or /deny <id>
+  (<tool>; shell: pathfinder approve|deny <id>) - if you meant something else, say it again ·
+  다른 뜻이었다면 다시 말해 주세요`.
+- The first phrase gets the line; a second one reaches the model (the gate is then older than
+  the last `user` message). A curly apostrophe matches like a plain one.
+
 ## pathfinder/mirror.py — the registry copy (D46; built in U1: 188 lines, ceiling 200 by D56)
 
 **Built as specified below.** The review added handling for four failures it reproduced (D56):
@@ -1510,7 +1522,7 @@ parallel. **Deploy gate: U15a, U21, U31 and U33.**
 | U25 | **done, merged** | Gmail: `search_mail`, the filter, `HOME`, the watermark, the IMAP move | `senses/_imap.py` (new), `senses/mail.py` | +65 / −30 | U21 | `test_query_goes_as_a_literal_utf8`, `test_first_poll_takes_the_watermark_silently` |
 | U31 | **done, merged** | Every tool result passes `tools.clean` (D62); `oneline` is `clean` plus flattening; the mail body filter becomes `clean` | `tools.py`, `broker.py`, `senses/mail.py` | tools +5, broker +6, mail −1 | U25, U6 | `test_tool_result_loses_bidi_zero_width_ansi_and_controls`, `test_tool_result_keeps_newlines_tabs_and_spacing`, `test_error_text_passes_the_filter`, `test_ledger_keeps_the_raw_result`, `test_oneline_is_clean_then_flatten` |
 | U26 | not started | The mail password intake; the daemon asks at start when the item is missing | `keychain.py` (`target`), `tui.py`, `__main__.py`, `daemon.py` | +12, daemon +4 | U16, U15b | `test_secret_mail_resolves_service_and_user`, `test_missing_mail_password_is_asked_at_start` |
-| U32 | not started | D63: only the owner's activity keeps a session alive; notice text passes `clean`; the approval line's way out | `state.py`, `daemon.py`, `jobs.py`, `broker.py` | +6 | U7a, U31 | `test_say_after_a_job_gate_in_an_aged_session_lands_in_the_new_session` |
+| U32 | **done, merged** | D63: only the owner's activity keeps a session alive; notice text passes `clean`; the approval line's way out | `state.py`, `daemon.py`, `jobs.py`, `broker.py` | +6 | U7a, U31 | `test_say_after_a_job_gate_in_an_aged_session_lands_in_the_new_session` |
 | U33 | not started | The remaining raw exits: the agenda, sense summaries, MCP parameter schemas, gate lines, `sanitize` (**deploy gate**) | `senses/*.py`, `mcp/tools.py`, `mcp/protocol.py`, `tui.py` | +10 | U31, U7b | `test_agenda_lines_pass_the_filter` |
 | U27 | not started | Skills (D58, D61): the seed copy, the index, `read_skill` | `skills.py` (new), `pyproject.toml`, `daemon.py` (`skills.bind`) | ~80, +1, daemon +1 | — | `test_seed_is_copied_when_missing_and_never_overwrites`, `test_index_lists_every_skill_sorted_and_uncut` |
 | U28 | not started | Skills: the write path (a proposal from a user turn, always approved) | `memory.py` (`vault_path`), `prompts/system.txt` | +4 | U27, U8 | `test_skills_target_user_only_and_always_approved` |

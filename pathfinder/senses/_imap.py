@@ -71,11 +71,11 @@ def valid_id(id):
     return bool(_MSGID_RE.fullmatch(id)) and '"' not in id and "\\" not in id
 
 
-def message_id(msg, fallback):
-    """A Message-ID `read_mail` can take back, else `fallback` (`uid:N`): missing, folded wrong,
-    too long, or holding anything outside printable ASCII."""
+def message_id(msg, key, uid):
+    """A Message-ID `read_mail` can take back, else `uid:<UIDVALIDITY>.<UID>` (`key` from `connect`)
+    when it is missing, folded wrong, too long, or holds anything outside printable ASCII."""
     mid = _raw(msg, "Message-ID").strip()
-    return mid if mid.startswith("<") and mid.endswith(">") and valid_id(mid) else fallback
+    return mid if mid.startswith("<") and mid.endswith(">") and valid_id(mid) else f"uid:{key[3].decode()}.{int(uid)}"
 
 
 def uids(conn, *criteria):
@@ -95,11 +95,14 @@ def search(conn, query):
     return uids(conn, "CHARSET", "UTF-8", key)
 
 
-def uid_of(conn, id):
-    """The UID behind an id `message_id` handed out (`id` has passed `valid_id`): `uid:N` is that
-    UID, a Message-ID is searched for."""
-    if re.fullmatch(r"uid:[0-9]{1,10}", id):
-        return id[4:]
+def uid_of(conn, key, id):
+    """The UID behind an id `message_id` handed out (`id` has passed `valid_id`). A `uid:` id names
+    its mailbox generation: after a rebuild the same UID is another mail, so it is refused."""
+    m = re.fullmatch(r"uid:([0-9]{1,10})\.([0-9]{1,10})", id)
+    if m and m[1].encode() != key[3]:
+        raise ValueError("that id is from before the mailbox was rebuilt; list the mail again")
+    if m:
+        return m[2]
     found = uids(conn, None, f'(HEADER MESSAGE-ID "{id}")')
     if not found:
         raise LookupError(f"no mail with Message-ID {id!r}")

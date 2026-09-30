@@ -41,14 +41,11 @@ def poll(options, now):
             msg = _imap.fetch(conn, uid)
             if msg is None:
                 continue
-            sender = _imap.header(msg, "From")
-            subject = _imap.header(msg, "Subject") or "(no subject)"
-            message_id = _imap.message_id(msg, f"uid:{uid}")
-            domain = sender.rsplit("@", 1)[-1].rstrip(">") if "@" in sender else ""
+            row = _row(_imap.message_id(msg, key, uid), msg)  # the notice is one clean line, as a tool row
+            domain = row["from"].rsplit("@", 1)[-1].rstrip(">") if "@" in row["from"] else ""
             out.append(Signal(
-                sense="mail", kind="new_mail", key=message_id, summary=f"Mail from {sender}: {subject}",
-                fields={"from": sender, "sender_domain": domain, "subject": subject,
-                        "received": _imap.header(msg, "Date")},
+                sense="mail", kind="new_mail", key=row["id"], summary=f"Mail from {row['from']}: {row['subject']}",
+                fields={"from": row["from"], "sender_domain": domain, "subject": row["subject"], "received": row["date"]},
                 trust=TRUST))
         return out
     finally:
@@ -66,22 +63,22 @@ def _row(id, msg):
     return {"id": id, "from": head["From"], "subject": head["Subject"] or "(no subject)", "date": head["Date"]}
 
 
-def _newest(conn, uids, limit):
+def _newest(conn, key, uids, limit):
     """The newest `limit` of `uids`, newest first, headers only."""
     out = []
     for uid in sorted(uids, key=int)[-limit:][::-1]:
         msg = _imap.fetch(conn, uid.decode())
         if msg is not None:
-            out.append(_row(_imap.message_id(msg, f"uid:{uid.decode()}"), msg))
+            out.append(_row(_imap.message_id(msg, key, uid), msg))
     return out
 
 
 def _list_mail(limit=10, control=None):
     if not 1 <= limit <= 20:
         raise ValueError("limit must be 1-20")
-    conn, _key = _imap.connect(_options())
+    conn, key = _imap.connect(_options())
     try:
-        return _newest(conn, _imap.uids(conn, None, "ALL"), limit)
+        return _newest(conn, key, _imap.uids(conn, None, "ALL"), limit)
     finally:
         _imap.logout(conn)
 
@@ -89,9 +86,9 @@ def _list_mail(limit=10, control=None):
 def _search_mail(query, limit=10, control=None):
     if not 0 < len(query) <= 200 or not query.isprintable() or not 1 <= limit <= 20:
         raise ValueError("query must be 1-200 printable characters, limit 1-20")
-    conn, _key = _imap.connect(_options())
+    conn, key = _imap.connect(_options())
     try:
-        return _newest(conn, _imap.search(conn, query), limit)
+        return _newest(conn, key, _imap.search(conn, query), limit)
     finally:
         _imap.logout(conn)
 
@@ -99,9 +96,9 @@ def _search_mail(query, limit=10, control=None):
 def _read_mail(id, control=None):
     if not _imap.valid_id(id):  # model-supplied, and a Message-ID goes into a SEARCH string
         raise ValueError("not a Message-ID")
-    conn, _key = _imap.connect(_options())
+    conn, key = _imap.connect(_options())
     try:
-        msg = _imap.fetch(conn, _imap.uid_of(conn, id), "(BODY.PEEK[])")
+        msg = _imap.fetch(conn, _imap.uid_of(conn, key, id), "(BODY.PEEK[])")
         if msg is None:
             raise LookupError(f"could not fetch mail {id!r}")
         # keeps its newlines; each line loses what `oneline` drops (controls, bidi, zero-width)

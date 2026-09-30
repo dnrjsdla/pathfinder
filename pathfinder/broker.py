@@ -5,12 +5,14 @@ import json
 import unicodedata
 
 from . import policy
-from .tools import READ_CLIP, clip, coerce
+from .tools import READ_CLIP, clean, clip, coerce, map_strings
 
 
 def _clip_for_model(value):
-    """Every tool result reaches `loop.settle` as `json.dumps(this)` - clip here, the one
-    place, so no tool (or a future one) can push an unbounded blob into the model's context."""
+    """Every tool result reaches `loop.settle` as `json.dumps(this)` - filter and clip here, the
+    one place, so no tool (or a future one) can push control characters or an unbounded blob into
+    the model's context (D62). The ledger's `tool_result` was emitted before, with the raw value."""
+    value = map_strings(value, clean)
     if isinstance(value, str):
         return clip(value)
     text = json.dumps(value, ensure_ascii=False)

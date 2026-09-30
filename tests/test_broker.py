@@ -1,7 +1,10 @@
+import tempfile
 import unittest
+from pathlib import Path
 
 from pathfinder import policy
 from pathfinder.broker import CHAT_APPROVAL, USER_DENIED_TEXT, Broker, Gate, chat_approval
+from pathfinder.ledger import Ledger
 from pathfinder.tools import ToolSpec
 
 
@@ -104,6 +107,43 @@ class BrokerTest(unittest.TestCase):
         b, emitted = self._broker()
         result = b.call("c1", "read_thing", {})
         self.assertEqual(result, {"ok": True, "result": {"done": True}})
+
+    def _result_of(self, handler):
+        b, emitted = self._broker()
+        b.tools = {**TOOLS, "t": _spec("t", handler=handler)}
+        return b.call("c1", "t", {}), emitted
+
+    def test_tool_result_loses_bidi_zero_width_ansi_and_controls(self):
+        """D62: a web page, a mail body or an MCP server's text reached the model as it came."""
+        hostile = "\x1b[31mred\x1b[0m \u202egnp.exe\u200b\x07\x00 \x1b]8;;https://example.com\x07link\x1b]8;;\x07\ufeff"
+        result, _ = self._result_of(lambda control=None: hostile)
+        self.assertEqual(result, {"ok": True, "result": "red gnp.exe link"})
+        result, _ = self._result_of(lambda control=None: {"k\u200b": [hostile, (hostile, 1)], "n": None})
+        self.assertEqual(result["result"], {"k": ["red gnp.exe link", ["red gnp.exe link", 1]], "n": None})
+
+    def test_tool_result_keeps_newlines_tabs_and_spacing(self):
+        code = 'def f():\n\tif x:\n        return {"a":  1}\n\n# 한국어  주석 👍\n'
+        result, _ = self._result_of(lambda control=None: code)
+        self.assertEqual(result["result"], code)  # code and a page keep their shape
+        result, _ = self._result_of(lambda control=None: {"text": "a\r\nb\u00a0 c\u2028d\re\r\n"})
+        self.assertEqual(result["result"], {"text": "a\nb  c d e\n"})  # CRLF a newline; other whitespace one space
+
+    def test_error_text_passes_the_filter(self):
+        def boom(control=None):
+            raise RuntimeError("\x1b[31mka\u202eboom\u200b\x07\n\tat line 2")
+        result, _ = self._result_of(boom)
+        self.assertEqual(result, {"ok": False, "error": "kaboom\n\tat line 2"})
+
+    def test_ledger_keeps_the_raw_result(self):
+        """The filter is on the way to the model; the ledger holds what the tool returned."""
+        raw = {"text": "\x1b[31mred\x1b[0m\u202e\u200b\x07\r\n"}
+        with tempfile.TemporaryDirectory() as tmp:
+            led = Ledger(Path(tmp))
+            b = Broker({"t": _spec("t", handler=lambda control=None: raw)}, "user", {}, control=None,
+                       emit=lambda kind, payload: led.append(kind, origin="user", **payload))
+            self.assertEqual(b.call("c1", "t", {})["result"], {"text": "red\n"})  # what the model sees
+            [event] = [e for e in led.read() if e["type"] == "tool_result"]
+        self.assertEqual(event["result"], raw)
 
 
 class ChatApprovalTest(unittest.TestCase):

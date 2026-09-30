@@ -131,13 +131,31 @@ def clip(text: str, limit: int = READ_CLIP) -> str:
 _ANSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
 
 
+def clean(text) -> str:
+    """The one character rule for someone else's text (D62): whole ANSI sequences out, every non-printable
+    character (controls, bidi marks, zero-width) dropped, a newline and a tab kept (a CRLF pair becomes a
+    newline), any other whitespace one space. Nothing is collapsed, so code and a page keep their shape."""
+    text = _ANSI_RE.sub("", str(text)).replace("\r\n", "\n")
+    return "".join(ch if ch in "\n\t" or not ch.isspace() else " "
+                   for ch in text if ch.isspace() or ch.isprintable())
+
+
 def oneline(text, n=None) -> str:
-    """Someone else's text (a registry name, a mail subject, a calendar title): whole ANSI sequences out,
-    whitespace to one space, every non-printable character (controls, bidi marks, zero-width) dropped, at most
-    `n` characters. Everything such text hands the model or the screen goes through this."""
-    text = _ANSI_RE.sub("", str(text))
-    text = "".join(" " if ch.isspace() else ch for ch in text if ch.isspace() or ch.isprintable())
-    return " ".join(text.split())[:n]
+    """Someone else's text (a registry name, a mail subject, a calendar title) on one line: `clean`,
+    whitespace to one space, at most `n` characters. Everything such text hands the model or the screen
+    outside a tool result goes through this."""
+    return " ".join(clean(text).split())[:n]
+
+
+def map_strings(value, fn):
+    """Every string in `value`, dict keys too, however deep, through `fn`; a tuple comes back a list."""
+    if isinstance(value, str):
+        return fn(value)
+    if isinstance(value, dict):
+        return {map_strings(k, fn): map_strings(v, fn) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [map_strings(v, fn) for v in value]
+    return value
 
 
 def clip_for_ledger(value, limit: int = LEDGER_CLIP):

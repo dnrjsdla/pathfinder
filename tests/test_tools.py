@@ -89,5 +89,27 @@ class OriginRegistryTest(unittest.TestCase):
             del tools_mod.TOOLS["memory_only_thing"]
 
 
+def _oneline_before_u31(text, n=None):
+    """`tools.oneline` as it was before U31, kept to prove the new one is byte-identical."""
+    text = tools_mod._ANSI_RE.sub("", str(text))
+    text = "".join(" " if ch.isspace() else ch for ch in text if ch.isspace() or ch.isprintable())
+    return " ".join(text.split())[:n]
+
+
+class CleanTest(unittest.TestCase):
+    def test_oneline_is_clean_then_flatten(self):
+        """D62: one character rule. `oneline` is `clean` plus flattening, and its output is unchanged."""
+        every_bmp = "".join(chr(c) for c in range(0xD800)) + "".join(chr(c) for c in range(0xE000, 0x10000))
+        corpus = [every_bmp, "\ud800 lone", "👩\u200d💻 \U0001F600\U000E0001\U0010FFFF", None, 42,
+                  "\x1b[31mred\x1b[0m \x1b]0;title\x07 \x1b]8;;u\x1b\\x \x1b[ half \x1b", "  \r\n\t\v\f\x1c\x85\u2028 a  \n b\u3000c  "]
+        corpus += [chr(c) + " x\ty " + chr(c) for c in range(0x10000)]
+        for text in corpus:
+            for n in (None, 0, 5, 300):
+                self.assertEqual(tools_mod.oneline(text, n), _oneline_before_u31(text, n), repr(text)[:80])
+                self.assertEqual(tools_mod.oneline(text, n), " ".join(tools_mod.clean(text).split())[:n])
+        self.assertEqual(tools_mod.clean("a\u200d\tb\r\n  c\x1b[1m\rd"), "a\tb\n  c d")
+        self.assertEqual(tools_mod.clean("👩\u200d💻"), "👩💻")  # D62's reversal clause: the joiner goes
+
+
 if __name__ == "__main__":
     unittest.main()

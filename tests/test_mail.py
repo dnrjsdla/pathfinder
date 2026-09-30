@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest import mock
 
 from pathfinder import config
+from pathfinder.broker import _clip_for_model
 from pathfinder.senses import mail as mail_sense
 
 _KEY = ("imap.example.com", "me@example.com", "INBOX", b"1")  # what FakeIMAP's defaults connect to
@@ -261,7 +262,9 @@ class MailToolsTest(unittest.TestCase):
             self.assertNotIn("[31m", row["from"])  # the ANSI sequence goes whole
             self.assertTrue(row["subject"].startswith("gnp.exe x"))
             self.assertEqual(row["date"], "Tue, 29 Sep 2026 10:00:00 +0900")
-        self.assertEqual(rows[2]["body"], "line one\n\nline three")  # newlines kept, the rest filtered
+        # the body reaches the model as a tool result, through the broker's filter (D62): newlines kept,
+        # a CRLF pair one newline, controls, bidi and zero-width gone
+        self.assertEqual(_clip_for_model(rows[2])["body"], "line one\n\nline three\n")
 
     def test_hostile_header_degrades_to_its_own_row(self):
         """Review: an encoded-word From that decodes to CR/LF made `msg.get` raise, failing every
@@ -299,7 +302,7 @@ class MailToolsTest(unittest.TestCase):
             rows = self._call(FakeIMAP(message=mail, search_uids=b"9"), mail_sense._list_mail, 1)
             self.assertEqual(rows[0]["id"], "uid:1.9")  # UIDVALIDITY 1, UID 9
         fake = FakeIMAP(message=mail)
-        self.assertEqual(self._call(fake, mail_sense._read_mail, "uid:1.9")["body"], "body")
+        self.assertEqual(self._call(fake, mail_sense._read_mail, "uid:1.9")["body"], "body\r\n")
         self.assertEqual(self._searches(fake), [])  # no HEADER MESSAGE-ID "uid:1.9" search
         self.assertEqual([c[2] for c in fake.commands if c[:2] == ("uid", "fetch")], [("9", "(BODY.PEEK[])")])
 
@@ -308,7 +311,7 @@ class MailToolsTest(unittest.TestCase):
         mail = b"From: a@example.com\r\nSubject: s\r\nMessage-ID: junk\r\n\r\nbody\r\n"
         rid = self._call(FakeIMAP(message=mail, uidvalidity=b"7", search_uids=b"9"), mail_sense._list_mail, 1)[0]["id"]
         self.assertEqual(rid, "uid:7.9")
-        self.assertEqual(self._call(FakeIMAP(message=mail, uidvalidity=b"7"), mail_sense._read_mail, rid)["body"], "body")
+        self.assertEqual(self._call(FakeIMAP(message=mail, uidvalidity=b"7"), mail_sense._read_mail, rid)["body"], "body\r\n")
         rebuilt = FakeIMAP(message=mail, uidvalidity=b"8")
         with self.assertRaisesRegex(ValueError, "rebuilt"):
             self._call(rebuilt, mail_sense._read_mail, rid)

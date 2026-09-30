@@ -72,11 +72,7 @@ class Signal:
 
 def _clean(value):
     """Every string inside a signal's `fields`, keys too, however deep, through `tools.oneline`."""
-    if isinstance(value, dict):
-        return {_clean(k): _clean(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_clean(v) for v in value]
-    return tools.oneline(value, 300) if isinstance(value, str) else value
+    return tools.map_strings(value, lambda text: tools.oneline(text, 300))
 
 
 def render_block(signal: Signal) -> str:

@@ -56,7 +56,7 @@ daemon.Daemon ── 세션마다 lane 하나 (큐 + 워커); 큐 항목: say | 
 | `~/Library/LaunchAgents/pathfinder.daemon.plist` | launchd 에이전트: 지금 인터프리터로 `-m pathfinder daemon`, 리터럴 `PATH`, 설정돼 있으면 `PATHFINDER_HOME`, `KeepAlive`, 로그는 `<home>/daemon.log`, `WorkingDirectory` = 패키지의 부모 | `init`(plistlib), 예라고 한 뒤 | `init` 을 다시 돌리기 전까지 `pathfinder service start` 가 실패 |
 | `<home>/daemon.log` | launchd 아래 데몬의 stderr | launchd | 없음 |
 | `<home>/hooks/pathfinder.zsh` 와 `~/.zshrc` 의 가드된 한 줄 | 셸 감각의 `preexec`/`precmd` 훅(`docs/senses.md`), 파일이 있을 때만 source | `init`, 예라고 한 뒤; `~/.zshrc` 는 `~/.zshrc.pathfinder-<ts>` 로 백업하고 덧붙이기만, 다시 쓰지 않음 | 셸 감각이 아무것도 못 듣는다 |
-| `~/.claude/settings.json`(`hooks.Stop`, `hooks.Notification`) | Claude Code 감각의 훅 두 항목 | `init` 이 `installer.merge_json_file`(D36)로: 백업 · 원자 쓰기 · 읽어서 대조; `pathfinder signal claude_code` 표식으로 멱등 | Claude Code 자기 일 |
+| `~/.claude/settings.json`(`hooks.Stop`, `hooks.Notification`) | Claude Code 감각의 훅 두 항목 | `init` 이 `config.merge_json_file`(D60)로: 백업 · 원자 쓰기 · 읽어서 대조; `pathfinder signal claude_code` 표식으로 멱등 | Claude Code 자기 일 |
 | macOS Keychain `pathfinder-mcp-<id>` / `pathfinder-mail` | 모든 비밀(MCP 서버 토큰, IMAP 비밀번호) | 사용자가 손으로(`security add-generic-password`) | 서버는 `disabled: secret missing: <NAME>` 로 남고, 메일 감각은 오류 |
 
 `<홈>` 은 `$PATHFINDER_HOME` 또는 `~/.pathfinder` (권한 0700).
@@ -738,7 +738,7 @@ python3 -m pathfinder memory undo                  # 최근 memory_apply 를 그
   묻고 `config.set` 한 번으로 `senses` 에 병합(mail · calendar 는 묻지 않고 안내만 — 비밀번호나 권한
   창이 필요하고 `init` 은 어느 쪽에도 막히면 안 된다); 셸 훅(스니펫을 `<home>/hooks/pathfinder.zsh`
   에, 백업 뒤 `~/.zshrc` 에 가드된 한 줄 덧붙임 — 파일 끝에 줄바꿈이 없으면 먼저 하나; 스니펫은
-  `zsh/datetime` 을 싣고 `add-zsh-hook` 으로 사용자 훅 옆에 붙는다); Claude Code 훅(`installer.merge_json_file`, D36 으로
+  `zsh/datetime` 을 싣고 `add-zsh-hook` 으로 사용자 훅 옆에 붙는다); Claude Code 훅(`config.merge_json_file`, D60 으로
   `~/.claude/settings.json` 에 두 항목 병합); launchd 에이전트(`plistlib` 로 쓰고 `launchctl bootstrap
   gui/<uid> <plist>`, 그 뒤 소켓을 최대 10초 기다림). 모든 단계가 멱등이다: 두 번째 실행은 파생 파일을
   바꾸지 않는다. 답은 `input()` 으로 받아 테스트가 파이프로 넣고, `launchctl` 은 주입 가능한 함수 하나다.

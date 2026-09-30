@@ -13,7 +13,8 @@ from types import SimpleNamespace
 from unittest import mock
 
 from pathfinder import catalog, config, mirror, tools as tools_mod
-from pathfinder.installer import Installer, merge_json_file, render_row, server_id
+from pathfinder.config import merge_json_file
+from pathfinder.installer import Installer, render_row, server_id
 from pathfinder.ledger import Ledger
 from pathfinder.state import State
 

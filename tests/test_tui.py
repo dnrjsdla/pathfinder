@@ -291,7 +291,7 @@ class TuiCase(unittest.TestCase):
         from pathfinder.loop import FLAG_WORDS
         msg = {"type": "retract", "what": FLAG_WORDS["unsupported_state"], "why": "MODEL-WHY"}
         line = ("철회 · withdrawn: the answer above says what the calendar, reminders, memory or registry "
-                "hold with no tool result in this turn - checking with the tools")
+                "hold without calling a tool - trying again with the tools")
         self.assertEqual(tui.render(msg), tui.NOTICE_DIM + line + tui.RESET)
         server, client = socket.socketpair()
         with server, client:
@@ -301,7 +301,7 @@ class TuiCase(unittest.TestCase):
             out, err = io.StringIO(), io.StringIO()
             with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
                 self.assertEqual(cli._stream(client, []), 0)
-        self.assertEqual((out.getvalue(), err.getvalue()), ("Your list is empty.It holds two.\n", "\n" + line + "\n"))
+        self.assertEqual((out.getvalue(), err.getvalue()), ("Your list is empty.\nIt holds two.\n", line + "\n"))
 
     def test_notice_text_is_sanitized(self):
         out = tui.render({"type": "notice", "id": "n", "text": "bad\x07bell", "why": "y"})

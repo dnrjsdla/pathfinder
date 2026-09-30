@@ -284,6 +284,27 @@ class SecondLookTest(unittest.TestCase):
         out, _, _ = self._run([[("text", "Hi."), ("usage", {"prompt_tokens": 10, "completion_tokens": 2})]], looks)
         self.assertEqual((out.steps, out.usage), (1, {"prompt_tokens": 110, "completion_tokens": 11}))
 
+    def test_why_is_one_line_and_cut(self):
+        why = ("the agenda says so\n" * 300)[:5000]
+        looks = _looks([("text", _verdict(why, unsupported_state=True))])
+        out, messages, emitted = self._run([[("text", "Empty.")], [("text", "Two.")]], looks)
+        cut = ("the agenda says so " * 12)[:200]
+        self.assertEqual(emitted[1][1]["why"], cut)
+        self.assertEqual(messages[5]["content"], RERUN_NOTE.format(what=FLAG_WORDS["unsupported_state"], why=cut))
+
+    def test_interrupt_during_the_look_still_cuts_it(self):
+        """The look runs as a tool does: a steer waits for it (the daemon reads `in_tool`), an
+        interrupt still cancels it - the draft stands, check failed."""
+        control = TurnControl()
+
+        def look(messages):
+            look.in_tool = control.in_tool
+            control.interrupt.set()
+            yield ("cancelled", None)
+        out, messages, _ = self._run([[("text", "Empty.")]], look, control=control)
+        self.assertEqual((look.in_tool, control.in_tool), (True, False))
+        self.assertEqual((out.kind, out.text, out.check), ("answer", "Empty.", "failed"))
+
     def test_llm_error_mid_stream_carries_what_was_streamed(self):
         """Invariant 2: text already on the screen rides the error to the ledger."""
         def failing(messages):

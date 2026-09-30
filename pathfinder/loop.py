@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from .broker import Gate
 from .llm import LLMError
 from .signals import AGENDA_HEADER
+from .tools import oneline
 
 
 @dataclass
@@ -44,7 +45,7 @@ STEER_ENVELOPE = ("[The user interrupted mid-answer with the instruction below. 
                   "from exactly where the answer above stopped; do not repeat what was already written.]\n")
 
 # The second look (D51) - measured in m10 (HISTORY.md). Copied verbatim from
-# bench/m10_unsupported.py; test_invariants holds them byte-identical.
+# bench/m10_unsupported.py; U17's test_second_look_matches_the_bench will hold them byte-identical.
 VERIFIER_PROMPT = (
     "You check an assistant's draft answer before the user sees it. The assistant lives on the "
     "user's computer and can do exactly what the tools below do; MCP servers installed through "
@@ -147,10 +148,10 @@ def verifier_input(tools, messages):
 def _second_look(verify_step, tools, messages):
     """(flags, why, usage) - flags None when the look failed: an LLMError, bad JSON, a cancel,
     anything. A failed look lets the draft stand; its usage still counts."""
-    ask = [{"role": "system", "content": VERIFIER_PROMPT},
-           {"role": "user", "content": verifier_input(tools, messages)}]
     raw, usage = "", None
     try:
+        ask = [{"role": "system", "content": VERIFIER_PROMPT},
+               {"role": "user", "content": verifier_input(tools, messages)}]
         for kind, payload in verify_step(ask):
             if kind == "text":
                 raw += payload
@@ -159,7 +160,8 @@ def _second_look(verify_step, tools, messages):
             elif kind == "cancelled":
                 return None, "", usage
         parsed = json.loads(raw[raw.index("{"):raw.rindex("}") + 1])
-        return [k for k in FLAG_WORDS if parsed.get(k) is True], str(parsed.get("why") or ""), usage
+        # `why` is the verifier's words about text that may be a third party's (the agenda): one line, cut
+        return [k for k in FLAG_WORDS if parsed.get(k) is True], oneline(parsed.get("why") or "", 200), usage
     except Exception:  # caught here alone: the look is the harness's own call, never the turn's end
         return None, "", usage
 
@@ -240,7 +242,11 @@ def run(step, messages, *, call_tool, emit, budget=8, control=None, resume=False
 
         if not tool_calls:
             if second_look is not None and check is None and not called and text.strip() and i < budget:
+                if control is not None:
+                    control.in_tool = True  # a steer typed during the look waits for it; an interrupt still cuts
                 flags, why, used = _second_look(final_step, second_look, messages)
+                if control is not None:
+                    control.in_tool = False
                 usage = _sum_usage(usage, used)  # the harness's own call, like D30's: not a step
                 check = "failed" if flags is None else "flagged" if flags else "passed"
                 if flags:

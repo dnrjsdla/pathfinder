@@ -576,14 +576,15 @@ PASSED = FLAGGED.replace("true", "false")
 def scripted_model(verdict, draft="Your list is empty.", rerun="Checked: it holds two."):
     """Answers `draft` first and `rerun` after; the second look answers `verdict`. A user message,
     or `rerun`, names another ending: "error" breaks mid-stream, "stop" is interrupted mid-stream,
-    "loop" calls a tool until the budget runs out, "write" stops at the gate."""
+    "loop" calls a tool until the budget runs out ("loop-error": then D30's final step breaks
+    mid-stream), "write" stops at the gate."""
     def factory(cfg, control=None, tools=None):
         def step(messages):
             if messages[0]["content"] == VERIFIER_PROMPT:
                 yield ("text", verdict)
                 return
             said = [m["content"] for m in messages if m["role"] == "user"][-1]
-            if said not in ("error", "stop", "loop", "write"):
+            if said not in ("error", "stop", "loop", "loop-error", "write"):
                 factory.answers += 1
                 said = draft if factory.answers == 1 else rerun
             if said == "error":
@@ -593,8 +594,10 @@ def scripted_model(verdict, draft="Your list is empty.", rerun="Checked: it hold
                 yield ("text", "partial ")
                 control.interrupt.set()
                 yield ("cancelled", None)
-            elif said == "loop":
+            elif said in ("loop", "loop-error"):
                 yield ("text", "working " if tools else "no luck.")
+                if not tools and said == "loop-error":
+                    raise LLMError(500, "upstream went away")
                 if tools:
                     yield ("tool_calls", [{"id": "c1", "name": "anything", "arguments": {}}])
             elif said == "write":
@@ -657,12 +660,59 @@ class SecondLookDaemonTest(DaemonHarness):
             checks.append((end["kind"], end["check"]))
         self.assertEqual(checks, ["passed", "flagged", "failed", None, ("gated", "flagged"), ("error", "flagged")])
 
+    def test_steer_during_the_look_waits_for_it(self):
+        """The owner types during the 1-3 s look: the steer is queued, not a cut, so the verdict
+        stands; it is answered in the re-run (flagged) or in a turn of its own (passed)."""
+        for verdict, turns in ((PASSED, 2), (FLAGGED, 1)):
+            release = threading.Event()
+
+            def factory(cfg, control=None, tools=None):
+                def step(messages):
+                    if messages[0]["content"] == VERIFIER_PROMPT:
+                        factory.looks += 1
+                        if factory.looks == 1:
+                            release.wait(5)
+                        # the real adapter's cancel check: a cut here would fail the look
+                        answer = verdict if factory.looks == 1 else PASSED
+                        yield ("cancelled", None) if control.is_set() else ("text", answer)
+                        return
+                    factory.answers += 1
+                    yield ("text", f"answer {factory.answers}")
+                return step
+            factory.looks = factory.answers = 0
+
+            async def scenario(daemon):
+                c = await Client.open(self.home)
+                c.send({"type": "say", "text": "any reminders?"})
+                while not factory.looks:
+                    await asyncio.sleep(0.01)
+                s = next(iter(daemon.sessions.values()))
+                c.send({"type": "say", "text": "and in Korean"})
+                while not s.control.steers:
+                    await asyncio.sleep(0.01)
+                release.set()
+                for _ in range(turns):
+                    await c.until("turn.end")
+                c.close()
+
+            start = len(self.events())
+            self.run_with(factory, scenario)
+            events = [e for e in self.events()[start:] if e["type"] != "session_start"]
+            self.assertEqual([(e["type"], e.get("steer"), e.get("final"), e.get("check")) for e in events], {
+                PASSED: [("user", None, None, None), ("turn_start", None, None, None), ("user", True, None, None),
+                         ("assistant", None, True, None), ("turn_end", None, None, "passed"),
+                         ("turn_start", None, None, None), ("assistant", None, True, None),
+                         ("turn_end", None, None, "passed")],
+                FLAGGED: [("user", None, None, None), ("turn_start", None, None, None), ("user", True, None, None),
+                          ("assistant", None, False, None), ("assistant", None, True, None),
+                          ("turn_end", None, None, "flagged")]}[verdict])
+
     def test_every_streamed_delta_is_in_the_ledger(self):
         """Invariant 2: whatever the ending, the turn's assistant events hold every delta sent."""
-        endings = ("hi", "loop", "stop", "error", "any reminders?", "write")
+        endings = ("hi", "loop", "loop-error", "stop", "error", "any reminders?", "write")
         turns, _ = self._say(scripted_model(FLAGGED), *endings)
         self.assertEqual([seen[-1]["kind"] for seen in turns],
-                         ["answer", "exhausted", "cancelled", "error", "answer", "gated"])
+                         ["answer", "exhausted", "error", "cancelled", "error", "answer", "gated"])
         for seen in turns:
             turn = next(m for m in seen if m["type"] == "turn.start")["turn"]
             streamed = "".join(m["text"] for m in seen if m["type"] == "delta")

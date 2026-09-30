@@ -44,8 +44,7 @@ STRINGS = {
     "tool_ok": "도구 완료 · tool {name} done",
     "tool_fail": "도구 실패 · tool {name} failed",
     "notice": "알림 · notice: {text} ({why})",
-    "retract": "철회 · withdrawn: the answer above {what} with no tool result in this turn "
-               "- checking with the tools",
+    "retract": "철회 · withdrawn: the answer above {what} without calling a tool - trying again with the tools",
     "help": "알 수 없는 명령 · unknown command - try /approve, /deny, /approvals, /jobs, /quit",
     "no_approvals": "대기 중인 승인 없음 · no approvals seen this sitting",
     "no_jobs": "확인된 작업 없음 · no jobs seen this sitting",

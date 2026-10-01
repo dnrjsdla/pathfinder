@@ -95,7 +95,7 @@ def render(msg: dict) -> str | None:
     if kind == "secret.ask":  # D53, for a client with no masked input (`say`, `listen`)
         return tui_secret.needed(msg)
     if kind == "secret.stored":  # D53: the daemon stored an asked-for value; the proposal follows
-        return tui_secret.STRINGS["secret_stored_ask"].format(name=msg.get("name"), id=msg.get("server_id"))
+        return tui_secret.stored(msg)
     if kind == "pasted":  # D53: a token in the owner's own line went to the Keychain under a handle
         return "\n".join(tui_secret.STRINGS["pasted"].format(handle=h) for h in msg.get("handles") or [])
     return None
@@ -197,7 +197,7 @@ class _Session:
         return None
 
     def _secret_enter(self, spill):
-        try:  # stored in this process, or sent to the daemon for a harness ask (`tui_secret.Entry.enter`)
+        try:  # sent to the daemon, which stores it (`tui_secret.Entry.enter`)
             text = self.secret.enter(self.buf, self.in_fd, spill)
         except Exception as e:  # store's messages never carry the value
             text = STRINGS["error"].format(message=e)
@@ -271,7 +271,7 @@ class _Session:
         elif cmd in ("approvals", "jobs"):
             self._cli_list(cmd)
         elif cmd == "secret":
-            entry, text = tui_secret.entry(rest, self.home)
+            entry, text = tui_secret.entry(rest, self.home, self.send)
             if entry:
                 self._masked(entry)
             self.show(text)
@@ -323,7 +323,7 @@ class _Session:
             return
         if kind == "secret.ask":  # D53: the harness asks; the value is typed masked, never into the chat
             if self.secret:  # never in place of an open entry, whose value would go to the wrong name
-                return self.show(tui_secret.STRINGS["secret_busy"])
+                return self.show(tui_secret.STRINGS["secret_busy"] + tui_secret.needed(msg))
             entry, text = tui_secret.asked(msg, self.home, self.send)
             if entry:
                 self._masked(entry)

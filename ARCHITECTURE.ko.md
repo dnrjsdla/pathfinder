@@ -57,7 +57,7 @@ daemon.Daemon ── 세션마다 lane 하나 (큐 + 워커); 큐 항목: say | 
 | `<home>/daemon.log` | launchd 아래 데몬의 stderr | launchd | 없음 |
 | `<home>/hooks/pathfinder.zsh` 와 `~/.zshrc` 의 가드된 한 줄 | 셸 감각의 `preexec`/`precmd` 훅(`docs/senses.md`), 파일이 있을 때만 source | `init`, 예라고 한 뒤; `~/.zshrc` 는 `~/.zshrc.pathfinder-<ts>` 로 백업하고 덧붙이기만, 다시 쓰지 않음 | 셸 감각이 아무것도 못 듣는다 |
 | `~/.claude/settings.json`(`hooks.Stop`, `hooks.Notification`) | Claude Code 감각의 훅 두 항목 | `init` 이 `config.merge_json_file`(D60)로: 백업 · 원자 쓰기 · 읽어서 대조; `pathfinder signal claude_code` 표식으로 멱등 | Claude Code 자기 일 |
-| macOS Keychain `pathfinder-mcp-<id>` / `pathfinder-mail` | 모든 비밀(MCP 서버 토큰, IMAP 비밀번호) | 주인이 가려서: 화면의 `/secret <id> NAME` 나 `/secret mail`, 셸의 `pathfinder secret ...`(둘 다 `keychain.target` 이 푼다), 또는 데몬의 `secret.ask` 에 대한 답(`installer.secret`); 메일 감각이 켜져 있고 항목이 없으면 데몬은 화면이 붙을 때 묻는다 | 서버는 `disabled: secret missing: <NAME>` 로 남고, 메일 감각은 오류 |
+| macOS Keychain `pathfinder-mcp-<id>` / `pathfinder-mail` | 모든 비밀(MCP 서버 토큰, IMAP 비밀번호) | 주인이 가려서: 화면의 `/secret <id> NAME` 나 `/secret mail` 과 데몬의 `secret.ask` 에 대한 답(둘 다 데몬으로 보내고 `installer.secret` 가 저장), 또는 셸의 `pathfinder secret ...`(모두 `keychain.target` 이 푼다); 메일 감각이 켜져 있고 항목이 없으면 데몬은 화면이 붙을 때 묻는다 | 서버는 `disabled: secret missing: <NAME>` 로 남고, 메일 감각은 오류 |
 | macOS Keychain `pathfinder-pasted` / `pasted-<seq>[-i]` | 주인이 입력한(`trust: user` 인 사건) 토큰 모양 문자열(`keychain.TOKEN_RE`), 이름은 그 사건의 원장 seq; 사건에는 그 자리에 `[secret:pasted-<seq>]` 이 남고(D53, D66), 그 세션의 화면과 `say` 는 핸들과 묶는 법을 알리는 `pasted` 줄을 받는다. 다른 사건에서는 그 문자열이 키체인 호출 없이 `[redacted]` 로 쓰인다 | `ledger.append()` 가 `keychain.vault` 로, 같은 이름의 항목(다른 홈의 것)이 이미 있으면 덮어쓰지 않는다; 만든 지 24시간이 지나면 다음 붙여넣기나 데몬 시작 때 삭제; `keychain.bind`(셸이나 화면의 `secret <id> NAME --from pasted-<seq>`)가 `pathfinder-mcp-<id>`/NAME 으로 옮기고 지운다 - 만료됐거나 모르는 핸들이면 `expired - enter it again with /secret` | 원장에는 핸들만 남고 값은 사라진다 - `/secret` 으로 다시 입력 |
 | `<홈>/pasted.json` (0600) | `{"pasted": {핸들: 만든 시각}}` - 값은 절대 없음; 청소 때마다 항목이 사라진 핸들도 지운다 | 원장 잠금 아래의 `keychain.vault`, 데몬 시작 때의 `keychain.sweep`, 그리고 옮긴 핸들을 지우는 `keychain.bind` | 빈 것으로 읽힌다: 같은 번호를 두 번 주는 일은 없지만(seq 는 다시 나오지 않는다) 목록에 있던 항목은 더는 청소되지 않고 키체인에 모르는 채로 남는다 |
 
@@ -236,14 +236,14 @@ dict 를 키 튜플로 바꿔 버린다.
   `approve {id}` · `deny {id}`(작업자 자신의 승인은 세션 lane 대신 `jobs.Manager.resume` 으로
   간다 — §9) · `signal {sense, fields}`(push 문 — 감각이 로드되어 있고 push 가능해야 한다, 즉
   `build(fields)` 를 내보내야 한다; `jobs` 는 절대 아니다; 확인과 생성은 `signals.pushed`, D67) · `presence {idle_s}` ·
-  `react {vote, id?}` · `job.stop {id}` · `job.steer {id, text}` · `secret {server_id, name, server,
-  value}`(D53 의 주 경로: 화면이 가려 받은 답, `installer.secret` 가 받아 필드를 먼저 확인하고 워커 스레드에서
-  `keychain.take` 로 저장하고 기록하지 않으며, 뒤에서 그 서버를 다시 제안하되 멈출 때는 취소한다;
-  이름 없는 `server_id: "mail"` 은 메일 비밀번호). 나가는 것 `attached` ·
+  `react {vote, id?}` · `job.stop {id}` · `job.steer {id, text}` · `secret {server_id, name, value}`(D53: 묻기나 `/secret` 뒤에 화면이 가려 받은 값,
+  `installer.secret` 가 받아 필드를 먼저 확인하고 워커 스레드에서 `keychain.take` 로 저장하고 기록하지
+  않으며, 그 id 를 기다리던 설치를 뒤에서 다시 제안하되 멈출 때는 취소한다; 이름 없는
+  `server_id: "mail"` 은 메일 비밀번호; 오류는 보낸 쪽에만). 나가는 것 `attached` ·
   `turn.start` · `delta` · `tool {name, ok}` · `gate {id, tool, args}` · `turn.end {kind}` ·
   `notice {id, text, why}` · `job.start {id, goal}` · `job.gate {id, approval, tool, args}` · `job.end {id, state}` · `secret.ask {server_id, name, server}`(D40 검사가 없는 비밀에서 멈추면
   붙은 화면 모두에: 첫 이름, 다시 제안할 때 다음 이름; 화면은 가려서 받고 `--from` 에 쓸 살아 있는
-  붙여넣기 핸들을 보여 준다) · `secret.stored {server_id, name}`(모든 화면에: 다른 화면은 입력을 닫는다) · `pasted {handles}`(주인이 친 줄이
+  붙여넣기 핸들을 보여 준다) · `secret.stored {server_id, name, server}`(모든 화면에: 다른 화면은 입력을 닫는다) · `pasted {handles}`(주인이 친 줄이
   금고에 들어갔다) · `error`. 깨진 줄 ·
   모르는 종류 · 없거나 이미 결정된 승인 id · 도는 턴이 없는 interrupt 는 `error` 한 줄이고
   연결은 안 끊는다.

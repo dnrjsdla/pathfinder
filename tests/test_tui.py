@@ -67,6 +67,10 @@ class FakeDaemon:
         self._server.close()
 
 
+def _answer(value):
+    return {"type": "secret", "server_id": "rv11test", "name": "TOKEN", "value": value}
+
+
 def _wait_for(pred, timeout=2):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -127,6 +131,9 @@ class TuiCase(unittest.TestCase):
             if not chunk:
                 return
             self.output.extend(chunk)
+
+    def _secrets(self):
+        return [m for m in self.daemon.received if m["type"] == "secret"]
 
     def type_(self, s):
         try:
@@ -238,9 +245,9 @@ class TuiCase(unittest.TestCase):
         self.assertTrue(_wait_for(lambda: any(
             m == {"type": "react", "vote": "down"} for m in self.daemon.received)))
 
-    def test_slash_secret_masks_and_never_touches_the_socket(self):
-        """U11: the value is read masked and stored in the screen's own process - only `*` on the
-        screen, nothing on the socket, so no client attached to the daemon can receive it."""
+    def test_slash_secret_masks_and_sends_the_value_only_to_the_daemon(self):
+        """U11, as routed in U16's review: the value is read masked - only `*` on the screen - and
+        goes in one `secret` line to the daemon, which stores it; nothing else carries it."""
         value = "s3cr3t-" + "v4lue"
         with mock.patch("pathfinder.keychain.store") as store:
             self.type_("/secret rv11test TOKEN\r")
@@ -248,13 +255,13 @@ class TuiCase(unittest.TestCase):
             self.type_(value)
             self.assertTrue(_wait_for(lambda: self.out_text().endswith(tui_secret.SECRET_PROMPT + "*" * len(value))))
             self.type_("\r")
-            self.assertTrue(_wait_for(lambda: "TOKEN stored for rv11test" in self.out_text()))
+            self.assertTrue(_wait_for(lambda: "TOKEN for rv11test went to the daemon" in self.out_text()))
             self.type_("/secret Bad_Id TOKEN\r")
             self.assertTrue(_wait_for(lambda: "/secret ID NAME takes a server id" in self.out_text()))
-            store.assert_called_once_with("pathfinder-mcp-rv11test", "TOKEN", value, None)
+            store.assert_not_called()  # the daemon stores it, not the screen
         self.assertNotIn(value, self.out_text())
-        self.assertNotIn(value, json.dumps(self.daemon.received))
-        self.assertEqual({m["type"] for m in self.daemon.received} - {"attach", "presence"}, set())
+        self.assertEqual(self._secrets(), [_answer(value)])
+        self.assertEqual({m["type"] for m in self.daemon.received} - {"attach", "presence", "secret"}, set())
 
     def test_secret_ask_masks_lists_handles_and_sends_the_value(self):
         """U16: the harness asks - the masked prompt names the variable and the live pasted handles,
@@ -269,9 +276,8 @@ class TuiCase(unittest.TestCase):
         self.assertTrue(_wait_for(lambda: self.out_text().endswith(tui_secret.SECRET_PROMPT + "*" * len(value))))
         self.type_("\r")
         self.assertTrue(_wait_for(lambda: any(m["type"] == "secret" for m in self.daemon.received)))
-        self.assertEqual([m for m in self.daemon.received if m["type"] == "secret"],
-                         [{**ask, "type": "secret", "value": value}])
-        self.daemon.send({"type": "secret.stored", "server_id": "notion", "name": "NOTION_TOKEN"})
+        self.assertEqual(self._secrets(), [{"type": "secret", "server_id": "notion", "name": "NOTION_TOKEN", "value": value}])
+        self.daemon.send({"type": "secret.stored", "server_id": "notion", "name": "NOTION_TOKEN", "server": "io.example/notion"})
         self.assertTrue(_wait_for(lambda: "NOTION_TOKEN stored for notion; proposing it again" in self.out_text()))
         self.assertNotIn(value, self.out_text())
 
@@ -292,12 +298,13 @@ class TuiCase(unittest.TestCase):
             self.assertTrue(_wait_for(lambda: self.out_text().endswith(tui_secret.SECRET_PROMPT)))
             self.daemon.send(ask)
             self.assertTrue(_wait_for(lambda: "another secret entry is open" in self.out_text()))
+            self.assertIn("/secret notion NOTION_TOKEN in the screen takes it and proposes the install again",
+                          self.out_text())
             self.type_("v4lue")
             self.assertTrue(_wait_for(lambda: self.out_text().endswith(tui_secret.SECRET_PROMPT + "*" * 5)))
             self.type_("\r")
-            self.assertTrue(_wait_for(lambda: store.called))
-            store.assert_called_once_with("pathfinder-mcp-rv11test", "TOKEN", "v4lue", None)
-        self.assertNotIn("secret", [m["type"] for m in self.daemon.received])
+            self.assertTrue(_wait_for(lambda: self._secrets()))
+            self.assertEqual(self._secrets(), [_answer("v4lue")])  # the open entry's own name, not the ask's
 
     def test_ctrl_c_cancels_secret_entry(self):
         with mock.patch("pathfinder.keychain.store") as store:
@@ -324,7 +331,7 @@ class TuiCase(unittest.TestCase):
             self.assertTrue(_wait_for(lambda: "a secret is one line" in self.out_text()))
             self.type_("hello\r")  # back to plain input, nothing of the paste left in the buffer
             self.assertTrue(_wait_for(lambda: any(m.get("type") == "say" for m in self.daemon.received)))
-            store.assert_not_called()
+            self.assertEqual(self._secrets(), [])
         self.assertEqual([m for m in self.daemon.received if m["type"] == "say"], [{"type": "say", "text": "hello"}])
         for part in ("PART1-tok", "PART2-after", "PART3"):
             self.assertNotIn(part, self.out_text() + json.dumps(self.daemon.received))
@@ -350,8 +357,8 @@ class TuiCase(unittest.TestCase):
                 time.sleep(0.05)
             self.assertTrue(_wait_for(lambda: self.out_text().endswith(tui_secret.SECRET_PROMPT + "*" * 9)))
             self.type_("\r")
-            self.assertTrue(_wait_for(lambda: "TOKEN stored for rv11test" in self.out_text()))
-            store.assert_called_once_with("pathfinder-mcp-rv11test", "TOKEN", "tok-value", None)
+            self.assertTrue(_wait_for(lambda: "TOKEN for rv11test went to the daemon" in self.out_text()))
+            self.assertEqual(self._secrets(), [_answer("tok-value")])
         out = self.out_text()
         self.assertLess(out.index("\x1b[?2004h"), out.index("\x1b[?2004l"))  # off once stored, screen still up
         self.assertTrue(self._main.is_alive())
@@ -365,13 +372,13 @@ class TuiCase(unittest.TestCase):
                 self.type_("\x1b[200~tok-" + "value" + end + "\x1b[201~")
                 self.assertTrue(_wait_for(lambda: self.out_text().endswith(tui_secret.SECRET_PROMPT + "*" * 9)))
                 self.type_("\r")
-                self.assertTrue(_wait_for(lambda: store.call_count == n))
+                self.assertTrue(_wait_for(lambda: len(self._secrets()) == n))
             self.assertNotIn("a secret is one line", self.out_text())
             self.type_("/secret rv11test TOKEN\r")
             self.assertTrue(_wait_for(lambda: self.out_text().endswith(tui_secret.SECRET_PROMPT)))
             self.type_("\x1b[200~a\nb\x1b[201~")
             self.assertTrue(_wait_for(lambda: "a secret is one line" in self.out_text()))
-        self.assertEqual(store.call_args_list, [mock.call("pathfinder-mcp-rv11test", "TOKEN", "tok-value", None)] * 2)
+        self.assertEqual(self._secrets(), [_answer("tok-value")] * 2)
 
     def test_screen_closing_while_masked_turns_bracketed_paste_off(self):
         self.type_("/secret rv11test TOKEN\r")
@@ -388,8 +395,8 @@ class TuiCase(unittest.TestCase):
             self.type_("\x1b[200~BPASTE\x1b[201~\x1b[A\x1b[D\x1b[1;5C\x1bOP")
             self.assertTrue(_wait_for(lambda: self.out_text().endswith(tui_secret.SECRET_PROMPT + "******")))
             self.type_("\r")
-            self.assertTrue(_wait_for(lambda: store.called))
-            store.assert_called_once_with("pathfinder-mcp-rv11test", "TOKEN", "BPASTE", None)
+            self.assertTrue(_wait_for(lambda: self._secrets()))
+            self.assertEqual(self._secrets(), [_answer("BPASTE")])
 
     def test_ctrl_c_interrupts_a_running_stream_then_quits(self):
         self.daemon.send({"type": "turn.start", "turn": 1})

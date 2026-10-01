@@ -366,6 +366,12 @@ class InstallerTest(unittest.TestCase):
         self.assertTrue(event["server_id"])
         self.assertIn(f"/secret {event['server_id']} API_KEY", event["reason"])
 
+    def test_close_ends_a_trial_in_flight(self):
+        """Round 2: a stop ends the stdio trial's process, so the exit does not wait out its timeout."""
+        self.installer._trialing = mock.Mock()
+        self.installer.close()
+        self.installer._trialing.close.assert_called_once_with()
+
     def test_missing_optional_secret_still_trials(self):
         env = [{"name": "TOKEN", "secret": True, "required": False}]
         with mock.patch("pathfinder.installer.keychain.secret", return_value=None), \

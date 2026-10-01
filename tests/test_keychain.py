@@ -223,22 +223,26 @@ class BindTest(unittest.TestCase):
         name = "ghp_" + "a1" * 18  # built by concatenation, so the scanner never flags this file
         with self.assertRaisesRegex(ValueError, "looks like a token, not a name"):
             keychain.target(self.home, "gh", name)
-        entry, text = tui_secret.entry(f"gh {name}", self.home)
+        entry, text = tui_secret.entry(f"gh {name}", self.home, mock.Mock())
         self.assertIsNone(entry)
         self.assertIn("looks like a token", text)
         self.assertNotIn(name, text)
 
-    def test_cli_and_screen_bind_through_one_function(self):
+    def test_cli_binds_and_the_screen_sends_from_to_the_daemon(self):
+        """The CLI binds in its own process; the screen sends `--from` to the daemon, whose
+        `keychain.take` binds it (and proposes again an install waiting for it)."""
         from pathfinder import tui_secret
         from pathfinder.__main__ import main
+        send = mock.Mock()
         with mock.patch("pathfinder.keychain.bind") as bind, \
                 mock.patch.dict("os.environ", {"PATHFINDER_HOME": str(self.home)}), \
                 contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(main(["secret", "gh", "TOKEN", "--from", "pasted-7"]), 0)
-            entry, text = tui_secret.entry("gh TOKEN --from pasted-7", self.home)
+            entry, text = tui_secret.entry("gh TOKEN --from pasted-7", self.home, send)
         self.assertIsNone(entry)
-        self.assertIn("TOKEN stored for gh", text)
-        self.assertEqual(bind.call_args_list, [mock.call(self.home, "pasted-7", "pathfinder-mcp-gh", "TOKEN")] * 2)
+        self.assertIn("TOKEN for gh went to the daemon", text)
+        bind.assert_called_once_with(self.home, "pasted-7", "pathfinder-mcp-gh", "TOKEN")
+        send.assert_called_once_with({"type": "secret", "server_id": "gh", "name": "TOKEN", "value": "--from pasted-7"})
 
 
 class MailTargetTest(unittest.TestCase):
@@ -270,7 +274,7 @@ class MailTargetTest(unittest.TestCase):
         self.assertEqual(rc, 0)
         store.assert_called_once_with("pathfinder-mail", "mailbox-user", "v4lue")
         self.assertIn("app password for mailbox-user", ask.call_args[0][0])
-        entry, prompt = tui_secret.entry("mail", self.home)
+        entry, prompt = tui_secret.entry("mail", self.home, mock.Mock())
         self.assertIsNotNone(entry)
         self.assertIn("app password for mailbox-user (hidden;", prompt)
         self._mail(keychain_service="other-mail")
@@ -284,8 +288,8 @@ class MailTargetTest(unittest.TestCase):
         self.assertEqual(rc, 2)
         self.assertIn("turn the mail sense on first", err)
         store.assert_not_called()
-        self.assertEqual(tui_secret.entry("mail", self.home)[0], None)
-        self.assertIn("turn the mail sense on first", tui_secret.entry("mail", self.home)[1])
+        self.assertEqual(tui_secret.entry("mail", self.home, mock.Mock())[0], None)
+        self.assertIn("turn the mail sense on first", tui_secret.entry("mail", self.home, mock.Mock())[1])
         self.assertFalse(keychain.missing(self.home, "mail"))  # nothing to ask for, no Keychain call
 
     def test_mcp_server_named_mail_is_not_shadowed(self):

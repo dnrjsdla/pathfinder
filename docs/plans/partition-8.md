@@ -39,7 +39,7 @@ A secret reaches the Keychain without passing through the chat. There are two pa
     `--from pasted-<seq>` binds that pasted item instead (the prompt lists the live handles);
   - writes no ledger event that holds the value;
   - answers `secret.stored` - *as built,* to every attached screen, so a screen that did not
-    answer leaves its entry;
+    answer leaves its entry; an error goes to the sender alone;
   - runs `installer.propose_by_name(server)` again, and the proposal's gate line follows -
     *as built,* in the background, cancelled (not awaited) when the daemon stops.
 - *As built,* the handler is `installer.secret` (the U3 pattern; `daemon.py` was 779/780). It
@@ -296,7 +296,7 @@ Counts are `splitlines()` on `partition-8` at 939c831; "with U2" is the review w
 | `senses/_eventkit.py` | 210 | none today; 250 (U17) | 210 |
 | `mcp/tools.py` | 116 | `mcp/` 1,858 | ~119 (U22) |
 | `tui.py` | 314 | 400 | ~357 |
-| `tui_secret.py` | new; 71 (D64 moved the masked input out of `tui.py`, 392 -> 367) | 150 (new, D64) | 128 (U15b, U16, U26) |
+| `tui_secret.py` | new; 71 (D64 moved the masked input out of `tui.py`, 392 -> 367) | 150 (new, D64) | 136 (U15b, U16, U26, and U16's two reviews) |
 | `init.py` | **297** | 300 | 297 |
 | `skills.py` | new | 120 (new, D61) | ~80 (U27) |
 | `keychain.py`, `config.py`, `__main__.py` | 14, 169, 455 (463 with U2) | none | ~82, ~179, ~490 |
@@ -789,6 +789,10 @@ below:
 - The same checks. The next line is read masked: the input line shows `*`, and the screen draws
   its own input line in cbreak mode.
 - Enter stores the value in the screen's own process. Ctrl-C cancels. Nothing goes on the socket.
+  *As built after U16's review (round 2):* Enter sends `secret {server_id, name, value}` to the
+  daemon instead (`/secret mail` sends `{server_id: "mail", value}`, and `--from pasted-<seq>` is
+  sent the same way), so a `/secret` typed after a dropped ask proposes again the install waiting
+  on that id. The value still reaches no other screen, the ledger or the model.
 - The confirmation says an already-installed server picks the value up at the next
   `service restart`.
 - D53's `secret.ask` (U16) reuses this masked mode. Its Enter sends the value to the daemon
@@ -1095,9 +1099,9 @@ line says how to get past it.**
   stores any value.
 - **One Keychain read per attach while the mail sense is on** (U26), `say` clients included:
   the ask on attach reads whether the item is there, found or not.
-- **A stop during a re-proposal still waits for its trial thread** (U16): `close()` cancels the
-  re-proposal at once, but the interpreter joins the worker thread, so the process exits when the
-  sandboxed trial ends (at most its 60 s timeout).
+- **A stop during a remote server's re-proposal waits for its trial** (U16): `close()` cancels the
+  re-proposal and ends a stdio trial's process, but an HTTP trial has no process to end, so the
+  interpreter's join waits for its request to time out (at most 60 s).
 - **A steer is recorded when it arrives, not when the model takes it.** A steer typed while the
   second look runs (or between the last chunk and the turn's end) has its `user` event before
   the draft's `assistant` in the ledger and in history, and a steer that gets its own turn is

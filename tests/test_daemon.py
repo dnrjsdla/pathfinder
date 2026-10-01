@@ -2014,10 +2014,12 @@ class SecretAskTest(DaemonHarness):
         return mock.Mock(returncode=0 if found else 44, stdout=self.items.get(key, "") + "\n", stderr="")
 
     @staticmethod
-    def _stopped(daemon, name="io.example/notion", names=("NOTION_TOKEN", "WORKSPACE")):
-        # `notion-2`, not what `_server_id(name)` would give now: the ask uses the check's own id
-        daemon.record("install_failed", id="", name=name, names=list(names), server_id="notion-2", step="secrets",
-                      reason="needs NOTION_TOKEN, WORKSPACE - store each with /secret notion NAME in the screen")
+    def _stopped(daemon, names=("NOTION_TOKEN", "WORKSPACE")):
+        """What `check` hands `propose` at D40's stop. Its id is `notion-2`, not what `_server_id`
+        would give now: the ask stores under the check's own id."""
+        daemon.installer.propose({"outcome": "install_failed", "name": "io.example/notion", "verification": {
+            "names": list(names), "server_id": "notion-2", "failed_step": "secrets",
+            "reason": "needs NOTION_TOKEN, WORKSPACE - store each with /secret notion-2 NAME in the screen"}}, "user")
 
     def test_secret_ask_reaches_every_screen(self):
         async def scenario(daemon):
@@ -2038,7 +2040,8 @@ class SecretAskTest(DaemonHarness):
         self.assertEqual(asks, [{"type": "secret.ask", "server_id": "notion-2",
                                  "name": "NOTION_TOKEN", "server": "io.example/notion"}] * 2)
         # every screen hears the answer, so the one that did not answer leaves its entry
-        self.assertEqual(stored, [{"type": "secret.stored", "server_id": "notion-2", "name": "NOTION_TOKEN"}] * 2)
+        self.assertEqual(stored, [{"type": "secret.stored", "server_id": "notion-2", "name": "NOTION_TOKEN",
+                                   "server": "io.example/notion"}] * 2)
         self.assertEqual(self.items, {("pathfinder-mcp-notion-2", "NOTION_TOKEN"): self.VALUE})
 
     def test_secret_ask_without_a_screen_falls_back_to_the_line(self):
@@ -2075,7 +2078,7 @@ class SecretAskTest(DaemonHarness):
             await c.recv()
             replies = []
             for bad in ({"server_id": "notion", "name": "N"}, {"server_id": "notion", "name": 5, "value": "x"},
-                        {"name": "N", "value": "x"}, {"server_id": "notion", "name": "N", "value": "x", "server": ["x"]}):
+                        {"name": "N", "value": "x"}):
                 c.send({"type": "secret", **bad})
                 replies.append((await c.until("error"))[-1])
             c.send({"type": "secret", "server_id": "mail", "value": self.VALUE})
@@ -2084,8 +2087,9 @@ class SecretAskTest(DaemonHarness):
             return replies
 
         *errors, stored = self.run_with(fake_model("ok"), scenario)
-        self.assertEqual([e["type"] for e in errors], ["error"] * 4)  # and nothing stored for any of them
-        self.assertEqual(stored, {"type": "secret.stored", "server_id": "mail", "name": None})
+        self.assertTrue(all(e["message"].startswith("secret needs") for e in errors))  # refused first; nothing stored
+        self.assertEqual(stored, {"type": "secret.stored", "server_id": "mail", "name": None, "server": ""})
+        self.assertEqual(tui.render(stored), "저장됨 · mail password stored")
         self.assertEqual(self.items, {("pathfinder-mail", "mailbox-user"): self.VALUE})
 
     def test_stop_during_a_reproposal_cancels_it_promptly(self):
@@ -2103,8 +2107,8 @@ class SecretAskTest(DaemonHarness):
             c = await Client.open(self.home)
             c.send({"type": "attach"})
             await c.recv()
-            c.send({"type": "secret", "server_id": "notion", "name": "NOTION_TOKEN", "server": "io.example/notion",
-                    "value": self.VALUE})
+            self._stopped(daemon)
+            c.send({"type": "secret", "server_id": "notion-2", "name": "NOTION_TOKEN", "value": self.VALUE})
             await c.until("secret.stored")
             c.close()
             began = time.monotonic()
@@ -2116,6 +2120,50 @@ class SecretAskTest(DaemonHarness):
         took, cancelled = asyncio.run(main())
         self.assertLess(took, 2)
         self.assertTrue(cancelled)
+
+    def test_a_bad_answer_errs_only_to_its_sender(self):
+        """Round 2: only `secret.stored` reaches every screen; an error is the sender's alone, so
+        another screen - or a `say` in flight - is never told of it."""
+        async def scenario(daemon):
+            a, b = await Client.open(self.home), await Client.open(self.home)
+            for c in (a, b):
+                c.send({"type": "attach"})
+                await c.recv()
+            a.send({"type": "secret", "server_id": "notion", "name": "NOTION_TOKEN"})  # no value
+            to_a = (await a.until("error"))[-1]
+            b.send({"type": "nothing"})
+            to_b = await b.recv()
+            a.close()
+            b.close()
+            return to_a, to_b
+
+        to_a, to_b = self.run_with(fake_model("ok"), scenario)
+        self.assertTrue(to_a["message"].startswith("secret needs"))
+        self.assertEqual(to_b, {"type": "error", "message": "unknown type: 'nothing'"})
+
+    def test_a_secret_for_a_pending_install_proposes_it_again(self):
+        """Round 2: `/secret <id> NAME` typed in the screen after its ask was dropped reaches the same
+        path: the install waiting on that id is proposed again, once."""
+        async def scenario(daemon):
+            proposed = []
+            daemon.installer.propose_by_name = lambda name, origin="user", session="", registry=None: \
+                proposed.append((name, session)) or {}
+            c = await Client.open(self.home)
+            c.send({"type": "attach"})
+            sid = (await c.recv())["session"]
+            self._stopped(daemon)
+            await c.until("secret.ask")
+            replies = []
+            for value in ("v4lue-one", "v4lue-two"):  # what the screen's `/secret notion-2 NOTION_TOKEN` sends
+                c.send({"type": "secret", "server_id": "notion-2", "name": "NOTION_TOKEN", "value": value})
+                replies.append((await c.until("secret.stored"))[-1])
+                await daemon.installer._again
+            c.close()
+            return sid, proposed, replies
+
+        sid, proposed, replies = self.run_with(fake_model("ok"), scenario)
+        self.assertEqual(proposed, [("io.example/notion", sid)])  # once: the second finds nothing waiting
+        self.assertEqual([r["server"] for r in replies], ["io.example/notion", ""])
 
     def test_missing_mail_password_is_asked_at_start(self):
         """U26: at a start no screen is attached, so a screen is asked as it attaches while the mail
@@ -2160,7 +2208,8 @@ class SecretAskTest(DaemonHarness):
 
         sid, proposed, seen = self.run_with(fake_model("ok"), scenario)
         self.assertEqual(self.items, {("pathfinder-mcp-notion-2", "NOTION_TOKEN"): self.VALUE})
-        self.assertIn({"type": "secret.stored", "server_id": "notion-2", "name": "NOTION_TOKEN"}, seen)
+        self.assertIn({"type": "secret.stored", "server_id": "notion-2", "name": "NOTION_TOKEN",
+                       "server": "io.example/notion"}, seen)
         self.assertEqual(proposed, [("io.example/notion", "user", sid)])  # proposed again once, in this screen's session
         self.assertNotIn(self.VALUE, json.dumps(seen))
         for path in self.home.rglob("*"):  # the ledger, state.db and its journal, every other file

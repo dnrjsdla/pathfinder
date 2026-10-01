@@ -1,8 +1,9 @@
 """The masked input of `/secret ID NAME` (D53, D64). The screen (`tui.py`) keeps the key loop,
 the escape parser, the input buffer and the switch into and out of the masked mode, and calls in
 here; an `Entry` holds what is the masked entry's own: where its value goes and where a bracketed
-paste stands. `/secret` stores the value in the screen's own process; a harness ask (`secret.ask`,
-D53's main path) sends it to the daemon, which stores it. Neither reaches the ledger or the model."""
+paste stands. The value goes to the daemon as `secret` - from `/secret` and from a harness ask
+(`secret.ask`, D53's main path) alike - which stores it in the Keychain and proposes again an
+install waiting for it; it never reaches the ledger, another screen or the model."""
 from __future__ import annotations
 
 import os
@@ -18,7 +19,7 @@ STRINGS = {
     "secret_usage": "사용법 · /secret ID NAME takes a server id and an env variable name "
                     "(then --from pasted-<seq> binds a pasted token), or /secret mail the mail password",
     "mail_ask": "비밀 입력 · the app password for {user} (hidden; stored in the Keychain, never shown to the assistant)",
-    "mail_stored": "저장됨 · the app password for {user} is in the Keychain",
+    "mail_stored": "저장됨 · mail password stored",
     "secret_ask": "비밀 입력 · {name} for {id} (hidden; stored in the Keychain, never shown to the assistant)",
     "secret_stored": "저장됨 · {name} stored for {id}; an installed server picks it up at the next "
                      "`pathfinder service restart`",
@@ -26,60 +27,67 @@ STRINGS = {
     "secret_one_line": "저장 안 함 · nothing stored: a secret is one line - enter only the value",
     "secret_failed": "저장 안 함 · nothing stored: {message}",
     "secret_handles": " - 또는 · or --from {handles}",
-    "secret_sent": "보냄 · {name} for {id} went to the daemon, not the chat",
+    "secret_sent": "보냄 · {what} went to the daemon, not the chat",
     "secret_stored_ask": "저장됨 · {name} stored for {id}; proposing it again",
-    "secret_busy": "건너뜀 · another secret entry is open, so this ask is dropped - answer it later with /secret",
-    "secret_needed": "비밀 필요 · {what} is needed - enter it with {how} in the screen, never in the chat",
+    "secret_busy": "다른 입력 중 · another secret entry is open; after it - ",
+    "secret_needed": "비밀 필요 · {what} is needed - {how} in the screen takes it{again}, never the chat",
     "pasted": "토큰을 붙여넣었습니다 · you pasted a token; it is stored as {handle} for 24 h - bind it with "
               "/secret <id> NAME --from {handle}",
 }
 
 
-def entry(rest, home):
-    """`/secret`'s arguments: `ID NAME` opens the masked entry - the Entry and the line to show;
-    `ID NAME --from pasted-<seq>` binds a pasted item at once (D53) - None and how it went; anything
-    else - None and the usage line."""
+def entry(rest, home, send):
+    """`/secret`'s arguments: `ID NAME` opens the masked entry, `mail` alone the mail password's (U26),
+    `ID NAME --from pasted-<seq>` binds a pasted item at once (D53) - the Entry (or None) and the line
+    to show; anything else - the usage line. Every value goes to the daemon as `secret` (`send`),
+    which stores it and proposes again an install that was waiting for it."""
     args = rest.split()
     if args == ["mail"]:  # alone, the mail password (U26); an MCP secret always names its variable
         try:
-            service, user = keychain.target(home, "mail")
+            _, user = keychain.target(home, "mail")
         except LookupError as e:  # the mail sense is not configured
             return None, STRINGS["secret_failed"].format(message=e)
-        return (Entry(lambda value: keychain.take(home, service, user, value), STRINGS["mail_stored"].format(user=user)),
-                _prompt(home, "mail_ask", user=user))
+        return (Entry(lambda value: send({"type": "secret", "server_id": "mail", "value": value}),
+                      STRINGS["secret_sent"].format(what="the mail password")), _prompt(home, "mail_ask", user=user))
     if len(args) in (2, 4) and args[2:3] in ([], ["--from"]) and keychain.valid_target(*args[:2]):
         try:
-            service, account = keychain.target(home, *args[:2])
+            keychain.target(home, *args[:2])
         except ValueError as e:  # a NAME that looks like a token
             return None, STRINGS["secret_failed"].format(message=e)
-        stored = STRINGS["secret_stored"].format(id=args[0], name=args[1])
-        if len(args) == 2:
-            return (Entry(lambda value: keychain.take(home, service, account, value), stored),
-                    _prompt(home, id=args[0], name=args[1]))
-        try:
-            keychain.bind(home, args[3], service, account)
-            return None, stored
-        except Exception as e:  # bind's messages never carry the value
-            return None, STRINGS["secret_failed"].format(message=e)
+        answer, sent = {"type": "secret", "server_id": args[0], "name": args[1]}, STRINGS["secret_sent"].format(
+            what=f"{args[1]} for {args[0]}")
+        if len(args) == 4:
+            send({**answer, "value": f"--from {args[3]}"})
+            return None, sent
+        return Entry(lambda value: send({**answer, "value": value}), sent), _prompt(home, id=args[0], name=args[1])
     return None, STRINGS["secret_usage"]
 
 
 def asked(msg, home, send):
-    """D53's main path, `secret.ask`: the harness asks for an MCP server's variable. The same masked
-    input, but Enter sends the value to the daemon, which stores it and proposes the server again."""
+    """D53's main path, `secret.ask`: the masked entry `/secret` opens, marked as this ask's, so an
+    answer from another screen closes it."""
     id, name = msg.get("server_id"), msg.get("name")
-    if not id:  # the mail password, asked as the screen attaches (U26): `/secret mail`, stored here
-        return entry("mail", home)
-    answer = {"type": "secret", "server_id": id, "name": name, "server": msg.get("server")}
-    return (Entry(lambda value: send({**answer, "value": value}), STRINGS["secret_sent"].format(id=id, name=name),
-                  ask=(id, name)), _prompt(home, id=id, name=name))
+    made, text = entry(f"{id} {name}" if id else "mail", home, send)
+    if made:
+        made.ask = (id, name)
+    return made, text
 
 
 def needed(msg):
-    """`secret.ask` for a client with no masked input (`say`, `listen`): the line that says how."""
+    """`secret.ask` as a line: for a client with no masked input (`say`, `listen`), or a screen with
+    an entry already open - it names the way in, which proposes the install again."""
     id, name = msg.get("server_id"), msg.get("name")
     return STRINGS["secret_needed"].format(what=f"{name} for {id}" if id else "the mail password",
-                                           how=f"/secret {id} {name}" if id else "/secret mail")
+                                           how=f"/secret {id} {name}" if id else "/secret mail",
+                                           again=" and proposes the install again" if id else "")
+
+
+def stored(msg):
+    """The daemon's `secret.stored`, as the screen shows it."""
+    if not msg.get("name"):
+        return STRINGS["mail_stored"]
+    key = "secret_stored_ask" if msg.get("server") else "secret_stored"
+    return STRINGS[key].format(name=msg.get("name"), id=msg.get("server_id"))
 
 
 def _prompt(home, key="secret_ask", **fields):
@@ -89,8 +97,8 @@ def _prompt(home, key="secret_ask", **fields):
 
 
 class Entry:
-    """One masked entry: `put` takes the value - stored in this process, or sent to the daemon for
-    a harness ask - and `done` is the line after it. `paste` is None outside a bracketed paste;
+    """One masked entry: `put` takes the value - it sends it to the daemon - and `done` is the line
+    after it. `paste` is None outside a bracketed paste;
     inside one it is False, "\\n" after a newline, True with text after one (more than one line)."""
 
     def __init__(self, put, done, ask=None):

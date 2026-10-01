@@ -367,8 +367,12 @@ class Daemon:
                     _write(writer, {"type": "memory.run", "result": result})
                 elif kind in ("install", "uninstall"):
                     _write(writer, await self.installer.handle(msg))
-                elif kind == "secret":  # D53: stored, never recorded; every screen hears the answer and leaves its entry
-                    self._send_all(await self.installer.secret(msg, session.id if session else ""))
+                elif kind == "secret":  # D53: stored, never recorded
+                    reply = await self.installer.secret(msg, session.id if session else "")
+                    if reply["type"] == "secret.stored":  # every screen hears it, so one that did not answer leaves its entry
+                        self._send_all(reply)
+                    else:  # an error is the sender's alone
+                        _write(writer, reply)
                 elif kind == "signal":  # the push door, checked and built in `signals.pushed` (D67)
                     signals.pushed(self.senses, msg, self.push_signal, lambda reply: _write(writer, reply))
                 elif kind == "presence":

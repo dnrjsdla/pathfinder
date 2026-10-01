@@ -524,5 +524,7 @@ for the start, so the two agree: a required variable with a default no longer st
 and a missing optional secret no longer disables a server the check trialled without it. New
 config keys (`optional`, `defaults`) were rejected because the entry would then live in two
 places; keeping the grammar and reinstalling was rejected because an optional secret added later
-would need a reinstall. Entries written before D65 keep `keychain:NAME` and stay disabled while
+would need a reinstall. A registry variable whose name is not an ASCII identifier is dropped
+from the candidate: it could not be stored under that name anyway, and a `=` in it would read as
+the grammar. Entries written before D65 keep `keychain:NAME` and stay disabled while
 the item is missing; there is no migration - a reinstall is the way.

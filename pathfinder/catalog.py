@@ -119,7 +119,7 @@ def _package(server: dict) -> dict:
             env = [{"name": e["name"], "secret": bool(e.get("isSecret")), "required": bool(e.get("isRequired")),
                     "default": oneline(e["default"]) if isinstance(e.get("default"), str) else None}  # registry text
                   for e in (pkg.get("environmentVariables") or [])
-                  if e["name"].isidentifier()]  # a name with `=` would read as account and default (D65)
+                  if isinstance(e.get("name"), str) and e["name"].isidentifier() and e["name"].isascii()]  # a name with `=` would read as account and default (D65); `valid_target`'s rule
             return {"registry_type": rtype, "identifier": pkg["identifier"],
                     "version": pkg.get("version", server.get("version", "")),
                     "runtime": runtime,

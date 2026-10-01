@@ -39,6 +39,8 @@ FIXTURE_NPM_ITEM = {
                 {"name": "API_KEY", "description": "a key", "isRequired": True, "isSecret": True},
                 {"name": "OPTIONAL_FLAG", "description": "optional", "default": "off\u200b"},
                 {"name": "BAD=NAME", "isRequired": True},  # not an identifier: dropped (D65)
+                {"name": 7, "isRequired": True}, {"name": None},  # a malformed item does not abort the poll
+                {"name": "토큰", "isRequired": True},  # not ASCII: `/secret` could not store it
             ],
         }],
         "remotes": [{"type": "streamable-http", "url": "https://example.com/mcp"}],

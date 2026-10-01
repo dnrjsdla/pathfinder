@@ -299,7 +299,7 @@ Counts are `splitlines()` on `partition-8` at 939c831; "with U2" is the review w
 | `tui.py` | 314 | 400 | ~357 |
 | `tui_secret.py` | new; 71 (D64 moved the masked input out of `tui.py`, 392 -> 367) | 150 (new, D64) | 136 (U15b, U16, U26, and U16's two reviews) |
 | `init.py` | **297** | 300 | 297 |
-| `skills.py` | new | 120 (new, D61) | ~80 (U27) |
+| `skills.py` | new | 120 (new, D61) | 113 (U27, as built) |
 | `keychain.py`, `config.py`, `__main__.py` | 14, 169, 455 (463 with U2) | none | ~82, ~179, ~490 |
 
 **`installer.py` lands at about 698/700.** If it crosses, the only movable block is D36's
@@ -1291,11 +1291,15 @@ A skill is an instruction, so it is trusted in a way a wiki page (knowledge, dat
 - The index is every skill's `name` and `description`, sorted by name, never cut.
 - It is not cut the way the memory wiki's map is (1,000 characters, newest first, so older
   entries fall off). Instead, it is bounded when files are loaded: a description over 160
-  characters, or an index over 4,000 characters, is refused at load with a message to the owner.
+  characters, or an index over 4,000 characters, is refused at load with a warning the owner
+  finds in the ledger (`error` event), the same as an MCP server's warnings. (U27's review: no
+  existing path shows a system line to a screen without growing the daemon.)
 - It rides in `read_skill`'s own description (D61). It goes with every request, and it stays
   byte-stable until a skill changes, which suits caching.
-- `skills.index()` is cheap: one directory listing and one frontmatter read per file, redone
-  when the directory's mtime moves.
+- `skills.index()` is cheap: one directory listing and one frontmatter read per file, read on
+  every request (measured: 0.84 ms at review and 1.3 ms with 40-line bodies, for 50 skills). A
+  cache on the directory's mtime was cut at U27's review: an edit in place (nano, `>>`,
+  `write_file`) does not move it.
 
 **The one tool: `read_skill(name)`.**
 - It returns the body with a harness header: `[Skill '<name>' - a procedure the owner approved;
@@ -1622,9 +1626,9 @@ parallel. **Deploy gate: U15a, U21, U31 and U33.**
 | U32 | **done, merged** | D63: only the owner's activity keeps a session alive; notice text passes `clean`; the approval line's way out | `state.py`, `daemon.py`, `jobs.py`, `broker.py` | +6 | U7a, U31 | `test_say_after_a_job_gate_in_an_aged_session_lands_in_the_new_session` |
 | U33 | **done, merged** | The remaining raw exits: the agenda, sense summaries, MCP parameter schemas, gate lines, `sanitize` (**deploy gate**) | `senses/*.py`, `mcp/tools.py`, `mcp/protocol.py`, `tui.py` | +10 | U31, U7b | `test_agenda_lines_pass_the_filter` |
 | U34 | **done, merged** | An installed server's entry records which variables are optional and which have a default; start agrees with the check | `installer.py`, `catalog.py`, `mcp/servers.py` | ~+7 | U10 | `test_required_with_a_default_does_not_stop_and_gets_the_default` |
-| U27 | not started | Skills (D58, D61): the seed copy, the index, `read_skill` | `skills.py` (new), `pyproject.toml`, `daemon.py` (`skills.bind`) | ~80, +1, daemon +1 | — | `test_seed_is_copied_when_missing_and_never_overwrites`, `test_index_lists_every_skill_sorted_and_uncut` |
+| U27 | **done, in review** | Skills (D58, D61): the seed copy, the index, `read_skill` | `skills.py` (new), `pyproject.toml`, `daemon.py` (`skills.bind`, in `__init__` beside `memory.bind`); review 1-2: `tools.py` (`_write_file` refuses a path whose resolved parent is `<home>/skills/`, before any mkdir; `_absolute_path` resolves symlinks so the gate names the target), `mcp/attach.py` (its log handler also takes `pathfinder.skills`) | 113 (new), pyproject ±0 (one list entry), daemon +1 (772), tools +6 (257), attach +2 (107) | — | `test_skills.test_bind_copies_missing_seeds_and_leaves_edited_ones`, `test_index_is_sorted_and_bounded`, `test_a_skill_with_a_token_is_not_loaded`, `test_read_skill_returns_header_and_clipped_body`, `test_read_skill_description_carries_the_index`, `test_a_refused_file_reaches_the_ledger_as_an_error_event`, `test_schema_builds_before_bind`, `test_write_file_cannot_write_a_skill`; `test_invariants.test_skills_module_under_120_lines` |
 | U28 | not started | Skills: the write path (a proposal from a user turn, always approved) | `memory.py` (`vault_path`), `prompts/system.txt` | +4 | U27, U8 | `test_skills_target_user_only_and_always_approved` |
-| U29 | not started | The first seed | `pathfinder/skills/connect-gmail.md` | ~35 | U27, U25, U26 | `test_connect_gmail_is_shipped_and_parses` |
+| U29 | **done, in review** | The first seed | `pathfinder/skills/connect-gmail.md` | 33 (new) | U27, U25, U26 | `test_skills.test_connect_gmail_is_shipped_and_parses` |
 | U17 | not started | Ceilings and invariant tests | `tests/test_invariants.py` | — | last | the U17 list above |
 | U18 | not started | Exit runs: m9 on the split pass (~40k tokens), m10 on the adopted prompt with the record and the second look (~215k tokens), each with the lead's go-ahead | `bench/m9_memory_write.py`, `bench/m10_unsupported.py` | — | U5, U7a, U8, U9 | — |
 | Lead | — | Live (1)-(16); both doc pairs, `docs/senses.md`; HISTORY; the reviewer (opus, read-only); the scan; the commit on `build`; deploy only past the gate | — | — | all | — |

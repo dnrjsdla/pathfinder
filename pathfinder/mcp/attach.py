@@ -14,7 +14,7 @@ from . import tools as mcp_tools
 
 
 class _McpLogHandler(logging.Handler):
-    """`pathfinder.mcp`'s WARNING+ lines -> one `error` event each, through `dispatch` (may fire off the loop thread)."""
+    """`pathfinder.mcp`'s and `pathfinder.skills`' WARNING+ lines -> one `error` event each, through `dispatch` (may fire off the loop thread)."""
 
     def __init__(self, dispatch, record):
         super().__init__(level=logging.WARNING)
@@ -39,7 +39,8 @@ class Attach:
         # The handler must be listening before `mcp_servers.load()` runs below - a secret
         # missing at load time logs its WARNING right there, not lazily.
         self._log_handler = _McpLogHandler(lambda fn: self.dispatch(fn), record)
-        logging.getLogger("pathfinder.mcp").addHandler(self._log_handler)
+        for name in ("pathfinder.mcp", "pathfinder.skills"):  # skills: a refused file reaches the owner
+            logging.getLogger(name).addHandler(self._log_handler)
         self.servers = mcp_servers.Servers(mcp_servers.load(config.load(home)))  # no process spawns yet
         self.loaded = None  # the daemon's `start()` sets this to the background `load()` task
 
@@ -102,4 +103,5 @@ class Attach:
     def close(self) -> None:
         self.servers.close()
         [tools.TOOLS.pop(n) for n in list(tools.TOOLS) if n.startswith("mcp__")]  # TOOLS is shared, module-wide
-        logging.getLogger("pathfinder.mcp").removeHandler(self._log_handler)
+        for name in ("pathfinder.mcp", "pathfinder.skills"):
+            logging.getLogger(name).removeHandler(self._log_handler)

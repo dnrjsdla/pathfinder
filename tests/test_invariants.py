@@ -109,6 +109,10 @@ class SourceInvariants(unittest.TestCase):
         n = len((SRC / "tui_secret.py").read_text(encoding="utf-8").splitlines())
         self.assertLessEqual(n, 150, f"tui_secret.py is {n} lines, over the D64 ceiling of 150")
 
+    def test_skills_module_under_120_lines(self):
+        n = len((SRC / "skills.py").read_text(encoding="utf-8").splitlines())
+        self.assertLessEqual(n, 120, f"skills.py is {n} lines, over the D61 ceiling of 120")
+
     def test_readme_pair_has_equal_heading_counts(self):
         """D6: README.md and README.ko.md are one document in two languages (same headings)."""
         root = SRC.parent

@@ -16,7 +16,7 @@ import time
 import uuid
 from pathlib import Path
 
-from . import clock, config, jobs, keychain, loop, memory, rules as rules_mod, signals, tools
+from . import clock, config, jobs, keychain, loop, memory, rules as rules_mod, signals, skills, tools
 from .broker import Broker, Gate, chat_approval
 from .deliver import Notice, Outbox
 from .ledger import Ledger
@@ -123,6 +123,7 @@ class Daemon:
         # `record` is loop-thread-only, so marshal through `dispatch` like every other callback.
         self.memory_mgr.on_rules_changed = lambda: self.memory_mgr.dispatch(self.reload_rules)
         memory.bind(self.memory_mgr)
+        skills.bind(self.home)  # D61: copies a missing shipped skill; never touches an existing one
         # A row with empty `messages` is a proposal (Manager.edit's/Attach.register's shape),
         # keyed by tool.
         self.PROPOSALS = {"edit_memory": self.memory_mgr.decide, "accept_pins": self.mcp.accept_pins,

@@ -53,6 +53,7 @@ daemon.Daemon ── one lane (queue + worker) per session; lane items: say | re
 | `<home>/RULES.md` | the speak/silence/defer/ask_model rules, one person can read | created from `pathfinder/prompts/RULES.md` on first start; edited by hand, or by an approved `edit_memory` row; either way reloads without a restart | rewritten from the shipped default on next start |
 | `<home>/USER.md` | `USER.xxx` lists RULES.md conditions read, plus a free body (resident context) | created empty on first start; filled by approved `edit_memory` rows (or a user-turn grant's auto-apply, D28) | an empty frontmatter - memory starts from zero |
 | `<home>/wiki/*.md` | wiki pages, one topic per file | `memory.Manager.apply` (`edit_memory`, applies at once) | the knowledge is gone - files are the truth |
+| `<home>/skills/<name>.md` (0600, directory 0700) | skills: procedures the owner approved, frontmatter `name`/`description` and a body (D58, D61) | the owner by hand; `skills.bind` at daemon start copies each shipped seed (`pathfinder/skills/*.md`) whose file is missing, never over an existing one | a deleted seed comes back at the next start; any other skill is gone |
 | `~/.claude.json` (the user's, not `<home>`) | Claude Code's user-scope `mcpServers` (D33) - one entry per approved install, secrets as `${VAR}` references | `installer.Installer` only, atomically (the resolved target of a symlink, in its own mode), after a byte copy to `~/.claude.json.pathfinder-<ts>` | Claude Code's own concern; the installer restores from its backup on rollback and uninstall |
 | `~/Library/LaunchAgents/pathfinder.daemon.plist` | the launchd agent: the running interpreter `-m pathfinder daemon`, a literal `PATH`, `PATHFINDER_HOME` when set, `KeepAlive`, log to `<home>/daemon.log`, `WorkingDirectory` = the package's parent | `init` (plistlib), after a yes | `pathfinder service start` fails until `init` is run again |
 | `<home>/daemon.log` | the daemon's stderr under launchd | launchd | nothing |
@@ -170,7 +171,7 @@ the model can act on. Core tools: `run_command(command, escalate)` (write, sandb
 `read_file(path)`, `write_file(path, content)` (write) — both file tools refuse
 `exec.SECRET_PATHS`. A sense may add more (schedule's `add_schedule`/`list_schedules`/
 `remove_schedule` — see §8), merged into this same registry by `signals.load`; `jobs.py` adds
-`start_job` the same way, at import time (see §9). `origins` (default: all four - `ledger.ORIGINS`)
+`start_job` the same way, at import time (see §9), and `skills.py` adds `read_skill` (§10). `origins` (default: all four - `ledger.ORIGINS`)
 names which turn origins may even see a tool's schema; `for_origin(origin)` filters `TOOLS` by it -
 `start_job` declares `origins={"user"}`, so a job's own registry and a signal turn's never contain
 it: "a worker cannot make a worker" is structure, not a policy check. `origins` is opt-in for
@@ -554,6 +555,24 @@ partition 3) and now `wiki/*.md` - no `vault/` directory: "inside the vault" is 
   `reindex`; standalone `Ledger`/`State`/`Manager`). `pathfinder approvals` prints an `edit_memory`
   row as `target op: old -> new` (each side clipped to 60 characters); `reindex` also calls
   `memory.reindex_pages` and reports the page count.
+
+**Skills (`pathfinder/skills.py`, D58, D61).** A skill is a procedure the owner approved, which
+the assistant reads before doing that task instead of inventing one; it is an instruction, so it
+is trusted where a wiki page is data, and its only mark is its location. Every skill is
+`<home>/skills/<name>.md`: frontmatter `name` (lowercase, digits, hyphens, equal to the file's
+stem) and `description` (one line, at most 160 characters, when to use it), parsed by
+`rules._parse_frontmatter`, then a markdown body. **The seed copy**: `skills.bind(home)`, called
+once in `Daemon.__init__` beside `memory.bind`, writes every shipped `pathfinder/skills/*.md` (package
+data) whose home file is missing, as `rules.load` writes `RULES.md`; an existing file is never
+touched, so an edited skill stays the owner's and a fix to a shipped one does not reach a home that
+has it (D61). **The index**: `skills.index(home)` is `- <name>: <description>` per skill, sorted
+by name, never cut, recomputed when the directory's mtime moves; a file that fails the frontmatter
+rules or holds a `keychain.TOKEN_RE` match is not loaded, and an index over 4,000 characters loads
+no skill - each with a warning in `<home>/daemon.log`. **`read_skill(name)`** (origins `user` and
+`job`, read-only, no gate) carries the index in its own description, built per request and
+byte-stable until a skill changes; it returns `[Skill '<name>' - a procedure the owner approved;
+follow it. Secrets go through /secret, never the chat.]` and the body cut at `tools.READ_CLIP`,
+re-checked on every read; an unknown name is a failed call, `no skill named '<name>'`.
 
 ## 11. The tool path (partition 6): MCP client, catalog, installer
 

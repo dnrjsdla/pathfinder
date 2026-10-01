@@ -299,7 +299,7 @@ Counts are `splitlines()` on `partition-8` at 939c831; "with U2" is the review w
 | `tui.py` | 314 | 400 | ~357 |
 | `tui_secret.py` | new; 71 (D64 moved the masked input out of `tui.py`, 392 -> 367) | 150 (new, D64) | 136 (U15b, U16, U26, and U16's two reviews) |
 | `init.py` | **297** | 300 | 297 |
-| `skills.py` | new | 120 (new, D61) | ~80 (U27) |
+| `skills.py` | new | 120 (new, D61) | 113 (U27, as built) |
 | `keychain.py`, `config.py`, `__main__.py` | 14, 169, 455 (463 with U2) | none | ~82, ~179, ~490 |
 
 **`installer.py` lands at about 698/700.** If it crosses, the only movable block is D36's
@@ -1622,7 +1622,7 @@ parallel. **Deploy gate: U15a, U21, U31 and U33.**
 | U32 | **done, merged** | D63: only the owner's activity keeps a session alive; notice text passes `clean`; the approval line's way out | `state.py`, `daemon.py`, `jobs.py`, `broker.py` | +6 | U7a, U31 | `test_say_after_a_job_gate_in_an_aged_session_lands_in_the_new_session` |
 | U33 | **done, merged** | The remaining raw exits: the agenda, sense summaries, MCP parameter schemas, gate lines, `sanitize` (**deploy gate**) | `senses/*.py`, `mcp/tools.py`, `mcp/protocol.py`, `tui.py` | +10 | U31, U7b | `test_agenda_lines_pass_the_filter` |
 | U34 | **done, merged** | An installed server's entry records which variables are optional and which have a default; start agrees with the check | `installer.py`, `catalog.py`, `mcp/servers.py` | ~+7 | U10 | `test_required_with_a_default_does_not_stop_and_gets_the_default` |
-| U27 | not started | Skills (D58, D61): the seed copy, the index, `read_skill` | `skills.py` (new), `pyproject.toml`, `daemon.py` (`skills.bind`) | ~80, +1, daemon +1 | — | `test_seed_is_copied_when_missing_and_never_overwrites`, `test_index_lists_every_skill_sorted_and_uncut` |
+| U27 | **done, in review** | Skills (D58, D61): the seed copy, the index, `read_skill` | `skills.py` (new), `pyproject.toml`, `daemon.py` (`skills.bind`, in `__init__` beside `memory.bind`) | 113 (new), pyproject ±0 (one list entry), daemon +1 (772) | — | `test_skills.test_bind_copies_missing_seeds_and_leaves_edited_ones`, `test_index_is_sorted_and_bounded`, `test_a_skill_with_a_token_is_not_loaded`, `test_read_skill_returns_header_and_clipped_body`, `test_read_skill_description_carries_the_index`; `test_invariants.test_skills_module_under_120_lines` |
 | U28 | not started | Skills: the write path (a proposal from a user turn, always approved) | `memory.py` (`vault_path`), `prompts/system.txt` | +4 | U27, U8 | `test_skills_target_user_only_and_always_approved` |
 | U29 | not started | The first seed | `pathfinder/skills/connect-gmail.md` | ~35 | U27, U25, U26 | `test_connect_gmail_is_shipped_and_parses` |
 | U17 | not started | Ceilings and invariant tests | `tests/test_invariants.py` | — | last | the U17 list above |

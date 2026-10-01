@@ -158,6 +158,10 @@ class TokenPatternTest(unittest.TestCase):
         "Telegram bot": "123456789" + ":" + "AAH" + "d" * 32,
         "private key block": "-----BEGIN " + "RSA PRIVATE KEY-----\n" + "MIIEow" + "IBAAKCAQEA" * 3 + "\n-----END RSA PRIVATE KEY-----",
         "private key header alone": "-----BEGIN " + "PRIVATE KEY-----",
+        "private key cut before END": "-----BEGIN " + "RSA PRIVATE KEY-----\nMIIEow" + "IBAAKCAQEA" * 3 + "\nQk9v",
+        "PGP key block": "-----BEGIN " + "PGP PRIVATE KEY BLOCK-----\n\nlQOYBGU" + "Ab12" * 10 + "\n=Xq9a\n"
+                         + "-----END " + "PGP PRIVATE KEY BLOCK-----",
+        "PGP key cut before END": "-----BEGIN " + "PGP PRIVATE KEY BLOCK-----\nVersion: GnuPG v2\n\nlQOYBGU" + "Ab12" * 10,
     }
     MUST_NOT_MATCH = {
         "git SHA": "6d9b265f0e1d2c3b4a5968778695a4b3c2d1e0f1",
@@ -211,7 +215,9 @@ class TokenPatternTest(unittest.TestCase):
     def test_token_re_is_linear(self):
         mib = 1 << 20
         texts = [(unit * (mib // len(unit) + 1))[:mib] for unit in self.ADVERSARIAL]
-        texts += ["-----BEGIN " + "PRIVATE KEY-----\n" + "x" * mib, "-----BEGIN " + "A " * (mib // 2)]
+        texts += ["-----BEGIN " + "PRIVATE KEY-----\n" + "x" * mib, "-----BEGIN " + "A " * (mib // 2),
+                  "-----BEGIN " + "PRIVATE KEY " * (mib // 12), "-----BEGIN " + "PRIVATE KEY-----\\n" + "MIIE\\n" * (mib // 6),
+                  "-----BEGIN " + "PRIVATE KEY-----\n-----END " + "PRIVATE KEY " * (mib // 12)]
         for text in texts:
             with self.subTest(text[:24]):
                 started = time.perf_counter()

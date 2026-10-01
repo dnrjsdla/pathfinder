@@ -59,7 +59,7 @@ daemon.Daemon ── 세션마다 lane 하나 (큐 + 워커); 큐 항목: say | 
 | `~/.claude/settings.json`(`hooks.Stop`, `hooks.Notification`) | Claude Code 감각의 훅 두 항목 | `init` 이 `config.merge_json_file`(D60)로: 백업 · 원자 쓰기 · 읽어서 대조; `pathfinder signal claude_code` 표식으로 멱등 | Claude Code 자기 일 |
 | macOS Keychain `pathfinder-mcp-<id>` / `pathfinder-mail` | 모든 비밀(MCP 서버 토큰, IMAP 비밀번호) | 사용자가 손으로(`security add-generic-password`) | 서버는 `disabled: secret missing: <NAME>` 로 남고, 메일 감각은 오류 |
 | macOS Keychain `pathfinder-pasted` / `pasted-N` | 원장 입구에 닿은 토큰 모양 문자열(`keychain.TOKEN_RE`); 사건에는 그 자리에 `[secret:pasted-N]` 이 남는다(D53) | `ledger.append()` 가 `keychain.vault` 로; 만든 지 24시간이 지나면 다음 붙여넣기나 원장 시작 때 삭제 | 원장에는 핸들만 남고 값은 사라진다 - `/secret` 으로 다시 입력 |
-| `<홈>/pasted.json` (0600) | 살아 있는 핸들과 만든 시각, 지금까지 준 가장 큰 N(핸들은 다시 쓰이지 않는다) - 값은 절대 없음 | 원장 잠금 아래의 `keychain.vault`/`sweep` | 빈 것으로 읽힌다: 번호는 처음부터 다시 세지만 키체인에 아직 있는 번호는 건너뛰고 덮어쓰지 않는다; 목록에 있던 항목은 더는 청소되지 않는다 |
+| `<홈>/pasted.json` (0600) | 살아 있는 핸들과 만든 시각, 지금까지 준 가장 큰 N(핸들은 다시 쓰이지 않는다) - 값은 절대 없음 | 원장 잠금 아래의 `keychain.vault`/`sweep` | 빈 것으로 읽힌다: 번호는 처음부터 다시 세지만 키체인에 아직 있는 번호는 건너뛰고 덮어쓰지 않으며 다시 목록에 올려 24시간 뒤 청소한다; 첫 빈 번호 너머의 항목은 다시 찾지 못한다 |
 
 `<홈>` 은 `$PATHFINDER_HOME` 또는 `~/.pathfinder` (권한 0700).
 

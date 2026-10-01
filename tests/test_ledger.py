@@ -1,5 +1,7 @@
 import json
 import os
+import re
+import shlex
 import tempfile
 import threading
 import time
@@ -9,6 +11,7 @@ from unittest import mock
 
 from pathfinder import keychain as keychain_mod
 from pathfinder import ledger as ledger_mod
+from pathfinder import tools as tools_mod
 from pathfinder.ledger import Ledger
 from pathfinder.state import State
 
@@ -392,6 +395,43 @@ class PastedTokenTest(unittest.TestCase):
         (self.home / "pasted.json").mkdir()  # nothing can be written there
         self.assertEqual(self._record("user", text=self.TOKEN)["text"], "[redacted]")
         self.assertEqual(self.items, {})
+
+    def test_pem_without_end_is_vaulted_whole(self):
+        """The ledger's 2,000-character clip cuts a 4096-bit key's END line off: the header and
+        the base64 after it go, as raw text or as JSON with `\\n` escapes."""
+        body = "\n".join("MIIJ" + "Qk9vdHN0cmFw" * 5 for _ in range(48))  # about 3 KB, no END
+        key = "-----BEGIN " + "RSA PRIVATE KEY-----\n" + body + "\n-----END " + "RSA PRIVATE KEY-----"
+        for n, clipped in enumerate((tools_mod.clip_for_ledger(key), tools_mod.clip_for_ledger({"content": key})), 1):
+            event = self._record("tool_result", id="c1", name="read_file", ok=True, result=clipped)
+            self.assertEqual(event["result"], clipped[:clipped.index("-----BEGIN")] + f"[secret:pasted-{n}]...(truncated)")
+        self.assertIsNone(re.search(r"[A-Za-z0-9+/=]{20,}", "".join(json.loads(line)["result"]
+                          for line in self._on_disk().splitlines())))
+        self.assertTrue(self.items[("pathfinder-pasted", "pasted-1")].startswith(key[:1900]))
+
+    def test_a_rediscovered_item_is_swept(self):
+        """A truncated index forgets pasted-1; the next paste's probe finds it and indexes it, so
+        a sweep 25 hours later deletes it - through the real secret/store/delete over a fake `security`."""
+        mock.patch.stopall()
+        items = {"pasted-1": "an item the lost index forgot"}
+
+        def security(argv, input=None, **kw):
+            if argv[1] == "-i":  # add-generic-password -U -s "..." -a "..." -w "..."
+                cmd = shlex.split(input)
+                items[cmd[cmd.index("-a") + 1]] = cmd[cmd.index("-w") + 1]
+                return mock.Mock(returncode=0, stdout="", stderr="")
+            account = argv[argv.index("-a") + 1]
+            if account not in items:
+                return mock.Mock(returncode=44, stdout="", stderr="")
+            value = items.pop(account) if argv[1] == "delete-generic-password" else items[account]
+            return mock.Mock(returncode=0, stdout=value + "\n", stderr="")
+
+        (self.home / "pasted.json").write_text('{"last": 1, "pas')  # truncated
+        with mock.patch("pathfinder.keychain.subprocess.run", side_effect=security):
+            self.assertEqual(self._record("user", text=self.TOKEN)["text"], "[secret:pasted-2]")
+            self.assertEqual(sorted(self._index()["pasted"]), ["pasted-1", "pasted-2"])
+            keychain_mod.sweep(self.home / "pasted.json", time.time() + 25 * 3600)
+        self.assertEqual(items, {})
+        self.assertEqual(self._index()["pasted"], {})
 
     def test_failed_read_back_leaves_no_orphan(self):
         def differs(service, account, value):  # stored, then read back as something else

@@ -9,13 +9,16 @@ import subprocess
 import time
 from pathlib import Path
 
-# One pattern for the ledger door and the pre-commit scan (D53): a private key (the whole block
-# when its END line comes before the next BEGIN), then vendor-prefixed keys and tokens, a JWT and
-# a Telegram bot token - each only at the start of a word, so `task-management-...` is not an
-# `sk-` key. It stays linear, since it runs under the ledger's lock: a body that could run on
-# with no terminator either needs none, or starts only where its run of characters starts.
+# One pattern for the ledger door and the pre-commit scan (D53): a private key, PEM or PGP (the
+# whole block when its END line comes before the next BEGIN; else the header and the base64 run
+# after it, `\n` escapes included, as when the ledger's clip cut the END off), then
+# vendor-prefixed keys and tokens, a JWT and a Telegram bot token - each only at the start of a
+# word, so `task-management-...` is not an `sk-` key. It stays linear, since it runs under the
+# ledger's lock: a body that could run on with no terminator either needs none, or starts only
+# where its run of characters starts.
 TOKEN_RE = re.compile(
-    r"-----BEGIN [A-Z ]*PRIVATE KEY-----(?:(?:(?!-----BEGIN )[\s\S])*?-----END [A-Z ]*PRIVATE KEY-----)?"
+    r"-----BEGIN [A-Z ]*PRIVATE KEY(?: BLOCK)?-----(?:(?:(?!-----BEGIN )[\s\S])*?"
+    r"-----END [A-Z ]*PRIVATE KEY(?: BLOCK)?-----|[A-Za-z0-9+/=\s:,\\-]*)"
     r"|(?<![A-Za-z0-9_-])(?:sk-(?=[A-Za-z0-9_-]*[0-9])(?=[A-Za-z0-9_-]*[A-Z])[A-Za-z0-9_-]{20,}"
     r"|eyJ[A-Za-z0-9_-]{7,}\.eyJ[A-Za-z0-9_-]{7,}\.[A-Za-z0-9_-]{10,})"
     r"|(?<![A-Za-z0-9])(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AIza[0-9A-Za-z_-]{30,}"
@@ -117,6 +120,7 @@ def _paste(token: str, index: Path) -> str:
     held = sweep(index, now)  # every new paste sweeps first
     n = held["last"] + 1
     while secret(PASTED, f"pasted-{n}") is not None:  # a lost index never overwrites an item an old handle names
+        held["pasted"].setdefault(f"pasted-{n}", now)  # and what it forgot is swept 24 hours from now
         n += 1
     account = f"pasted-{n}"
     try:

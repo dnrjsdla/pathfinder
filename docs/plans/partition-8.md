@@ -50,32 +50,47 @@ A secret reaches the Keychain without passing through the chat. There are two pa
   then the proposal with `/approve`.
 
 **The backstop: vault and handle, at the ledger door** (U15a, U15b).
-- **At `ledger.append`.** A token-shaped substring (`keychain.TOKEN_RE`) goes into the Keychain
-  as service `pathfinder-pasted`, account `pasted-N`. The text carries `[secret:pasted-N]`
-  instead, and the event `append` returns carries the handle, so `state`, history, the tool
-  record and every later turn see only the handle.
+- **At `ledger.append` (D66).** A token-shaped substring (`keychain.TOKEN_RE`) in text the owner
+  typed (an event with `trust: user`) goes into the Keychain as service `pathfinder-pasted`,
+  account `pasted-<seq>`, the event's own ledger seq; further tokens in the same event are
+  `pasted-<seq>-2`, `-3`. The text carries `[secret:pasted-<seq>]` instead, and the event
+  `append` returns carries the handle, so `state`, history, the tool record, the screen's gate,
+  job and steer lines, and every later turn see only the handle. In every other event (a tool's
+  call or result, a signal, a job's or the model's words, memory) the substring is written as
+  `[redacted]`, with no Keychain call (`keychain.mask`).
 - **One pattern.** The scanner's `api-key`/`private-key` patterns become `keychain.TOKEN_RE`, with
-  Notion's `ntn_` and `secret_` added. `scripts/scan_personal.py` imports it.
-- **Binding a handle.** `pathfinder secret <id> NAME --from pasted-N` and
-  `/secret <id> NAME --from pasted-N` move the value to `pathfinder-mcp-<id>`/`NAME` and delete
+  Notion's `ntn_` and `secret_`, Slack's `xapp-`, Stripe keys, a JWT, a Telegram bot token and a
+  PEM or PGP private key (the whole block, or the header and its base64 when the END line was
+  cut off) added. A prefix counts only at a word's start, and the pattern stays linear.
+  `scripts/scan_personal.py` imports it.
+- **Binding a handle.** `pathfinder secret <id> NAME --from pasted-<seq>` and
+  `/secret <id> NAME --from pasted-<seq>` move the value to `pathfinder-mcp-<id>`/`NAME` and delete
   the pasted item. The masked prompt (U16) lists the live handles, so a pasted token can be
   bound where the secret is asked for.
 - **Expiry.**
-  - An index `<home>/pasted.json` (0600) holds handles and creation times, never values.
-  - Every new paste, and every daemon start, deletes pasted items older than 24 hours.
-  - Binding an expired handle says "expired - enter it again with /secret".
+  - An index `<home>/pasted.json` (0600), `{"pasted": {handle: created}}`, holds handles and
+    creation times, never values.
+  - Every new paste, and every daemon start, deletes pasted items older than 24 hours and drops
+    a handle whose item is gone. An index that is missing or unusable reads as empty; an item
+    whose handle it lost stays in the Keychain, unknown (the known limit, D66).
+  - Binding an expired handle says "expired - enter it again with /secret". A seq never recurs,
+    so an old handle never comes to name a new value.
 - **When the Keychain write fails** (a locked keychain, no `security` binary), the substring is
   written as `[redacted]`, so the append still lands and the value still never reaches the
   ledger.
 - **What it gives up:**
-  - The ledger writer calls a subprocess under its lock, about 50 ms, and only for an event that
-    holds a token.
+  - The ledger writer calls `security` under its lock, about 30-50 ms, and only for an owner's
+    event that holds a token: one `find` per token first, so an item already there (another
+    home's, or a reset ledger's) is never replaced. The sweep runs at daemon start and on a
+    paste, never when a ledger is opened, and asks once per live handle whether its item is
+    still there.
+  - A token in third-party text is redacted and cannot be read back (D66).
   - One more file under the home.
   - A false positive can be read back for 24 hours, then it is gone.
-- **What the owner sees:** "you pasted a token; it is stored as pasted-1 - bind it with /secret
-  <id> NAME --from pasted-1".
-- **Within the same turn,** a steer, a signal envelope or a tool result still reaches the model
-  raw, because those travel beside the ledger, not through it. The handle protects every later
+- **What the owner sees:** "you pasted a token; it is stored as pasted-<seq> - bind it with
+  /secret <id> NAME --from pasted-<seq>".
+- **Within the same turn,** a signal envelope or a tool result still reaches the model raw,
+  because those travel beside the ledger, not through it (a steer goes on as recorded). The handle protects every later
   turn and the record.
 
 **Encryption was considered and dropped (D53).** The model cannot use ciphertext, so encrypting
@@ -112,8 +127,8 @@ the token only produces a handle with a key to guard.
     integration (free), then share one test page with it (the page's `...` menu, then
     Connections), and paste the integration's token into the masked prompt when it appears.
 - (6) **A token-shaped string typed at the prompt.** The events file, `state.db` and the next
-  turn's history hold `[secret:pasted-1]`. The Keychain holds the value.
-  `pathfinder secret <id> NAME --from pasted-1` binds it, and the pasted item is gone afterwards.
+  turn's history hold `[secret:pasted-<seq>]`. The Keychain holds the value.
+  `pathfinder secret <id> NAME --from pasted-<seq>` binds it, and the pasted item is gone afterwards.
   An unbound handle is swept after 24 hours; test this with a back-dated index entry.
 - (7) **The private home.** Start the new daemon on a copy of a pre-partition home. Afterwards
   `find <home> -path <home>/workspace -prune -o -perm +077 -print` prints nothing. A partition
@@ -469,7 +484,8 @@ clause names the test that enforces it.
 > a record line.
 >
 > Arguments are compact JSON cut to 120 characters. They are taken from the event exactly as
-> the ledger door wrote it, so a pasted token appears only as its `[secret:pasted-N]` handle.
+> the ledger door wrote it, so a pasted token appears only as its `[secret:pasted-<seq>]` handle,
+> and a token the owner did not type as `[redacted]` (D66).
 
 | Clause | Test |
 |---|---|
@@ -1554,7 +1570,7 @@ parallel. **Deploy gate: U15a, U21, U31 and U33.**
 | U12 | **done, merged** | 5a | `state.py`, `deliver.py`, `daemon.py` line 573 | ~0 | U6 | `test_presence_is_the_newest_row_across_sessions` |
 | U14a | **done, merged** | Born private | `ledger.py`, `state.py` | +1 | U12, U24 | `test_partition_and_lock_born_0600_dir_0700` |
 | U14b | **done, merged** | Existing files private | `config.py` (`make_private`), `__main__.py` (daemon branch), `init.py` (literals) | +11 | U10 | `test_make_private_drops_group_other_keeps_owner_x_skips_symlinks_and_workspace` |
-| U15a | not started | D53's backstop: the vault at the ledger door (**deploy gate**) | `ledger.py`, `keychain.py` (`TOKEN_RE`, vault, sweep, index), `scripts/scan_personal.py` | +45 | U14a, U10 | `test_paste_vaulted_and_handle_returned`, `test_pasted_token_reaches_the_record_as_a_handle` |
+| U15a | **built, in review** (`p8-u15`) | D53's backstop: the vault at the ledger door (**deploy gate**); D66: handles are `pasted-<seq>[-i]`, only the owner's text is vaulted | `ledger.py`, `keychain.py` (`TOKEN_RE`, vault, mask, sweep, index), `scripts/scan_personal.py`, `daemon.py` (gate and steer lines from the recorded event), `jobs.py` (the same; a job's own masked copies) | +127 (`keychain.py` +114 to 172, `ledger.py` +7 to 140, scanner +3, `daemon.py` +2 to 768, `jobs.py` +1) | U14a, U10 | `test_paste_vaulted_and_handle_returned`, `test_handle_is_the_event_seq`, `test_a_token_in_a_tool_result_is_redacted_without_the_keychain`, `test_pasted_token_reaches_the_record_as_a_handle` |
 | U15b | not started | Binding a handle | `__main__.py` (`secret --from`), `tui.py` (`/secret --from`; the masked prompt lists live handles) | +7 | U15a, U11, U14b | `test_bind_moves_and_deletes_the_pasted_item` |
 | U16 | not started | D53's main path: the harness asks | `daemon.py` (`record` hook, `secret` handler), `tui.py` (`secret.ask`), `installer.py` (event fields) | daemon +9, tui +12, installer +1 | U15b | `test_secret_value_never_reaches_ledger_or_state` |
 | U25 | **done, merged** | Gmail: `search_mail`, the filter, `HOME`, the watermark, the IMAP move | `senses/_imap.py` (new), `senses/mail.py` | +65 / −30 | U21 | `test_query_goes_as_a_literal_utf8`, `test_first_poll_takes_the_watermark_silently` |

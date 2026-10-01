@@ -1,7 +1,10 @@
 import contextlib
+import importlib.util
 import io
 import tempfile
+import time
 import unittest
+from pathlib import Path
 from unittest import mock
 
 from pathfinder import keychain
@@ -132,6 +135,106 @@ class SecretCliTest(unittest.TestCase):
                 self.assertEqual(self._main("rv11test", "TOKEN", answer=answer), 1)
                 self.assertNotIn("Traceback", self.err.getvalue())
             run.assert_not_called()
+
+
+class TokenPatternTest(unittest.TestCase):
+    # Every token-shaped string is built by concatenation, so the scanner never flags this file.
+    MUST_MATCH = {
+        "GitHub classic": "gh" + "p_" + "A1b2" * 9,
+        "GitHub fine-grained": "github" + "_pat_" + "11AB" * 6 + "_" + "xY9z" * 14,
+        "Slack bot": "xo" + "xb-" + "1234567890-1234567890123-" + "AbCd" * 6,
+        "Slack app-level": "xa" + "pp-1-A0" + "B1C2D3E4-1234567890123-" + "ab" * 32,
+        "AWS access key id": "AK" + "IA" + "IOSFODNN7EXAMPLE",
+        "OpenAI project": "sk-" + "proj-" + "Ab1Cd2" * 8,
+        "Anthropic": "sk-" + "ant-api03-" + "Zz9" * 20,
+        "Google API": "AI" + "za" + "SyD" + "x" * 32,
+        "Notion": "nt" + "n_" + "1234567890" + "aBcD" * 9,
+        "Notion legacy": "sec" + "ret_" + "AbC1" * 10 + "xyz",
+        "Stripe live": "sk" + "_live_" + "51H" + "a" * 30,
+        "Stripe test": "sk" + "_test_" + "51H" + "b" * 30,
+        "Stripe restricted live": "rk" + "_live_" + "51H" + "c" * 30,
+        "Stripe restricted test": "rk" + "_test_" + "51H" + "d" * 30,
+        "JWT": "ey" + "JhbGciOiJIUzI1NiJ9" + "." + "ey" + "JzdWIiOiIxMjM0In0" + "." + "dBjftJeZ4CVP" + "mB92K27uhbUJU1p1r_wW1g",
+        "Telegram bot": "123456789" + ":" + "AAH" + "d" * 32,
+        "private key block": "-----BEGIN " + "RSA PRIVATE KEY-----\n" + "MIIEow" + "IBAAKCAQEA" * 3 + "\n-----END RSA PRIVATE KEY-----",
+        "private key header alone": "-----BEGIN " + "PRIVATE KEY-----",
+        "private key cut before END": "-----BEGIN " + "RSA PRIVATE KEY-----\nMIIEow" + "IBAAKCAQEA" * 3 + "\nQk9v",
+        "PGP key block": "-----BEGIN " + "PGP PRIVATE KEY BLOCK-----\n\nlQOYBGU" + "Ab12" * 10 + "\n=Xq9a\n"
+                         + "-----END " + "PGP PRIVATE KEY BLOCK-----",
+        "PGP key cut before END": "-----BEGIN " + "PGP PRIVATE KEY BLOCK-----\nVersion: GnuPG v2\n\nlQOYBGU" + "Ab12" * 10,
+    }
+    MUST_NOT_MATCH = {
+        "git SHA": "6d9b265f0e1d2c3b4a5968778695a4b3c2d1e0f1",
+        "UUID": "3f2b9c1e-8a4d-4f6b-9e2a-1c5d7b8e9f0a",
+        "base64 image": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+        "sha256": "2d711642b726b04401627ca9fbac32f5c8530fb1903cc4db02258717921a4881",
+        "Message-ID": "<CAF=" + "Yq8x" * 8 + "@mail.example.com>",
+        "long URL": "https://github.com/modelcontextprotocol/servers/tree/main/src/everything/README.md",
+        "Korean": "내일 오후 세 시에 회의 일정을 잡아줘, 그리고 메일도 확인해줘.",
+        "sk-learn": "pip install scikit-learn; import sk-learn",
+        "MCP packages": "@modelcontextprotocol/server-filesystem mcp-server-sqlite @notionhq/notion-mcp-server",
+        "task-management": "npx -y @hyperbolic/task-management-mcp-server",
+        "disk-usage": "disk-usage-analyzer-server",
+        "ask-me": "ask-me-anything-about-the-weather-today",
+        "risk-": "risk-assessment-framework-v2",
+        "risk_test_": "risk_test_" + "a" * 24,
+        "ledger ids": "turn=0a1b2c3d4e5f id=9f8e7d6c5b4a seq=48213",
+        "handle": "[secret:pasted-1]",
+        "snake_case secret_": "secret_value_never_reaches_ledger test_secret_missing_records_one_error",
+        "camelCase secret_": "secret_ConfigurationManagerFactory",
+        "public key header": "-----BEGIN PUBLIC KEY-----",
+        "AWS ARN": "arn:aws:iam::123456789012:role/service-role",
+        "npm integrity": "sha512-" + "Qm9vdHN0cmFwIGludGVncml0eSBoYXNoIGZvciBhIHRlc3QgcGFja2FnZQ==",
+        "xoxo": "hugs xoxo-from-the-team-at-the-office",
+        "a timestamp and a longer tail": "at 1727712000:" + "b" * 40,
+        "a JWT header alone": "ey" + "JhbGciOiJIUzI1NiJ9",
+        "news slug sk-hynix": "https://example.com/news/sk-hynix-q3-earnings-beat-2026",
+        "sk-telecom": "sk-telecom-6g-partnership-announced",
+        "task_sk-": "task_sk-" + "Listing2026" + "Ab1" * 4,
+        "sk-innovation": "sk-innovation-battery-plant-expansion",
+    }
+    # One MiB of each alternative's own prefix with no terminator, and a few near-misses: the
+    # pattern runs under the ledger's lock, so none of these may go quadratic.
+    ADVERSARIAL = ["-----BEGIN " + "PRIVATE KEY-----\n", "-----BEGIN ", "sk-", "sk-A1", "eyJ", "eyJ-",
+                   "eyJ" + "a" * 7 + ".", "eyJ" + "a" * 7 + ".eyJ" + "b" * 7 + ".x ", "gh" + "p_",
+                   "github" + "_pat_", "AI" + "za", "xo" + "xb-", "xa" + "pp-", "AK" + "IA", "nt" + "n_",
+                   "sec" + "ret_", "sk" + "_live_", "12345678" + ":", "1234567890", "_12345678:" + "a" * 36]
+
+    def test_token_re_catches_the_known_shapes(self):
+        for kind, token in self.MUST_MATCH.items():
+            with self.subTest(kind):
+                self.assertEqual(keychain.TOKEN_RE.findall(f"see {token}. then"), [token])
+        env = "OPENAI_API_KEY=" + self.MUST_MATCH["OpenAI project"]
+        self.assertEqual(keychain.TOKEN_RE.findall(env), [self.MUST_MATCH["OpenAI project"]])
+
+    def test_token_re_spares_ordinary_text(self):
+        for kind, text in self.MUST_NOT_MATCH.items():
+            with self.subTest(kind):
+                self.assertEqual(keychain.TOKEN_RE.findall(text), [])
+
+    def test_token_re_is_linear(self):
+        mib = 1 << 20
+        texts = [(unit * (mib // len(unit) + 1))[:mib] for unit in self.ADVERSARIAL]
+        texts += ["-----BEGIN " + "PRIVATE KEY-----\n" + "x" * mib, "-----BEGIN " + "A " * (mib // 2),
+                  "-----BEGIN " + "PRIVATE KEY " * (mib // 12), "-----BEGIN " + "PRIVATE KEY-----\\n" + "MIIE\\n" * (mib // 6),
+                  "-----BEGIN " + "PRIVATE KEY-----\n-----END " + "PRIVATE KEY " * (mib // 12)]
+        for text in texts:
+            with self.subTest(text[:24]):
+                started = time.perf_counter()
+                keychain.TOKEN_RE.sub("", text)
+                self.assertLess(time.perf_counter() - started, 1.0)
+
+    def test_scanner_uses_the_package_pattern(self):
+        path = Path(__file__).resolve().parents[1] / "scripts" / "scan_personal.py"
+        spec = importlib.util.spec_from_file_location("scan_personal", path)
+        scan = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(scan)
+        self.assertIn(("token", keychain.TOKEN_RE), scan.PATTERNS)
+        for token in self.MUST_MATCH.values():
+            self.assertIn("token", scan.hits_in(f"x {token} y", set()))
+        for text in self.MUST_NOT_MATCH.values():
+            self.assertNotIn("token", scan.hits_in(text, set()))
+
 
 if __name__ == "__main__":
     unittest.main()

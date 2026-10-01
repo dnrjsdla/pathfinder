@@ -16,7 +16,7 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import clock, config
+from . import clock, config, keychain
 from . import loop
 from . import tools as tools_mod
 from .broker import Broker, Gate
@@ -115,11 +115,11 @@ class Manager:
         """The daemon's door, then the `job.start`/`job.gate`/`job.end` line a screen is owed
         (live: a job's gate was silent - only `approvals` knew)."""
         def go():
-            self._record(type, **fields)
+            event = self._record(type, **fields)  # the lines show what was recorded (D53's handle)
             if type == "job_start":
-                self._send({"type": "job.start", "id": fields["id"], "goal": fields["goal"]})
+                self._send({"type": "job.start", "id": fields["id"], "goal": event["goal"]})
             elif type == "approval_pending":
-                self._send({"type": "job.gate", "id": fields["job"], "approval": fields["id"], "tool": fields["tool"], "args": fields["args"]})
+                self._send({"type": "job.gate", "id": fields["job"], "approval": fields["id"], "tool": fields["tool"], "args": event["args"]})
             elif type in ("job_done", "job_failed"):  # the row exists: job_start came through this door
                 self._send({"type": "job.end", "id": fields["id"], "state": self._job_state(fields["id"])["state"]})
             # a job's tool_call/tool_result/steer: ledger only
@@ -157,10 +157,11 @@ class Manager:
                 raise ValueError("the day's job budget is spent; ask again tomorrow or raise "
                                  "jobs_per_day in RULES.md")
             id = uuid.uuid4().hex[:8]
+            kept = keychain.mask(goal)  # the job's own copy, for its model and notices (D53)
             messages = [{"role": "system", "content": JOB_PROMPT},
                        {"role": "system", "content": clock.now_line()},
-                       {"role": "user", "content": f"Goal: {goal}"}]
-            job = Job(id=id, goal=goal, session=session, control=TurnControl(),
+                       {"role": "user", "content": f"Goal: {kept}"}]
+            job = Job(id=id, goal=kept, session=session, control=TurnControl(),
                       messages=messages, started_ts=time.time())
             self.jobs[id] = job
             self.record("job_start", session=session, origin="job", id=id, goal=goal)
@@ -188,7 +189,7 @@ class Manager:
         # The user said this, not the job (D12's own rule: a steer is what the user said) -
         # origin "user", with `job` naming which job it was said to.
         self.record("user", session=job.session, origin="user", job=id, trust="user", text=text, steer=True)
-        job.control.steers.append(text)
+        job.control.steers.append(keychain.mask(text))  # the ledger's own copy gets a handle (D53)
         if not job.control.in_tool:  # mirrors daemon.steer: no cut while a tool handler is running
             job.control.steer_cut.set()
 

@@ -528,3 +528,24 @@ would need a reinstall. A registry variable whose name is not an ASCII identifie
 from the candidate: it could not be stored under that name anyway, and a `=` in it would read as
 the grammar. Entries written before D65 keep `keychain:NAME` and stay disabled while
 the item is missing; there is no migration - a reinstall is the way.
+
+## 2026-10-01 — The pasted-token handle, and what the ledger door vaults (owner's choices)
+
+**D66. A pasted token's handle is `pasted-<seq>[-i]`, the ledger seq of the event it came from,
+and only text the owner typed is vaulted; any other text is redacted at the door** (decided
+2026-10-01; amends D53). The first token in an event is `pasted-<seq>`, further ones in the same
+event `pasted-<seq>-2`, `-3`, and `pasted.json` keeps only `{"pasted": {handle: created}}`. The
+counter it kept before did not survive a lost or malformed index: it restarted, so an old handle
+in the ledger could come to name a new value. A seq never recurs, so U15b's "expired - enter it
+again" can trust that a number means one value. The service is shared by every home and a seq
+is unique only within its own ledger, so an item that already holds the name (a trial home's,
+or one left from before a reset) is never replaced: that token is written `[redacted]`. A sweep,
+at daemon start and on a paste, also drops a handle whose item is gone; an item whose handle a
+lost index listed stays in the Keychain, unknown - the accepted limit.
+The vault runs only for an event with `trust: user` - the owner's chat text and steers, and a
+reminder or a schedule entry, whose senses declare `user`. Every other event (a tool's call and
+result, a third party's signal, a job's and the model's words, memory) passes `keychain.mask`,
+so a token there becomes `[redacted]` with no Keychain call: one tool result could hold about
+285 token-shaped strings, which was about 285 `security` calls under the ledger's lock and 95
+items left for 24 hours. The cost accepted: a token in third-party text cannot be read back - it
+never should reach the model anyway.

@@ -102,6 +102,20 @@ class SkillsTest(unittest.TestCase):
         self.write("b", _skill("b", "Use for b."))
         self.assertTrue(spec.schema()["function"]["description"].endswith("- a: Use for a.\n- b: Use for b."))
 
+    def test_connect_gmail_is_shipped_and_parses(self):
+        seed = skills.SEEDS / "connect-gmail.md"
+        description, body = skills._load(seed)  # frontmatter valid, no token-shaped string
+        self.assertEqual(description, "Use when the owner asks to connect Gmail or read their mail.")
+        self.assertNotRegex(seed.read_text(encoding="utf-8"), r"[\w.+-]+@[\w-]+\.\w")  # no address
+        skills.bind(self.home)  # the real seeds
+        self.assertEqual((self.home / "skills" / "connect-gmail.md").read_text(encoding="utf-8"),
+                         seed.read_text(encoding="utf-8"))
+        self.assertIn(f"- connect-gmail: {description}", skills.index(self.home).splitlines())
+        out = skills._read_skill("connect-gmail")
+        self.assertTrue(out.startswith("[Skill 'connect-gmail' - a procedure the owner approved"))
+        self.assertIn("/secret mail", out)
+        self.assertIn("myaccount.google.com/apppasswords", out)
+
 
 if __name__ == "__main__":
     unittest.main()

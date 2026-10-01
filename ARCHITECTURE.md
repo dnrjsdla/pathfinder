@@ -572,7 +572,9 @@ no skill - each with a warning in `<home>/daemon.log`. **`read_skill(name)`** (o
 `job`, read-only, no gate) carries the index in its own description, built per request and
 byte-stable until a skill changes; it returns `[Skill '<name>' - a procedure the owner approved;
 follow it. Secrets go through /secret, never the chat.]` and the body cut at `tools.READ_CLIP`,
-re-checked on every read; an unknown name is a failed call, `no skill named '<name>'`.
+re-checked on every read; an unknown name is a failed call, `no skill named '<name>'`. The first
+seed is `connect-gmail`: the app-password check and the seven steps that turn the mail sense on,
+its only secret step `/secret mail`.
 
 ## 11. The tool path (partition 6): MCP client, catalog, installer
 

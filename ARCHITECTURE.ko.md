@@ -553,7 +553,8 @@ frontmatter 규칙을 어기거나 `keychain.TOKEN_RE` 에 걸리는 파일은 �
 와 `job`, 읽기 전용, 게이트 없음)은 목록을 자기 설명에 싣는다 - 요청마다 만들고, 스킬이 바뀔 때까지 바이트가
 같다; 돌려주는 것은 `[Skill '<name>' - a procedure the owner approved; follow it. Secrets go
 through /secret, never the chat.]` 와 `tools.READ_CLIP` 에서 자른 본문이며, 읽을 때마다 다시 검사한다;
-모르는 이름은 실패한 호출 `no skill named '<name>'` 이다.
+모르는 이름은 실패한 호출 `no skill named '<name>'` 이다. 첫 시드는 `connect-gmail` 이다: 앱 비밀번호
+확인과 메일 감각을 켜는 일곱 단계, 비밀 단계는 `/secret mail` 하나뿐.
 
 ## 11. 도구 경로 (구획 6): MCP 클라이언트 · 카탈로그 · 설치기
 

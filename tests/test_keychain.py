@@ -182,6 +182,15 @@ class BindTest(unittest.TestCase):
         self.assertEqual(self.items, {(keychain.PASTED, "pasted-7"): self.TOKEN})  # the sweep's to delete
         self.real.assert_not_called()
 
+    def test_take_binds_from_a_handle_or_stores_the_value(self):
+        """U16: a masked value `--from <handle>` binds the pasted item; any other value is stored."""
+        self._index(**{"pasted-7": time.time()})
+        keychain.take(self.home, "pathfinder-mcp-gh", "TOKEN", " --from pasted-7 ", run=self._security)
+        keychain.take(self.home, "pathfinder-mcp-gh", "OTHER", "pl41n-value", run=self._security)
+        self.assertEqual(self.items, {("pathfinder-mcp-gh", "TOKEN"): self.TOKEN, ("pathfinder-mcp-gh", "OTHER"): "pl41n-value"})
+        self.assertEqual(keychain.live(self.home), [])
+        self.real.assert_not_called()
+
     def test_cli_and_screen_bind_through_one_function(self):
         from pathfinder import tui_secret
         from pathfinder.__main__ import main

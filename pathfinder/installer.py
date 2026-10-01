@@ -344,7 +344,7 @@ class Installer:
     def propose(self, candidate: dict, origin: str, session: str = "") -> str:
         if candidate.get("outcome") == "install_failed":
             vf = candidate["verification"]
-            self.record("install_failed", id="", name=candidate["name"],
+            self.record("install_failed", id="", name=candidate["name"], names=vf.get("names", []),  # D53 asks for them
                         step=vf.get("failed_step", ""), reason=vf.get("reason", ""))
             signal = Signal(sense="catalog", kind="install_failed",
                 key=f"install_failed:{candidate['name']}:{int(time.time())}",
@@ -390,7 +390,9 @@ class Installer:
         status = ((item.get("_meta") or {}).get("io.modelcontextprotocol.registry/official") or {}).get("status")
         return {"id": aid, "line": line + ("  deprecated in the registry" if status == "deprecated" else "")}
 
-    async def handle(self, msg: dict) -> dict:
+    async def handle(self, msg: dict, session: str = "") -> dict:
+        if msg["type"] == "secret":
+            return await self.secret(msg, session)
         install = msg["type"] == "install"
         arg = msg.get("name" if install else "id")
         if not isinstance(arg, str) or not arg:
@@ -404,6 +406,19 @@ class Installer:
         if install:
             return {"type": "install", "id": result["id"], "line": result["line"]}
         return {"type": "uninstall", "id": result["id"]}
+
+    async def secret(self, msg: dict, session: str = "") -> dict:
+        """D53's main path: the screen's masked answer to `secret.ask`. The value goes to the Keychain
+        on a worker thread and nowhere else - no event holds it - and the server is proposed again in
+        the background, so its gate line (or the ask for the next missing name) follows."""
+        try:
+            service, account = keychain.target(self.home, msg.get("server_id"), msg.get("name"))
+            await asyncio.to_thread(keychain.take, self.home, service, account, msg.get("value"))
+        except Exception as e:  # keychain's messages never carry the value
+            return {"type": "error", "message": f"{type(e).__name__}: {e}"[:300]}
+        if msg.get("server"):  # held, so the task is not collected before it runs
+            self._again = asyncio.ensure_future(asyncio.to_thread(self.propose_by_name, msg["server"], "user", session))
+        return {"type": "secret.stored", "server_id": msg["server_id"], "name": msg["name"]}
 
     # -- install / rollback --------------------------------------------------------------
     async def decide(self, approval_id: str, decision: str) -> None:

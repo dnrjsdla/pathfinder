@@ -166,7 +166,14 @@ class Daemon:
             self.dispatch(lambda: self._send_to_session(fields.get("session"), line))
         if type == "user" and (pasted := keychain.handles(event)):  # D53: the owner sees where the token went
             self._send_to_session(fields.get("session"), {"type": "pasted", "handles": pasted})
+        if type == "install_failed" and fields.get("names"):  # D40 stopped on a missing secret: the screens ask
+            self._ask_secret(fields["names"][0], self.installer._server_id(fields["name"]), fields["name"])
         return event
+
+    def _ask_secret(self, name, server_id="", server="", writer=None) -> None:
+        """D53: the harness asks every screen (or the one attaching) for a missing secret, typed masked."""
+        for w in [writer] if writer else [w for s in self.sessions.values() for w in s.conns if not w.is_closing()]:
+            _write(w, {"type": "secret.ask", "server_id": server_id, "name": name, "server": server})
 
     # -- socket ------------------------------------------------------------------------
     async def start(self):
@@ -359,8 +366,8 @@ class Daemon:
                 elif kind == "memory.run":
                     result = await asyncio.to_thread(self.memory_mgr.run_pass, True)
                     _write(writer, {"type": "memory.run", "result": result})
-                elif kind in ("install", "uninstall"):
-                    _write(writer, await self.installer.handle(msg))
+                elif kind in ("install", "uninstall", "secret"):  # a secret's value is stored, never recorded (D53)
+                    _write(writer, await self.installer.handle(msg, session.id if session else ""))
                 elif kind == "signal":
                     sense_name, fields = msg.get("sense"), msg.get("fields")
                     sense = self.senses.get(sense_name)

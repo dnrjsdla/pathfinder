@@ -25,6 +25,7 @@ TOKEN_RE = re.compile(
     r"|xox[abprs]-[A-Za-z0-9-]{10,}|xapp-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|ntn_[A-Za-z0-9]{20,}"
     r"|secret_[A-Za-z0-9]{40,}|[sr]k_(?:live|test)_[A-Za-z0-9]{20,}|\d{8,10}:[A-Za-z0-9_-]{35}(?![A-Za-z0-9_-]))")
 PASTED = "pathfinder-pasted"  # a pasted token's service; its account is its handle, pasted-<seq>[-i]
+INDEX = "pasted.json"  # under the home: the ledger's `pasted`, handles and times only
 
 
 def secret(service: str, account: str, run=None) -> str | None:
@@ -72,6 +73,23 @@ def store(service: str, account: str, value: str, run=None) -> None:
         raise RuntimeError(f"security could not store {account} for {service} (exit {result.returncode})")
     if secret(service, account, run) != value:
         raise RuntimeError(f"the Keychain gave back a different value for {account} in {service}")
+
+
+def target(home, id: str, name: str) -> tuple:
+    """`secret ID NAME`'s (service, account): an MCP server's variable, `pathfinder-mcp-<id>`/NAME."""
+    if not valid_target(id, name):
+        raise ValueError("secret ID NAME takes a server id and an env variable name")
+    return f"pathfinder-mcp-{id}", name
+
+
+def take(home, service: str, account: str, value: str, run=None) -> None:
+    """A masked input's value (D53): the secret itself, or `--from pasted-<seq>[-i]` to bind a pasted
+    item instead - the masked prompt lists the live handles."""
+    flag, _, handle = value.strip().partition(" ")
+    if flag == "--from":
+        bind(home, handle.strip(), service, account, run)
+    else:
+        store(service, account, value, run)
 
 
 def valid_target(id: str, name: str) -> bool:
@@ -142,7 +160,7 @@ def bind(home, handle: str, service: str, account: str, run=None) -> None:
     """`secret <id> NAME --from <handle>` (D53): the pasted item moves to (service, account) - read,
     stored there, then deleted and its handle dropped from the index. A handle the index does not
     hold, or one 24 hours old, is expired (a seq never recurs, D66); the sweep deletes its item."""
-    index = Path(home) / "pasted.json"  # the ledger's `pasted`
+    index = Path(home) / INDEX
     held = _held(index)
     value = secret(PASTED, handle, run) if time.time() - held.get(handle, 0) < 24 * 3600 else None
     if value is None:
@@ -151,6 +169,13 @@ def bind(home, handle: str, service: str, account: str, run=None) -> None:
     if delete(PASTED, handle, run):  # a refused delete keeps the handle, so the sweep still finds the item
         held.pop(handle)
         _save(index, held)
+
+
+def live(home) -> list:
+    """The handles a masked prompt offers for `--from`, oldest first: younger than 24 hours, by the
+    index alone - no Keychain call."""
+    held = _held(Path(home) / INDEX)
+    return sorted((h for h, t in held.items() if time.time() - t < 24 * 3600), key=held.get)
 
 
 def _save(index: Path, held: dict) -> None:

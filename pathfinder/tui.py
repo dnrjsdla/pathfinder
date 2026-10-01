@@ -92,6 +92,8 @@ def render(msg: dict) -> str | None:
         return STRINGS["job_end"].format(id=msg.get("id"), state=msg.get("state"))
     if kind == "error":
         return STRINGS["error"].format(message=msg.get("message"))
+    if kind == "secret.stored":  # D53: the daemon stored an asked-for value; the proposal follows
+        return tui_secret.STRINGS["secret_stored_ask"].format(name=msg.get("name"), id=msg.get("server_id"))
     if kind == "pasted":  # D53: a token in the owner's own line went to the Keychain under a handle
         return "\n".join(tui_secret.STRINGS["pasted"].format(handle=h) for h in msg.get("handles") or [])
     return None
@@ -191,7 +193,7 @@ class _Session:
         return None
 
     def _secret_enter(self, spill):
-        try:  # stored in this process, never sent on the socket (`tui_secret.Entry.enter`)
+        try:  # stored in this process, or sent to the daemon for a harness ask (`tui_secret.Entry.enter`)
             text = self.secret.enter(self.buf, self.in_fd, spill)
         except Exception as e:  # store's messages never carry the value
             text = STRINGS["error"].format(message=e)
@@ -314,6 +316,11 @@ class _Session:
             self.turn_running = False
             self.out.write("\n")
             self.redraw()
+            return
+        if kind == "secret.ask":  # D53: the harness asks; the value is typed masked, never into the chat
+            entry, text = tui_secret.asked(msg, self.home, self.send)
+            self._masked(entry)
+            self.show(text)
             return
         text = render(msg)
         if text is None:

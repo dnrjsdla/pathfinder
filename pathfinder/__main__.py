@@ -290,7 +290,8 @@ def secret_cmd(home, id, name, handle=None):
     """`pathfinder secret ID NAME [--from pasted-<seq>]`: the value read hidden, or a pasted item
     moved (D53), put straight into the Keychain - no socket, no daemon, no ledger."""
     if not keychain.valid_target(id, name):
-        print("pathfinder: secret ID NAME takes a server id and an env variable name", file=sys.stderr)
+        print("pathfinder: secret ID NAME takes a server id and an env variable name "
+              "(then --from pasted-<seq> binds a pasted token)", file=sys.stderr)
         return 2
     try:
         value = None if handle else getpass.getpass(f"{name} for {id} (hidden; stored in the Keychain): ")

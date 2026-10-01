@@ -251,10 +251,29 @@ class TuiCase(unittest.TestCase):
             self.assertTrue(_wait_for(lambda: "TOKEN stored for rv11test" in self.out_text()))
             self.type_("/secret Bad_Id TOKEN\r")
             self.assertTrue(_wait_for(lambda: "/secret ID NAME takes a server id" in self.out_text()))
-            store.assert_called_once_with("pathfinder-mcp-rv11test", "TOKEN", value)
+            store.assert_called_once_with("pathfinder-mcp-rv11test", "TOKEN", value, None)
         self.assertNotIn(value, self.out_text())
         self.assertNotIn(value, json.dumps(self.daemon.received))
         self.assertEqual({m["type"] for m in self.daemon.received} - {"attach", "presence"}, set())
+
+    def test_secret_ask_masks_lists_handles_and_sends_the_value(self):
+        """U16: the harness asks - the masked prompt names the variable and the live pasted handles,
+        and Enter sends the value to the daemon, never onto the screen."""
+        (self.home / "pasted.json").write_text(json.dumps({"pasted": {"pasted-12": time.time()}}))
+        value = "s3cr3t-" + "asked"
+        ask = {"type": "secret.ask", "server_id": "notion", "name": "NOTION_TOKEN", "server": "io.example/notion"}
+        self.daemon.send(ask)
+        self.assertTrue(_wait_for(lambda: "NOTION_TOKEN for notion (hidden;" in self.out_text()))
+        self.assertIn("or --from pasted-12", self.out_text())
+        self.type_(value)
+        self.assertTrue(_wait_for(lambda: self.out_text().endswith(tui_secret.SECRET_PROMPT + "*" * len(value))))
+        self.type_("\r")
+        self.assertTrue(_wait_for(lambda: any(m["type"] == "secret" for m in self.daemon.received)))
+        self.assertEqual([m for m in self.daemon.received if m["type"] == "secret"],
+                         [{**ask, "type": "secret", "value": value}])
+        self.daemon.send({"type": "secret.stored", "server_id": "notion", "name": "NOTION_TOKEN"})
+        self.assertTrue(_wait_for(lambda: "NOTION_TOKEN stored for notion; proposing it again" in self.out_text()))
+        self.assertNotIn(value, self.out_text())
 
     def test_ctrl_c_cancels_secret_entry(self):
         with mock.patch("pathfinder.keychain.store") as store:
@@ -308,7 +327,7 @@ class TuiCase(unittest.TestCase):
             self.assertTrue(_wait_for(lambda: self.out_text().endswith(tui_secret.SECRET_PROMPT + "*" * 9)))
             self.type_("\r")
             self.assertTrue(_wait_for(lambda: "TOKEN stored for rv11test" in self.out_text()))
-            store.assert_called_once_with("pathfinder-mcp-rv11test", "TOKEN", "tok-value")
+            store.assert_called_once_with("pathfinder-mcp-rv11test", "TOKEN", "tok-value", None)
         out = self.out_text()
         self.assertLess(out.index("\x1b[?2004h"), out.index("\x1b[?2004l"))  # off once stored, screen still up
         self.assertTrue(self._main.is_alive())
@@ -328,7 +347,7 @@ class TuiCase(unittest.TestCase):
             self.assertTrue(_wait_for(lambda: self.out_text().endswith(tui_secret.SECRET_PROMPT)))
             self.type_("\x1b[200~a\nb\x1b[201~")
             self.assertTrue(_wait_for(lambda: "a secret is one line" in self.out_text()))
-        self.assertEqual(store.call_args_list, [mock.call("pathfinder-mcp-rv11test", "TOKEN", "tok-value")] * 2)
+        self.assertEqual(store.call_args_list, [mock.call("pathfinder-mcp-rv11test", "TOKEN", "tok-value", None)] * 2)
 
     def test_screen_closing_while_masked_turns_bracketed_paste_off(self):
         self.type_("/secret rv11test TOKEN\r")
@@ -346,7 +365,7 @@ class TuiCase(unittest.TestCase):
             self.assertTrue(_wait_for(lambda: self.out_text().endswith(tui_secret.SECRET_PROMPT + "******")))
             self.type_("\r")
             self.assertTrue(_wait_for(lambda: store.called))
-            store.assert_called_once_with("pathfinder-mcp-rv11test", "TOKEN", "BPASTE")
+            store.assert_called_once_with("pathfinder-mcp-rv11test", "TOKEN", "BPASTE", None)
 
     def test_ctrl_c_interrupts_a_running_stream_then_quits(self):
         self.daemon.send({"type": "turn.start", "turn": 1})

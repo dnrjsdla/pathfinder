@@ -3,6 +3,7 @@ import asyncio
 import dataclasses
 import json
 import os
+import shlex
 import shutil
 import signal
 import stat
@@ -1988,6 +1989,99 @@ class PastedTokenScreenTest(DaemonHarness):
 
         (steer,) = self.run_with(fake_model("ok"), scenario)
         self.assertRegex(steer, r"^use \[secret:pasted-\d+\]$")
+
+
+class SecretAskTest(DaemonHarness):
+    """U16, D53's main path: the harness asks every screen for a missing secret, and the masked
+    answer goes to the Keychain through the daemon - never the ledger, the state or another line.
+    `security` is a fake over a dict at the keychain module's `subprocess.run`."""
+    VALUE = "hunter2-" + "v" * 12  # not token-shaped: a leak would show raw, not as a handle
+
+    def setUp(self):
+        super().setUp()
+        self.items = {}
+        patch = mock.patch("pathfinder.keychain.subprocess.run", side_effect=self._security)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def _security(self, argv, input=None, **kw):
+        if argv[1] == "-i":  # add-generic-password -U -s "..." -a "..." -w "..."
+            cmd = shlex.split(input)
+            self.items[(cmd[cmd.index("-s") + 1], cmd[cmd.index("-a") + 1])] = cmd[cmd.index("-w") + 1]
+            return mock.Mock(returncode=0, stdout="", stderr="")
+        key = (argv[argv.index("-s") + 1], argv[argv.index("-a") + 1])
+        found = key in self.items
+        return mock.Mock(returncode=0 if found else 44, stdout=self.items.get(key, "") + "\n", stderr="")
+
+    @staticmethod
+    def _stopped(daemon, name="io.example/notion", names=("NOTION_TOKEN", "WORKSPACE")):
+        daemon.record("install_failed", id="", name=name, names=list(names), step="secrets",
+                      reason="needs NOTION_TOKEN, WORKSPACE - store each with /secret notion NAME in the screen")
+
+    def test_secret_ask_reaches_every_screen(self):
+        async def scenario(daemon):
+            a, b = await Client.open(self.home), await Client.open(self.home)
+            for c in (a, b):
+                c.send({"type": "attach"})
+                await c.recv()
+            self._stopped(daemon)
+            asks = [await a.until("secret.ask"), await b.until("secret.ask")]
+            a.close()
+            b.close()
+            return asks
+
+        asks = self.run_with(fake_model("ok"), scenario)
+        self.assertEqual([a[-1] for a in asks], [{"type": "secret.ask", "server_id": "notion",
+                                                  "name": "NOTION_TOKEN", "server": "io.example/notion"}] * 2)
+
+    def test_secret_ask_without_a_screen_falls_back_to_the_line(self):
+        async def scenario(daemon):
+            def propose(name, origin="user", session="", registry=None):
+                daemon.installer.record("install_failed", id="", name=name, names=["NOTION_TOKEN"], step="secrets",
+                                        reason="needs NOTION_TOKEN - store it with /secret notion NOTION_TOKEN")
+                return {"error": "needs NOTION_TOKEN - store it with /secret notion NOTION_TOKEN"}
+            daemon.installer.propose_by_name = propose
+            c = await Client.open(self.home)  # `pathfinder install`: a client that never attached
+            c.send({"type": "install", "name": "io.example/notion"})
+            reply = await c.recv()
+            c.send({"type": "nothing"})
+            after = await c.recv()
+            c.close()
+            return reply, after
+
+        reply, after = self.run_with(fake_model("ok"), scenario)
+        self.assertEqual(reply["type"], "error")
+        self.assertIn("/secret notion NOTION_TOKEN", reply["message"])
+        self.assertEqual(after["type"], "error")  # the next line is the next reply: no ask came between
+
+    def test_secret_value_never_reaches_ledger_or_state(self):
+        async def scenario(daemon):
+            proposed = []
+
+            def propose(name, origin="user", session="", registry=None):
+                proposed.append((name, origin, session))
+                daemon.installer.record("approval_pending", session=session, origin="user", id="a1", call_id="a1",
+                                        tool="write_file", args={"path": "x"}, messages=[])
+                return {"id": "a1", "line": "x"}
+            daemon.installer.propose_by_name = propose
+            c = await Client.open(self.home)
+            c.send({"type": "attach"})
+            sid = (await c.recv())["session"]
+            self._stopped(daemon)
+            ask = (await c.until("secret.ask"))[-1]
+            c.send({**{k: ask[k] for k in ("server_id", "name", "server")}, "type": "secret", "value": self.VALUE})
+            seen = await c.until("gate")
+            c.close()
+            return sid, proposed, seen
+
+        sid, proposed, seen = self.run_with(fake_model("ok"), scenario)
+        self.assertEqual(self.items, {("pathfinder-mcp-notion", "NOTION_TOKEN"): self.VALUE})
+        self.assertIn({"type": "secret.stored", "server_id": "notion", "name": "NOTION_TOKEN"}, seen)
+        self.assertEqual(proposed, [("io.example/notion", "user", sid)])  # proposed again once, in this screen's session
+        self.assertNotIn(self.VALUE, json.dumps(seen))
+        for path in self.home.rglob("*"):  # the ledger, state.db and its journal, every other file
+            if path.is_file():
+                self.assertNotIn(self.VALUE.encode(), path.read_bytes(), path.name)
 
 
 class ChatApprovalTest(DaemonHarness):

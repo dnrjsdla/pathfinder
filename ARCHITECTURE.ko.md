@@ -236,9 +236,14 @@ dict 를 키 튜플로 바꿔 버린다.
   `approve {id}` · `deny {id}`(작업자 자신의 승인은 세션 lane 대신 `jobs.Manager.resume` 으로
   간다 — §9) · `signal {sense, fields}`(push 문 — 감각이 로드되어 있고 push 가능해야 한다, 즉
   `build(fields)` 를 내보내야 한다; `jobs` 는 절대 아니다) · `presence {idle_s}` ·
-  `react {vote, id?}` · `job.stop {id}` · `job.steer {id, text}`. 나가는 것 `attached` ·
+  `react {vote, id?}` · `job.stop {id}` · `job.steer {id, text}` · `secret {server_id, name, server,
+  value}`(D53 의 주 경로: 화면이 가려 받은 답, `installer.secret` 가 받아 워커 스레드에서
+  `keychain.take` 로 저장하고 기록하지 않으며, 뒤에서 그 서버를 다시 제안한다). 나가는 것 `attached` ·
   `turn.start` · `delta` · `tool {name, ok}` · `gate {id, tool, args}` · `turn.end {kind}` ·
-  `notice {id, text, why}` · `job.start {id, goal}` · `job.gate {id, approval, tool, args}` · `job.end {id, state}` · `error`. 깨진 줄 ·
+  `notice {id, text, why}` · `job.start {id, goal}` · `job.gate {id, approval, tool, args}` · `job.end {id, state}` · `secret.ask {server_id, name, server}`(D40 검사가 없는 비밀에서 멈추면
+  붙은 화면 모두에: 첫 이름, 다시 제안할 때 다음 이름; 화면은 가려서 받고 `--from` 에 쓸 살아 있는
+  붙여넣기 핸들을 보여 준다) · `secret.stored {server_id, name}` · `pasted {handles}`(주인이 친 줄이
+  금고에 들어갔다) · `error`. 깨진 줄 ·
   모르는 종류 · 없거나 이미 결정된 승인 id · 도는 턴이 없는 interrupt 는 `error` 한 줄이고
   연결은 안 끊는다.
 - 세션 = 큐 + 워커 하나(`_Lane`, deque 로 만든 큐 — 보통 `asyncio.Queue` 에는 미리보기가 없다).

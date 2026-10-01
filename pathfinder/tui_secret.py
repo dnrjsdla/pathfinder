@@ -1,8 +1,8 @@
 """The masked input of `/secret ID NAME` (D53, D64). The screen (`tui.py`) keeps the key loop,
 the escape parser, the input buffer and the switch into and out of the masked mode, and calls in
-here; an `Entry` holds what is the masked entry's own: its Keychain target and where a bracketed
-paste stands. The value is stored by the screen's own process - it never goes on the socket, so
-it never reaches the daemon, the ledger or the model."""
+here; an `Entry` holds what is the masked entry's own: where its value goes and where a bracketed
+paste stands. `/secret` stores the value in the screen's own process; a harness ask (`secret.ask`,
+D53's main path) sends it to the daemon, which stores it. Neither reaches the ledger or the model."""
 from __future__ import annotations
 
 import os
@@ -15,13 +15,17 @@ SECRET_DRAIN_S = 0.05           # input within this after a masked Enter is a pa
 
 # Fixed strings, Korean and English side by side (D6), as in `tui.STRINGS`.
 STRINGS = {
-    "secret_usage": "사용법 · /secret ID NAME takes a server id and an env variable name",
+    "secret_usage": "사용법 · /secret ID NAME takes a server id and an env variable name "
+                    "(then --from pasted-<seq> binds a pasted token)",
     "secret_ask": "비밀 입력 · {name} for {id} (hidden; stored in the Keychain, never shown to the assistant)",
     "secret_stored": "저장됨 · {name} stored for {id}; an installed server picks it up at the next "
                      "`pathfinder service restart`",
     "secret_cancelled": "저장 안 함 · nothing stored",
     "secret_one_line": "저장 안 함 · nothing stored: a secret is one line - enter only the value",
     "secret_failed": "저장 안 함 · nothing stored: {message}",
+    "secret_handles": " - 또는 · or --from {handles}",
+    "secret_sent": "보냄 · {name} for {id} went to the daemon, not the chat",
+    "secret_stored_ask": "저장됨 · {name} stored for {id}; proposing it again",
     "pasted": "토큰을 붙여넣었습니다 · you pasted a token; it is stored as {handle} for 24 h - bind it with "
               "/secret <id> NAME --from {handle}",
 }
@@ -33,22 +37,41 @@ def entry(rest, home):
     else - None and the usage line."""
     args = rest.split()
     if len(args) in (2, 4) and args[2:3] in ([], ["--from"]) and keychain.valid_target(*args[:2]):
+        service, account = keychain.target(home, *args[:2])
+        stored = STRINGS["secret_stored"].format(id=args[0], name=args[1])
         if len(args) == 2:
-            return Entry(*args), STRINGS["secret_ask"].format(id=args[0], name=args[1])
+            return (Entry(lambda value: keychain.take(home, service, account, value), stored),
+                    _prompt(home, id=args[0], name=args[1]))
         try:
-            keychain.bind(home, args[3], f"pathfinder-mcp-{args[0]}", args[1])
-            return None, STRINGS["secret_stored"].format(id=args[0], name=args[1])
+            keychain.bind(home, args[3], service, account)
+            return None, stored
         except Exception as e:  # bind's messages never carry the value
             return None, STRINGS["secret_failed"].format(message=e)
     return None, STRINGS["secret_usage"]
 
 
+def asked(msg, home, send):
+    """D53's main path, `secret.ask`: the harness asks for an MCP server's variable. The same masked
+    input, but Enter sends the value to the daemon, which stores it and proposes the server again."""
+    id, name = msg.get("server_id"), msg.get("name")
+    answer = {"type": "secret", "server_id": id, "name": name, "server": msg.get("server")}
+    return (Entry(lambda value: send({**answer, "value": value}), STRINGS["secret_sent"].format(id=id, name=name)),
+            _prompt(home, id=id, name=name))
+
+
+def _prompt(home, key="secret_ask", **fields):
+    """The masked prompt, with the live pasted handles `--from` binds there (D53)."""
+    held = keychain.live(home)
+    return STRINGS[key].format(**fields) + (STRINGS["secret_handles"].format(handles=", ".join(held)) if held else "")
+
+
 class Entry:
-    """One masked entry for `pathfinder-mcp-<id>`/NAME. `paste` is None outside a bracketed paste;
+    """One masked entry: `put` takes the value - stored in this process, or sent to the daemon for
+    a harness ask - and `done` is the line after it. `paste` is None outside a bracketed paste;
     inside one it is False, "\\n" after a newline, True with text after one (more than one line)."""
 
-    def __init__(self, id, name):
-        self.id, self.name, self.paste = id, name, None
+    def __init__(self, put, done):
+        self.put, self.done, self.paste = put, done, None
 
     def swallow(self, ch, in_esc) -> bool:
         """In a paste no control is a key: True drops `ch`. Text after a pasted newline marks the
@@ -73,10 +96,10 @@ class Entry:
         """A secret is one line: Enter stores the value only when silence follows it. Input after it
         in the same read (`spill`), or readable within SECRET_DRAIN_S (a paste spread over reads), is
         read and dropped unseen, the value with it - nothing is stored. Returns the line to show;
-        `keychain.store` raises with messages that never carry the value."""
+        `put` raises with messages that never carry the value."""
         while select.select([in_fd], [], [], SECRET_DRAIN_S)[0] and os.read(in_fd, 1024):
             spill = True
         if spill:
             return STRINGS["secret_one_line"]
-        keychain.store(f"pathfinder-mcp-{self.id}", self.name, value)
-        return STRINGS["secret_stored"].format(name=self.name, id=self.id)
+        self.put(value)
+        return self.done

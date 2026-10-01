@@ -1,12 +1,13 @@
 # Partition 8 — trust in the answer and the security bundle: the rewritten prompt and a second look, a record of what was done, the registry copy, the split memory pass, secrets only through the Keychain, a private home, Gmail, skills
 
-**Where this stands (2026-09-30).**
+**Where this stands (2026-10-02).**
 - **Code:** branch `partition-8` (worktree `.claude/worktrees/partition-8`). Merged, each after
   review: U0, U1, U2, U5 (U5b), U9, U13, and on 2026-09-30 U21, U22, U24, U3, U4, U23, U30, U6,
-  U12, U25, U31, U7a, U7b, U8, U32, U33, U10, U14a, U11, U14b, D64, U34, U15a (D66). `daemon.py` 768/780, `tui.py`
-  367/400 + `tui_secret.py` 71/150, `installer.py` 664/700, `loop.py` 295/520.
-- **Next:** U15b, U16, U26, U27-U29,
-  U17, U18. `tui.py` has room for U15b, U16 and U26 after D64.
+  U12, U25, U31, U7a, U7b, U8, U32, U33, U10, U14a, U11, U14b, D64, U34, U15a (D66), and on
+  2026-10-02 U15b, U16, U26, D67. `daemon.py` 771/780, `installer.py` **699/700**, `tui.py`
+  387/400 + `tui_secret.py` 136/150, `signals.py` + `rules.py` 449/585, `loop.py` 295/520.
+- **Next:** U27-U29 (skills), U17, U18. The deploy gate is met; nothing is deployed yet. A unit
+  that adds to `installer.py` needs room first.
 
 The unit table at the end is where the next session starts. Every row carries its state, its
 files, its size, what it waits for, and its tests.
@@ -1613,11 +1614,11 @@ parallel. **Deploy gate: U15a, U21, U31 and U33.**
 | U14a | **done, merged** | Born private | `ledger.py`, `state.py` | +1 | U12, U24 | `test_partition_and_lock_born_0600_dir_0700` |
 | U14b | **done, merged** | Existing files private | `config.py` (`make_private`), `__main__.py` (daemon branch), `init.py` (literals) | +11 | U10 | `test_make_private_drops_group_other_keeps_owner_x_skips_symlinks_and_workspace` |
 | U15a | **done, merged** | D53's backstop: the vault at the ledger door (**deploy gate**); D66: handles are `pasted-<seq>[-i]`, only the owner's text is vaulted | `ledger.py`, `keychain.py` (`TOKEN_RE`, vault, mask, sweep, index), `scripts/scan_personal.py`, `daemon.py` (gate and steer lines from the recorded event), `jobs.py` (the same; a job's own masked copies) | +127 (`keychain.py` +114 to 172, `ledger.py` +7 to 140, scanner +3, `daemon.py` +2 to 768, `jobs.py` +1) | U14a, U10 | `test_paste_vaulted_and_handle_returned`, `test_handle_is_the_event_seq`, `test_a_token_in_a_tool_result_is_redacted_without_the_keychain`, `test_pasted_token_reaches_the_record_as_a_handle` |
-| U15b | done, in review | Binding a handle; the `pasted {handles}` line tells the owner the handle a pasted token got | `keychain.py` (`bind`), `__main__.py` (`secret --from`), `tui_secret.py` (`/secret --from`), `daemon.py` (`record`: `pasted`), `tui.py`/`__main__.py` (render it) | keychain +20, tui_secret +9, `__main__` +5, daemon +2, tui +2 | U15a, U11, U14b | `test_bind_moves_and_deletes_the_pasted_item` |
-| U16 | done, in review | D53's main path: the harness asks (trigger on `names`; stored through `keychain.take`; `secret.stored` to every screen; the handler `installer.secret` also takes `mail`) | `daemon.py` (`record` hook, `_ask_secret`, `secret` branch), `tui.py`/`tui_secret.py` (`secret.ask`), `installer.py` (`secret`, `close`, event fields), `keychain.py` (`take`, `live`), `ledger.py` (`locked`) | daemon +9, tui +18, tui_secret +25, installer +25, keychain +20, ledger +12 | U15b | `test_secret_value_never_reaches_ledger_or_state` |
+| U15b | **done, merged** | Binding a handle; the `pasted {handles}` line tells the owner the handle a pasted token got | `keychain.py` (`bind`), `__main__.py` (`secret --from`), `tui_secret.py` (`/secret --from`), `daemon.py` (`record`: `pasted`), `tui.py`/`__main__.py` (render it) | keychain +20, tui_secret +9, `__main__` +5, daemon +2, tui +2 | U15a, U11, U14b | `test_bind_moves_and_deletes_the_pasted_item` |
+| U16 | **done, merged** | D53's main path: the harness asks (trigger on `names`; stored through `keychain.take`; `secret.stored` to every screen; the handler `installer.secret` also takes `mail`) | `daemon.py` (`record` hook, `_ask_secret`, `secret` branch), `tui.py`/`tui_secret.py` (`secret.ask`), `installer.py` (`secret`, `close`, event fields), `keychain.py` (`take`, `live`), `ledger.py` (`locked`) | daemon +9, tui +18, tui_secret +25, installer +25, keychain +20, ledger +12 | U15b | `test_secret_value_never_reaches_ledger_or_state` |
 | U25 | **done, merged** | Gmail: `search_mail`, the filter, `HOME`, the watermark, the IMAP move | `senses/_imap.py` (new), `senses/mail.py` | +65 / −30 | U21 | `test_query_goes_as_a_literal_utf8`, `test_first_poll_takes_the_watermark_silently` |
 | U31 | **done, merged** | Every tool result passes `tools.clean` (D62); `oneline` is `clean` plus flattening; the mail body filter becomes `clean` | `tools.py`, `broker.py`, `senses/mail.py` | tools +5, broker +6, mail −1 | U25, U6 | `test_tool_result_loses_bidi_zero_width_ansi_and_controls`, `test_tool_result_keeps_newlines_tabs_and_spacing`, `test_error_text_passes_the_filter`, `test_ledger_keeps_the_raw_result`, `test_oneline_is_clean_then_flatten` |
-| U26 | done, in review | The mail password intake; the daemon asks when a screen attaches and the item is missing | `keychain.py` (`target`), `tui.py`, `__main__.py`, `daemon.py` | +12, daemon +4 | U16, U15b | `test_secret_mail_resolves_service_and_user`, `test_missing_mail_password_is_asked_at_start` |
+| U26 | **done, merged** | The mail password intake; the daemon asks when a screen attaches and the item is missing | `keychain.py` (`target`), `tui.py`, `__main__.py`, `daemon.py` | +12, daemon +4 | U16, U15b | `test_secret_mail_resolves_service_and_user`, `test_missing_mail_password_is_asked_at_start` |
 | U32 | **done, merged** | D63: only the owner's activity keeps a session alive; notice text passes `clean`; the approval line's way out | `state.py`, `daemon.py`, `jobs.py`, `broker.py` | +6 | U7a, U31 | `test_say_after_a_job_gate_in_an_aged_session_lands_in_the_new_session` |
 | U33 | **done, merged** | The remaining raw exits: the agenda, sense summaries, MCP parameter schemas, gate lines, `sanitize` (**deploy gate**) | `senses/*.py`, `mcp/tools.py`, `mcp/protocol.py`, `tui.py` | +10 | U31, U7b | `test_agenda_lines_pass_the_filter` |
 | U34 | **done, merged** | An installed server's entry records which variables are optional and which have a default; start agrees with the check | `installer.py`, `catalog.py`, `mcp/servers.py` | ~+7 | U10 | `test_required_with_a_default_does_not_stop_and_gets_the_default` |

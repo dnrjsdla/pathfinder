@@ -51,13 +51,12 @@ class SourceInvariants(unittest.TestCase):
             self.assertNotRegex(text, r"start_server\(|AF_INET", f"{name} opens TCP; the daemon is unix-socket only")
 
     def test_sense_files_under_150_lines(self):
-        """A leading underscore (`_eventkit.py`) marks an adapter shared by senses, not a sense
-        itself - outside the budget, same as `__init__.py`."""
+        """A leading underscore (`_eventkit.py`, `_imap.py`) marks an adapter shared by senses,
+        not a sense itself: its ceiling is 250 (partition 8, U17)."""
         for p in (SRC / "senses").glob("*.py"):
-            if p.name.startswith("_"):
-                continue
+            ceiling = 250 if p.name.startswith("_") else 150
             n = len(p.read_text(encoding="utf-8").splitlines())
-            self.assertLessEqual(n, 150, f"{p.name} is {n} lines, over the sense budget of 150")
+            self.assertLessEqual(n, ceiling, f"{p.name} is {n} lines, over its ceiling of {ceiling}")
 
     def test_jobs_module_under_350_lines(self):
         n = len((SRC / "jobs.py").read_text(encoding="utf-8").splitlines())
@@ -113,6 +112,51 @@ class SourceInvariants(unittest.TestCase):
         n = len((SRC / "skills.py").read_text(encoding="utf-8").splitlines())
         self.assertLessEqual(n, 120, f"skills.py is {n} lines, over the D61 ceiling of 120")
 
+    def test_module_ceilings(self):
+        """D49's gate for the rows that had no test (partition 8, U17): 1.3x the blueprint §6
+        allocation for the core rows, D56's 200 for mirror.py, §6's allocation for llm/ and mcp/.
+        A `+` row is one ceiling over the files together."""
+        ceilings = {"state.py": 780, "loop.py": 520, "ledger.py": 520, "tools.py": 390, "exec.py": 390,
+                    "deliver.py": 325, "broker.py+policy.py": 455, "signals.py+rules.py": 585,
+                    "mirror.py": 200, "llm/**/*.py": 600, "mcp/**/*.py": 1858}
+        for row, ceiling in ceilings.items():
+            with self.subTest(row):
+                files = [list(SRC.glob(part)) for part in row.split("+")]
+                self.assertTrue(all(files), f"{row} matches no file; a renamed module keeps its ceiling")
+                n = sum(len(p.read_text(encoding="utf-8").splitlines()) for ps in files for p in ps)
+                self.assertLessEqual(n, ceiling, f"{row} is {n} lines, over its ceiling of {ceiling}")
+
+    def test_core_under_5500_lines(self):
+        """D49: the core is the blueprint §6 rows, capped at 5,500 together."""
+        core = ["ledger", "state", "daemon", "loop", "broker", "policy", "exec", "tools", "signals", "rules",
+                "deliver", "jobs", "memory"]
+        n = sum(len((SRC / f"{m}.py").read_text(encoding="utf-8").splitlines()) for m in core)
+        self.assertLessEqual(n, 5500, f"the core is {n} lines, over the §6 cap of 5,500")
+
+    def test_no_new_ledger_type(self):
+        """Partition 8 adds two fields (`assistant.withdrawn`, `turn_end.check`) and no type."""
+        from pathfinder import ledger
+        self.assertEqual(ledger.TYPES, frozenset({
+            "session_start", "user", "assistant", "tool_call", "tool_result",
+            "turn_start", "turn_end", "error", "config_set",
+            "approval_pending", "approval", "interrupted",
+            "signal", "decision", "judgment", "delivery", "reaction", "presence",
+            "job_start", "job_done", "job_failed",
+            "memory_pass", "memory_apply", "session_summary",
+            "pin_accept", "pin_revoke",
+            "install_step", "install_done", "install_failed", "uninstalled"}), "a new ledger type needs a decision")
+
+    def test_config_json_written_only_by_config_set(self):
+        """test_single_writer keeps config.json inside config.py; inside it, only set() writes it."""
+        import ast
+        src = sources()["config.py"]
+        for fn in ast.parse(src).body:
+            if isinstance(fn, ast.FunctionDef) and fn.name != "set":
+                body = ast.get_source_segment(src, fn)
+                if "config.json" in body:
+                    self.assertNotRegex(body, r"os\.replace|write_text|write_bytes|_atomic_write_json|merge_json_file"
+                                              r"|open\(.*['\"][wax]b?\+?['\"]", f"config.{fn.name} writes config.json")
+
     def test_readme_pair_has_equal_heading_counts(self):
         """D6: README.md and README.ko.md are one document in two languages (same headings)."""
         root = SRC.parent
@@ -167,6 +211,43 @@ class SignalEnvelopeInvariants(unittest.TestCase):
         from pathfinder import signals
         self.assertEqual(signals.SIGNAL_ENVELOPE, self.bench.SIGNAL_ENVELOPE)
         self.assertEqual(signals.SIGNAL_TURNS_CLAUSE, self.bench.SIGNAL_TURNS_CLAUSE)
+
+
+class SecondLookInvariants(unittest.TestCase):
+    """m10 (HISTORY.md) measured the second look and the prompt; both stay what it measured."""
+
+    # The four lines U8 added to bench/m10/system.txt, exactly as they sit in the prompt.
+    ADDITIONS = (
+        "This is about the world outside this conversation: a question about the conversation itself - a\n"
+        "recap, a summary, what you said or did earlier, how you work - is answered from the conversation and\n"
+        "the record of your tool calls, without a new tool call.\n",
+        "Before your answers, the system notes the tools you called in earlier turns - names and arguments\n"
+        "from the ledger, never their results. Use it to say what you did; it is not the current state.\n\n",
+        "Never ask for a token, key or password in chat. A secret goes in with /secret <server> <NAME>, and\n"
+        "you never see it.\n",
+        "USER.md holds the user's standing instructions; follow them in every turn.\n")
+
+    def test_second_look_matches_the_bench(self):
+        from pathfinder import loop
+        spec = importlib.util.spec_from_file_location("m10_unsupported", REPO_ROOT / "bench" / "m10_unsupported.py")
+        bench = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(bench)
+        for name in ("VERIFIER_PROMPT", "RERUN_NOTE", "FLAG_WORDS"):
+            self.assertEqual(getattr(loop, name), getattr(bench, name), f"loop.{name} drifted from the bench")
+        agenda = loop.AGENDA_HEADER + "\n- 09:00 dentist"
+        history = [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "Hello."},
+                   {"role": "user", "content": "what is on today?"}]
+        messages = ([{"role": "system", "content": "prompt"}, {"role": "system", "content": "Now: x\n\n" + agenda}]
+                    + history + [{"role": "assistant", "content": "Nothing today."}])
+        tools = ["list_events", "list_reminders"]
+        self.assertEqual(loop.verifier_input(tools, messages), bench.verifier_input(tools, messages, history, agenda))
+        prompt = (SRC / "prompts" / "system.txt").read_text(encoding="utf-8")
+        for added in self.ADDITIONS:
+            self.assertIn(added, prompt)
+            prompt = prompt.replace(added, "", 1)
+        self.assertEqual(prompt, (REPO_ROOT / "bench" / "m10" / "system.txt").read_text(encoding="utf-8"),
+                         "system.txt has a line that is neither bench/m10/system.txt nor in ADDITIONS: m10 did "
+                         "not measure it; add it to ADDITIONS if it is meant to be there")
 
 
 class HomeInvariants(unittest.TestCase):

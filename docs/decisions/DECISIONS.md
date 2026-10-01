@@ -500,3 +500,16 @@ of the job, not the old session.
 is for is handing over tool PACKAGES that are useful as they arrive - not wiring services one by
 one. Partition 8 connects single services because the secret path and the registry copy need a
 real case; the server's design starts from the package.
+
+## 2026-10-01 — The screen's masked input (owner's choice)
+
+**D64. The screen's masked `/secret` input moves to `tui_secret.py`, ceiling 150** (decided
+2026-10-01). `tui.py` was 392/400 with U15b, U16 and U26 still to add about 20 lines to it. The
+new module holds what is the masked entry's own: its target, where a bracketed paste stands (the
+marks `[200~`/`[201~`), the 50 ms drain, the one-line refusal, the store, the `/secret` arguments
+and their strings. `tui.py` keeps the key loop, the escape parser, the input buffer and the switch
+into and out of the mode, and calls in; it is 367 after the move. Raising the ceiling was the
+other way, and D34's intent is that a module past its line is cut, not its ceiling raised;
+trimming the three units would cut the intake the secret path depends on. — *Reversed if*
+`tui_secret.py` ends up needing the screen's state: then the split goes back and `tui.py`'s
+ceiling is raised instead.

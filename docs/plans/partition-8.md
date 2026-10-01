@@ -273,6 +273,7 @@ Counts are `splitlines()` on `partition-8` at 939c831; "with U2" is the review w
 | `senses/_eventkit.py` | 210 | none today; 250 (U17) | 210 |
 | `mcp/tools.py` | 116 | `mcp/` 1,858 | ~119 (U22) |
 | `tui.py` | 314 | 400 | ~357 |
+| `tui_secret.py` | new; 71 (D64 moved the masked input out of `tui.py`, 392 -> 367) | 150 (new, D64) | ~71 |
 | `init.py` | **297** | 300 | 297 |
 | `skills.py` | new | 120 (new, D61) | ~80 (U27) |
 | `keychain.py`, `config.py`, `__main__.py` | 14, 169, 455 (463 with U2) | none | ~82, ~179, ~490 |

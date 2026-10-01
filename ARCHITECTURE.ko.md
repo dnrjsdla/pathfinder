@@ -679,7 +679,7 @@ Daemon.run_signal_turn ── 신호마다 rules.decide 를 먼저(절대 안 �
 | SIGTERM 과 Ctrl-C 둘 다 `close()` 하나로 끝남(가짜 stdio 서버 프로세스가 사라짐); 신호 턴 도중의 `say` 는 자기 턴을 얻고, 사용자 턴 도중엔 여전히 steer | `test_daemon.SigtermTest`, `test_say_during_signal_turn_starts_its_own_turn`, `test_daemon_say_during_turn_steers` |
 | `merge_json_file` 은 다른 키를 전부 지키고, 먼저 백업하고, 없는 파일은 만들고, 읽어서 다르면 raise | `test_installer.test_merge_json_file_*` |
 | Anthropic 어댑터는 녹화 SSE 에서 같은 튜플을 냄(text, `input_json_delta` 로 조립한 tool_use, usage), 이력을 가장자리에서 변환, 429/402 는 `blocked`; `api` 없는 설정은 전과 똑같이 `openai` 로 풀림; 어느 테스트도 네트워크 소켓을 열지 않음 | `test_llm_anthropic.*` |
-| `init.py` ≤ 300, `tui.py` ≤ 400; README.md 와 README.ko.md 의 제목 수가 같음 | `test_invariants.test_init_module_under_300_lines`, `test_tui_module_under_400_lines`, `test_readme_pair_has_equal_heading_counts` |
+| `init.py` ≤ 300, `tui.py` ≤ 400, `tui_secret.py`(`/secret` 의 가린 입력, D64) ≤ 150; README.md 와 README.ko.md 의 제목 수가 같음 | `test_invariants.test_init_module_under_300_lines`, `test_tui_module_under_400_lines`, `test_tui_secret_module_under_150_lines`, `test_readme_pair_has_equal_heading_counts` |
 | `memory` 는 옵트인 툴 origin, 정확히 `search_memory, read_memory, read_ledger, edit_memory`; 소켓이 `signal memory ...` 를 거부함; `memory.py` 와 `daemon.py` 는 780줄 이하(배분 600 의 1.3배 선) | `test_memory.test_tools_for_origin_memory`, `test_daemon.MemoryDaemonTest.test_socket_refuses_signal_memory`, `test_invariants.test_memory_module_under_780_lines`, `test_invariants.test_daemon_module_under_780_lines` |
 
 ## 13. 세는 법
@@ -693,7 +693,7 @@ wc -l pathfinder/*.py pathfinder/llm/*.py pathfinder/senses/*.py   # 코어; 배
                                                   # deliver 250 · jobs 350 · memory 600(오늘 686, 780 이 하드 라인) ·
                                                   # 감각 파일 150 · catalog 300 · installer 700
                                                   # init 300(구획 7); 코어 상한 7,000(D34) — 모듈별 1.3배 선이 게이트
-wc -l pathfinder/tui.py pathfinder/llm/anthropic.py  # 코어 밖: tui ≤ 400, 실험 어댑터는 llm/ 의 600 안
+wc -l pathfinder/tui.py pathfinder/tui_secret.py pathfinder/llm/anthropic.py  # 코어 밖: tui ≤ 400, tui_secret ≤ 150 (D64), 실험 어댑터는 llm/ 의 600 안
 wc -l pathfinder/mcp/*.py                         # 이식한 MCP 클라이언트: 어댑터 예산 1,858, 코어 밖
 python3 bench/m5_install.py                       # m5: 임시 HOME 에 레지스트리에서 설치(네트워크·npx, 모델 크레딧 0)
 python3 scripts/scan_personal.py --all           # 추적 파일 전체 개인정보 스캔

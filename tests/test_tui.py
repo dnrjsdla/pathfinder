@@ -13,7 +13,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from pathfinder import tui
+from pathfinder import tui, tui_secret
 
 
 class FakeDaemon:
@@ -246,7 +246,7 @@ class TuiCase(unittest.TestCase):
             self.type_("/secret rv11test TOKEN\r")
             self.assertTrue(_wait_for(lambda: "TOKEN for rv11test (hidden;" in self.out_text()))
             self.type_(value)
-            self.assertTrue(_wait_for(lambda: self.out_text().endswith(tui.SECRET_PROMPT + "*" * len(value))))
+            self.assertTrue(_wait_for(lambda: self.out_text().endswith(tui_secret.SECRET_PROMPT + "*" * len(value))))
             self.type_("\r")
             self.assertTrue(_wait_for(lambda: "TOKEN stored for rv11test" in self.out_text()))
             self.type_("/secret Bad_Id TOKEN\r")
@@ -261,7 +261,7 @@ class TuiCase(unittest.TestCase):
             self.type_("/secret rv11test TOKEN\r")
             self.assertTrue(_wait_for(lambda: "(hidden;" in self.out_text()))
             self.type_("half")
-            self.assertTrue(_wait_for(lambda: self.out_text().endswith(tui.SECRET_PROMPT + "****")))
+            self.assertTrue(_wait_for(lambda: self.out_text().endswith(tui_secret.SECRET_PROMPT + "****")))
             self.type_("\x03")
             self.assertTrue(_wait_for(lambda: "nothing stored" in self.out_text()))
             self.assertIn("\x1b[?2004l", self.out_text())  # bracketed paste off on cancel
@@ -305,7 +305,7 @@ class TuiCase(unittest.TestCase):
             for part in ("\x1b[20", "0~tok-" + "value\x1b[2", "01~"):  # both marks straddle reads
                 self.type_(part)
                 time.sleep(0.05)
-            self.assertTrue(_wait_for(lambda: self.out_text().endswith(tui.SECRET_PROMPT + "*" * 9)))
+            self.assertTrue(_wait_for(lambda: self.out_text().endswith(tui_secret.SECRET_PROMPT + "*" * 9)))
             self.type_("\r")
             self.assertTrue(_wait_for(lambda: "TOKEN stored for rv11test" in self.out_text()))
             store.assert_called_once_with("pathfinder-mcp-rv11test", "TOKEN", "tok-value")
@@ -318,14 +318,14 @@ class TuiCase(unittest.TestCase):
         with mock.patch("pathfinder.keychain.store") as store:
             for n, end in enumerate(("\n", "\r\n"), 1):
                 self.type_("/secret rv11test TOKEN\r")
-                self.assertTrue(_wait_for(lambda: self.out_text().endswith(tui.SECRET_PROMPT)))
+                self.assertTrue(_wait_for(lambda: self.out_text().endswith(tui_secret.SECRET_PROMPT)))
                 self.type_("\x1b[200~tok-" + "value" + end + "\x1b[201~")
-                self.assertTrue(_wait_for(lambda: self.out_text().endswith(tui.SECRET_PROMPT + "*" * 9)))
+                self.assertTrue(_wait_for(lambda: self.out_text().endswith(tui_secret.SECRET_PROMPT + "*" * 9)))
                 self.type_("\r")
                 self.assertTrue(_wait_for(lambda: store.call_count == n))
             self.assertNotIn("a secret is one line", self.out_text())
             self.type_("/secret rv11test TOKEN\r")
-            self.assertTrue(_wait_for(lambda: self.out_text().endswith(tui.SECRET_PROMPT)))
+            self.assertTrue(_wait_for(lambda: self.out_text().endswith(tui_secret.SECRET_PROMPT)))
             self.type_("\x1b[200~a\nb\x1b[201~")
             self.assertTrue(_wait_for(lambda: "a secret is one line" in self.out_text()))
         self.assertEqual(store.call_args_list, [mock.call("pathfinder-mcp-rv11test", "TOKEN", "tok-value")] * 2)
@@ -343,7 +343,7 @@ class TuiCase(unittest.TestCase):
             self.type_("/secret rv11test TOKEN\r")
             self.assertTrue(_wait_for(lambda: "(hidden;" in self.out_text()))
             self.type_("\x1b[200~BPASTE\x1b[201~\x1b[A\x1b[D\x1b[1;5C\x1bOP")
-            self.assertTrue(_wait_for(lambda: self.out_text().endswith(tui.SECRET_PROMPT + "******")))
+            self.assertTrue(_wait_for(lambda: self.out_text().endswith(tui_secret.SECRET_PROMPT + "******")))
             self.type_("\r")
             self.assertTrue(_wait_for(lambda: store.called))
             store.assert_called_once_with("pathfinder-mcp-rv11test", "TOKEN", "BPASTE")

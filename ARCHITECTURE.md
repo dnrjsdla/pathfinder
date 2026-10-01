@@ -703,7 +703,7 @@ the next turn calls `mcp__<server>__<tool>`. Every hop is an event; `state.db` d
 | SIGTERM and Ctrl-C both end in one `close()` (the fake stdio server's process is gone); a `say` during a signal turn gets its own turn, during the user's turn still steers | `test_daemon.SigtermTest`, `test_say_during_signal_turn_starts_its_own_turn`, `test_daemon_say_during_turn_steers` |
 | `merge_json_file` keeps every other key, backs up first, creates a missing file, raises when the read-back differs | `test_installer.test_merge_json_file_*` |
 | The Anthropic adapter yields the same tuples from recorded SSE (text, tool_use from `input_json_delta`, usage), converts the history at the edge, maps 429/402 to `blocked`; a config without `api` resolves to `openai` exactly as before; no test opens a network socket | `test_llm_anthropic.*` |
-| `init.py` <= 300, `tui.py` <= 400; README.md and README.ko.md have the same headings | `test_invariants.test_init_module_under_300_lines`, `test_tui_module_under_400_lines`, `test_readme_pair_has_equal_heading_counts` |
+| `init.py` <= 300, `tui.py` <= 400, `tui_secret.py` (the masked `/secret` input, D64) <= 150; README.md and README.ko.md have the same headings | `test_invariants.test_init_module_under_300_lines`, `test_tui_module_under_400_lines`, `test_tui_secret_module_under_150_lines`, `test_readme_pair_has_equal_heading_counts` |
 | `memory` is an opt-in tool origin, exactly `search_memory, read_memory, read_ledger, edit_memory`; the socket refuses `signal memory ...`; `memory.py` and `daemon.py` <= 780 lines (the 1.3x line of their 600 allocations) | `test_memory.test_tools_for_origin_memory`, `test_daemon.MemoryDaemonTest.test_socket_refuses_signal_memory`, `test_invariants.test_memory_module_under_780_lines`, `test_invariants.test_daemon_module_under_780_lines` |
 
 ## 13. How to count
@@ -717,7 +717,7 @@ wc -l pathfinder/*.py pathfinder/llm/*.py pathfinder/senses/*.py   # core; budge
                                                   # memory 600 (686 today, 780 hard line), a sense file 150,
                                                   # catalog 300, installer 700, init 300 (partition 7);
                                                   # core cap 7,000 (D34) - the 1.3x line per module is the gate
-wc -l pathfinder/tui.py pathfinder/llm/anthropic.py  # outside the core: tui <= 400, the experimental adapter in llm/'s 600
+wc -l pathfinder/tui.py pathfinder/tui_secret.py pathfinder/llm/anthropic.py  # outside the core: tui <= 400, tui_secret <= 150 (D64), the experimental adapter in llm/'s 600
 wc -l pathfinder/mcp/*.py                         # the transplanted MCP client: adapter budget 1,858, outside the core
 python3 bench/m5_install.py                       # m5: installs from the registry in a temp HOME (network, npx; no model credits)
 python3 scripts/scan_personal.py --all           # personal-data scan over tracked files

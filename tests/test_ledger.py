@@ -285,16 +285,19 @@ if __name__ == "__main__":
 
 
 class PastedTokenTest(unittest.TestCase):
-    """D53's backstop. The Keychain is a dict here: no test touches the real one."""
+    """D53's backstop, with D66's names and scope. The Keychain is a dict here, faked at
+    `store`/`delete`/`_gone` or at `subprocess.run`: no test touches the real one."""
     TOKEN = "ntn_" + "x" * 40  # built by concatenation, so the scanner never flags this file
+    OTHER = "sk-" + "Y9" * 15
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
         self.home = Path(self._tmp.name)
         self.items = {}
-        self.deletable = True
-        for name, fake in (("store", self._store), ("delete", self._delete), ("secret", self._secret)):
+        self.locked = False
+        for name, fake in (("store", self._store), ("delete", self._delete), ("_gone", self._gone),
+                           ("secret", lambda service, account: self.items.get((service, account)))):
             patch = mock.patch(f"pathfinder.keychain.{name}", side_effect=fake)
             patch.start()
             self.addCleanup(patch.stop)
@@ -305,18 +308,21 @@ class PastedTokenTest(unittest.TestCase):
     def _store(self, service, account, value):
         self.items[(service, account)] = value
 
-    def _secret(self, service, account):
-        return self.items.get((service, account))
-
     def _delete(self, service, account):
-        if self.deletable:
+        if not self.locked:
             self.items.pop((service, account), None)
-        return self.deletable
+        return not self.locked
+
+    def _gone(self, account):
+        return not self.locked and ("pathfinder-pasted", account) not in self.items
 
     def _record(self, type, **kw):
         event = self.ledger.append(type, **kw)
         self.state.apply(event)
         return event
+
+    def _say(self, text, **kw):  # what the owner typed
+        return self._record("user", origin="user", trust="user", text=text, **kw)
 
     def _on_disk(self):
         return "".join(p.read_text() for p in (self.home / "events").glob("*.jsonl"))
@@ -324,28 +330,55 @@ class PastedTokenTest(unittest.TestCase):
     def _index(self):
         return json.loads((self.home / "pasted.json").read_text())
 
+    def _security(self, argv, input=None, **kw):
+        """A fake `security` over `self.items`, for the real secret/store/delete/_gone."""
+        self.calls += 1
+        if argv[1] == "-i":  # add-generic-password -U -s "..." -a "..." -w "..."
+            cmd = shlex.split(input)
+            self.items[(cmd[cmd.index("-s") + 1], cmd[cmd.index("-a") + 1])] = cmd[cmd.index("-w") + 1]
+            return mock.Mock(returncode=0, stdout="", stderr="")
+        key = (argv[argv.index("-s") + 1], argv[argv.index("-a") + 1])
+        if key not in self.items:
+            return mock.Mock(returncode=44, stdout="", stderr="")
+        value = self.items.pop(key) if argv[1] == "delete-generic-password" else self.items[key]
+        return mock.Mock(returncode=0, stdout=value + "\n", stderr="")
+
     def test_paste_vaulted_and_handle_returned(self):
-        other = "sk-" + "Y9" * 15
         self._record("session_start", session="s")
-        event = self._record("user", session="s", origin="user", trust="user",
-                             text=f"use {self.TOKEN} then {self.TOKEN}", extra={"k": [other]})
-        self.assertEqual(event["text"], "use [secret:pasted-1] then [secret:pasted-1]")  # one handle
-        self.assertEqual(event["extra"], {"k": ["[secret:pasted-2]"]})
-        self.assertEqual(self.items, {("pathfinder-pasted", "pasted-1"): self.TOKEN,
-                                      ("pathfinder-pasted", "pasted-2"): other})
+        event = self._say(f"use {self.TOKEN} then {self.TOKEN}", session="s", extra={"k": [self.OTHER]})
+        seq = event["seq"]
+        self.assertEqual(event["text"], f"use [secret:pasted-{seq}] then [secret:pasted-{seq}]")  # one handle
+        self.assertEqual(event["extra"], {"k": [f"[secret:pasted-{seq}-2]"]})
+        self.assertEqual(self.items, {("pathfinder-pasted", f"pasted-{seq}"): self.TOKEN,
+                                      ("pathfinder-pasted", f"pasted-{seq}-2"): self.OTHER})
         disk = self._on_disk()
         self.assertNotIn(self.TOKEN, disk)
-        self.assertNotIn(other, disk)
-        self.assertIn("[secret:pasted-1]", disk)
+        self.assertNotIn(self.OTHER, disk)
+        self.assertIn(f"[secret:pasted-{seq}]", disk)
         self.assertEqual(self.state.history("s"), [{"role": "user", "content": event["text"]}])
-        self.assertEqual(sorted(self._index()["pasted"]), ["pasted-1", "pasted-2"])  # handles and times only
+        self.assertEqual(sorted(self._index()["pasted"]), [f"pasted-{seq}", f"pasted-{seq}-2"])  # handles and times only
         self.assertNotIn(self.TOKEN, (self.home / "pasted.json").read_text())
         self.assertEqual((self.home / "pasted.json").stat().st_mode & 0o777, 0o600)
-        plain = self._record("user", session="s", origin="user", trust="user", text="no token here")
-        self.assertEqual(plain["text"], "no token here")
+        self.assertEqual(self._say("no token here", session="s")["text"], "no token here")
         self.assertEqual(len(self.items), 2)
 
-    def _back_date(self, pasted):
+    def test_handle_is_the_event_seq(self):
+        first = self._say(f"one {self.TOKEN}")
+        second = self._say(f"two {self.OTHER} and {self.TOKEN}")
+        s1, s2 = first["seq"], second["seq"]
+        self.assertEqual(first["text"], f"one [secret:pasted-{s1}]")
+        self.assertEqual(second["text"], f"two [secret:pasted-{s2}] and [secret:pasted-{s2}-2]")
+        self.assertEqual(sorted(a for _, a in self.items), [f"pasted-{s1}", f"pasted-{s2}", f"pasted-{s2}-2"])
+
+    def test_a_lost_index_cannot_reuse_a_number(self):
+        first = self._say(self.TOKEN)
+        (self.home / "pasted.json").unlink()
+        second = self._say(self.OTHER)
+        self.assertNotEqual(first["text"], second["text"])
+        self.assertEqual(self.items, {("pathfinder-pasted", f"pasted-{first['seq']}"): self.TOKEN,
+                                      ("pathfinder-pasted", f"pasted-{second['seq']}"): self.OTHER})
+
+    def _back_date(self, pasted):  # an index as partition 8 first wrote it, with `last`: still read
         (self.home / "pasted.json").write_text(json.dumps({"last": 2, "pasted": pasted}))
 
     def test_unbound_paste_expires_after_24h(self):
@@ -354,25 +387,27 @@ class PastedTokenTest(unittest.TestCase):
         self.items = {("pathfinder-pasted", "pasted-1"): "a", ("pathfinder-pasted", "pasted-2"): "b"}
         Ledger(self.home)  # a daemon start sweeps
         self.assertEqual(list(self.items), [("pathfinder-pasted", "pasted-2")])
-        self.assertEqual(self._index(), {"last": 2, "pasted": {"pasted-2": now - 3600}})
+        self.assertEqual(self._index(), {"pasted": {"pasted-2": now - 3600}})
 
         self._back_date({"pasted-2": now - 25 * 3600})
-        self.deletable = False  # a locked keychain: the entry stays for the next sweep
+        self.locked = True  # the entry stays for the next sweep
         Ledger(self.home)
         self.assertEqual(list(self._index()["pasted"]), ["pasted-2"])
-        self.deletable = True
-        self._record("user", text=self.TOKEN)  # a new paste sweeps too
-        self.assertEqual(self.items, {("pathfinder-pasted", "pasted-3"): self.TOKEN})
-        self.assertEqual(list(self._index()["pasted"]), ["pasted-3"])
+        self.locked = False
+        seq = self._say(self.TOKEN)["seq"]  # a new paste sweeps too
+        self.assertEqual(self.items, {("pathfinder-pasted", f"pasted-{seq}"): self.TOKEN})
+        self.assertEqual(list(self._index()["pasted"]), [f"pasted-{seq}"])
 
-    def test_a_handle_is_never_reused(self):
-        self.assertEqual(self._record("user", text=self.TOKEN)["text"], "[secret:pasted-1]")
-        index = self._index()
-        index["pasted"]["pasted-1"] -= 25 * 3600
-        (self.home / "pasted.json").write_text(json.dumps(index))
-        self.assertEqual(self._record("user", text="sk-" + "N7" * 15)["text"], "[secret:pasted-2]")
+    def test_a_handle_whose_item_is_gone_is_dropped(self):
+        now = time.time()
+        self._back_date({"pasted-1": now - 3600, "pasted-2": now - 3600})
+        self.items = {("pathfinder-pasted", "pasted-2"): "b"}
+        Ledger(self.home)
         self.assertEqual(list(self._index()["pasted"]), ["pasted-2"])
-        self.assertNotIn(("pathfinder-pasted", "pasted-1"), self.items)
+        self._back_date({"pasted-1": now - 3600})
+        self.items, self.locked = {}, True  # a locked keychain cannot say it is gone: kept
+        Ledger(self.home)
+        self.assertEqual(list(self._index()["pasted"]), ["pasted-1"])
 
     def test_an_unusable_index_never_stops_an_append(self):
         index = self.home / "pasted.json"
@@ -382,63 +417,34 @@ class PastedTokenTest(unittest.TestCase):
                 if state is not None:
                     index.write_text(state)
                 ledger = Ledger(self.home)  # a daemon start, or any CLI command
-                self.assertEqual(ledger.append("user", text="plain")["text"], "plain")
-                self.assertRegex(ledger.append("user", text=self.TOKEN)["text"], r"^\[secret:pasted-\d+\]$")
+                self.assertEqual(ledger.append("user", trust="user", text="plain")["text"], "plain")
+                self.assertRegex(ledger.append("user", trust="user", text=self.TOKEN)["text"],
+                                 r"^\[secret:pasted-\d+\]$")
         self.assertNotIn(self.TOKEN, self._on_disk())
-
-    def test_a_lost_index_never_overwrites_a_live_item(self):
-        self.items = {("pathfinder-pasted", "pasted-1"): "the value an old handle points to"}
-        self.assertEqual(self._record("user", text=self.TOKEN)["text"], "[secret:pasted-2]")
-        self.assertEqual(self.items[("pathfinder-pasted", "pasted-1")], "the value an old handle points to")
 
     def test_an_unwritable_index_redacts_and_leaves_no_orphan(self):
         (self.home / "pasted.json").mkdir()  # nothing can be written there
-        self.assertEqual(self._record("user", text=self.TOKEN)["text"], "[redacted]")
+        self.assertEqual(self._say(self.TOKEN)["text"], "[redacted]")
         self.assertEqual(self.items, {})
 
-    def test_pem_without_end_is_vaulted_whole(self):
+    def test_pem_without_end_is_redacted_whole(self):
         """The ledger's 2,000-character clip cuts a 4096-bit key's END line off: the header and
         the base64 after it go, as raw text or as JSON with `\\n` escapes."""
         body = "\n".join("MIIJ" + "Qk9vdHN0cmFw" * 5 for _ in range(48))  # about 3 KB, no END
         key = "-----BEGIN " + "RSA PRIVATE KEY-----\n" + body + "\n-----END " + "RSA PRIVATE KEY-----"
-        for n, clipped in enumerate((tools_mod.clip_for_ledger(key), tools_mod.clip_for_ledger({"content": key})), 1):
+        for clipped in (tools_mod.clip_for_ledger(key), tools_mod.clip_for_ledger({"content": key})):
             event = self._record("tool_result", id="c1", name="read_file", ok=True, result=clipped)
-            self.assertEqual(event["result"], clipped[:clipped.index("-----BEGIN")] + f"[secret:pasted-{n}]...(truncated)")
+            self.assertEqual(event["result"], clipped[:clipped.index("-----BEGIN")] + "[redacted]...(truncated)")
         self.assertIsNone(re.search(r"[A-Za-z0-9+/=]{20,}", "".join(json.loads(line)["result"]
                           for line in self._on_disk().splitlines())))
-        self.assertTrue(self.items[("pathfinder-pasted", "pasted-1")].startswith(key[:1900]))
-
-    def test_a_rediscovered_item_is_swept(self):
-        """A truncated index forgets pasted-1; the next paste's probe finds it and indexes it, so
-        a sweep 25 hours later deletes it - through the real secret/store/delete over a fake `security`."""
-        mock.patch.stopall()
-        items = {"pasted-1": "an item the lost index forgot"}
-
-        def security(argv, input=None, **kw):
-            if argv[1] == "-i":  # add-generic-password -U -s "..." -a "..." -w "..."
-                cmd = shlex.split(input)
-                items[cmd[cmd.index("-a") + 1]] = cmd[cmd.index("-w") + 1]
-                return mock.Mock(returncode=0, stdout="", stderr="")
-            account = argv[argv.index("-a") + 1]
-            if account not in items:
-                return mock.Mock(returncode=44, stdout="", stderr="")
-            value = items.pop(account) if argv[1] == "delete-generic-password" else items[account]
-            return mock.Mock(returncode=0, stdout=value + "\n", stderr="")
-
-        (self.home / "pasted.json").write_text('{"last": 1, "pas')  # truncated
-        with mock.patch("pathfinder.keychain.subprocess.run", side_effect=security):
-            self.assertEqual(self._record("user", text=self.TOKEN)["text"], "[secret:pasted-2]")
-            self.assertEqual(sorted(self._index()["pasted"]), ["pasted-1", "pasted-2"])
-            keychain_mod.sweep(self.home / "pasted.json", time.time() + 25 * 3600)
-        self.assertEqual(items, {})
-        self.assertEqual(self._index()["pasted"], {})
+        self.assertEqual(self.items, {})
 
     def test_failed_read_back_leaves_no_orphan(self):
         def differs(service, account, value):  # stored, then read back as something else
             self.items[(service, account)] = value[:-1]
             raise RuntimeError("the Keychain gave back a different value")
         keychain_mod.store.side_effect = differs
-        self.assertEqual(self._record("user", text=self.TOKEN)["text"], "[redacted]")
+        self.assertEqual(self._say(self.TOKEN)["text"], "[redacted]")
         self.assertEqual(self.items, {})
         self.assertFalse((self.home / "pasted.json").exists())
 
@@ -448,17 +454,39 @@ class PastedTokenTest(unittest.TestCase):
             with mock.patch("pathfinder.keychain.subprocess.run",
                             **({"side_effect": failure} if isinstance(failure, BaseException)
                                else {"return_value": failure})):
-                event = self._record("user", text=f"key {self.TOKEN}")
+                event = self._say(f"key {self.TOKEN}")
             self.assertEqual(event["text"], "key [redacted]")
         self.assertNotIn(self.TOKEN, self._on_disk())
         self.assertEqual(self._on_disk().count("key [redacted]"), 2)  # the appends landed
         self.assertFalse((self.home / "pasted.json").exists())
 
+    def test_a_token_in_a_tool_result_is_redacted_without_the_keychain(self):
+        mock.patch.stopall()
+        with mock.patch("pathfinder.keychain.subprocess.run") as run:
+            result = self._record("tool_result", id="c1", name="read_file", ok=True, result=f"env: {self.TOKEN}")
+            signal = self.ledger.append("signal", origin="signal", trust="third_party", summary=f"mail {self.OTHER}")
+        self.assertEqual((result["result"], signal["summary"]), ("env: [redacted]", "mail [redacted]"))
+        self.assertEqual(run.call_count, 0)
+        self.assertFalse((self.home / "pasted.json").exists())
+
+    def test_a_token_in_the_owners_text_gets_a_handle(self):
+        mock.patch.stopall()
+        self.calls = 0
+        with mock.patch("pathfinder.keychain.subprocess.run", side_effect=self._security):
+            event = self._say(f"key {self.TOKEN}")
+        self.assertEqual(event["text"], f"key [secret:pasted-{event['seq']}]")
+        self.assertEqual(self.items, {("pathfinder-pasted", f"pasted-{event['seq']}"): self.TOKEN})
+        self.assertGreater(self.calls, 0)
+
     def test_pasted_token_reaches_the_record_as_a_handle(self):
+        """The owner's paste becomes a handle in history; a call that passes the handle on is
+        recorded with it, and a raw token the model wrote into a call is recorded redacted."""
         self._record("session_start", session="s")
-        self._record("user", session="s", turn="t1", origin="user", trust="user", text="save it")
-        for type_, extra in (("tool_call", {"args": {"token": self.TOKEN}}), ("tool_result", {"ok": True, "result": "done"})):
+        handle = self._say(f"save {self.TOKEN}", session="s", turn="t1")["text"].split()[-1]
+        args = {"token": handle, "raw": self.OTHER}
+        for type_, extra in (("tool_call", {"args": args}), ("tool_result", {"ok": True, "result": "done"})):
             self._record(type_, session="s", turn="t1", origin="user", id="c1", name="remember", **extra)
         (record,) = [m["content"] for m in self.state.history("s") if m["role"] == "system"]
-        self.assertIn('remember {"token":"[secret:pasted-1]"} ok', record)
+        self.assertIn(f'remember {{"token":"{handle}","raw":"[redacted]"}} ok', record)
         self.assertNotIn(self.TOKEN, record)
+        self.assertNotIn(self.OTHER, record)

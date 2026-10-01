@@ -1893,8 +1893,9 @@ class ProposalGateLineTest(DaemonHarness):
 
 
 class PastedTokenScreenTest(DaemonHarness):
-    """D53: a screen line shows what the ledger holds, so the owner approves what will run. The
-    Keychain is a dict here."""
+    """D53: a screen line shows what the ledger holds, so the owner approves what will run. A
+    model's call is not the owner's text, so a token there is redacted (D66). The Keychain is a
+    dict here."""
     TOKEN = "ntn_" + "s" * 40  # built by concatenation, so the scanner never flags this file
 
     def setUp(self):
@@ -1906,7 +1907,7 @@ class PastedTokenScreenTest(DaemonHarness):
             patch.start()
             self.addCleanup(patch.stop)
 
-    def test_gate_line_carries_the_handle_the_approval_holds(self):
+    def test_gate_line_shows_what_the_approval_holds(self):
         note_path = str(self.home / "note.txt")
 
         def gate_model(cfg, control=None, tools=None):
@@ -1929,7 +1930,8 @@ class PastedTokenScreenTest(DaemonHarness):
 
         seen = self.run_with(gate_model, scenario)
         gates = [m for m in seen if m["type"] == "gate"]
-        self.assertEqual([g["args"]["content"] for g in gates], ["[secret:pasted-1]", "[secret:pasted-2]"])
+        self.assertEqual([g["args"]["content"] for g in gates], ["[redacted]", "[redacted]"])
+        self.assertEqual(self.items, {})  # no Keychain call for a call's arguments
         self.assertNotIn(self.TOKEN, json.dumps(seen))
         state = State(self.home / "state.db")
         self.addCleanup(state.close)
@@ -1944,7 +1946,8 @@ class PastedTokenScreenTest(DaemonHarness):
             daemon.steer(s, f"use {self.TOKEN}")
             return list(s.control.steers)
 
-        self.assertEqual(self.run_with(fake_model("ok"), scenario), ["use [secret:pasted-1]"])
+        (steer,) = self.run_with(fake_model("ok"), scenario)
+        self.assertRegex(steer, r"^use \[secret:pasted-\d+\]$")
 
 
 class ChatApprovalTest(DaemonHarness):

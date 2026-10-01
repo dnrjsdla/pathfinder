@@ -24,7 +24,7 @@ TOKEN_RE = re.compile(
     r"|(?<![A-Za-z0-9])(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AIza[0-9A-Za-z_-]{30,}"
     r"|xox[abprs]-[A-Za-z0-9-]{10,}|xapp-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|ntn_[A-Za-z0-9]{20,}"
     r"|secret_[A-Za-z0-9]{40,}|[sr]k_(?:live|test)_[A-Za-z0-9]{20,}|\d{8,10}:[A-Za-z0-9_-]{35}(?![A-Za-z0-9_-]))")
-PASTED = "pathfinder-pasted"  # a pasted token's service; its account is its handle, pasted-N
+PASTED = "pathfinder-pasted"  # a pasted token's service; its account is its handle, pasted-<seq>[-i]
 
 
 def secret(service: str, account: str, run=None) -> str | None:
@@ -90,70 +90,80 @@ def delete(service: str, account: str) -> bool:
         return False
 
 
-def mask(text: str) -> str:
-    """`text` with every token-shaped substring as `[redacted]`, and no Keychain call: for a copy
-    that is kept apart from the ledger, such as a job's goal (D53)."""
-    return TOKEN_RE.sub("[redacted]", text)
+def _gone(account: str) -> bool:
+    """True only when the Keychain answers that the pasted item is not there (exit 44): a locked
+    keychain, or no `security`, never drops a handle. Asks without `-w`, so no value is read."""
+    try:
+        argv = ["security", "find-generic-password", "-s", PASTED, "-a", account]
+        return subprocess.run(argv, capture_output=True, timeout=5).returncode == 44
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def _walk(value, swap):
+    if isinstance(value, str):
+        return TOKEN_RE.sub(swap, value)
+    if isinstance(value, dict):
+        return {_walk(k, swap): _walk(v, swap) for k, v in value.items()}
+    return [_walk(v, swap) for v in value] if isinstance(value, list) else value
+
+
+def mask(value):
+    """`value` (a text, or an event) with every token-shaped substring as `[redacted]`, and no
+    Keychain call: for text the owner did not type (D66), and for a job's own copy of its goal."""
+    return _walk(value, "[redacted]")
 
 
 def sweep(index: Path, now: float) -> dict:
-    """Delete pasted items older than 24 hours from the Keychain and the index (D53); returns the
-    index: `last`, the highest N handed out, and `pasted`, handle -> creation time. A delete the
-    Keychain refuses stays for next time. An index that is missing or unusable reads as empty."""
+    """Delete pasted items older than 24 hours from the Keychain and the index, and drop a handle
+    whose item is gone (D53, D66); returns the index left, handle -> creation time. A delete the
+    Keychain refuses stays for next time. An index that is missing or unusable reads as empty, and
+    an item whose handle it lost stays unknown (no item is ever found without its handle)."""
     try:
-        held = json.loads(index.read_text())
-        held = {"last": int(held["last"]), "pasted": {str(h): float(t) for h, t in held["pasted"].items()}}
+        held = {str(h): float(t) for h, t in json.loads(index.read_text())["pasted"].items()}
     except Exception:  # missing, garbage, or the wrong shape: never a reason for an append to fail
-        held = {"last": 0, "pasted": {}}
-    live = {h: t for h, t in held["pasted"].items() if now - t < 24 * 3600 or not delete(PASTED, h)}
-    if live != held["pasted"]:
+        held = {}
+    live = {h: t for h, t in held.items()  # expired: deleted; still young: asked whether it is there
+            if not (delete(PASTED, h) if now - t >= 24 * 3600 else _gone(h))}
+    if live != held:
         try:
-            _save(index, {**held, "pasted": live})
+            _save(index, live)
         except OSError:  # the deletes are done; the next sweep repeats them harmlessly
             pass
-    return {**held, "pasted": live}
+    return live
 
 
 def _save(index: Path, held: dict) -> None:
     """Handles and times, never values; replaced whole, so a crash never leaves half an index."""
     tmp = index.with_name(index.name + ".tmp")
     with open(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as f:
-        json.dump(held, f)
+        json.dump({"pasted": held}, f)
     os.replace(tmp, index)
 
 
-def _paste(token: str, index: Path) -> str:
-    now = time.time()
-    held = sweep(index, now)  # every new paste sweeps first
-    n = held["last"] + 1
-    while secret(PASTED, f"pasted-{n}") is not None:  # a lost index never overwrites an item an old handle names
-        held["pasted"].setdefault(f"pasted-{n}", now)  # and what it forgot is swept 24 hours from now
-        n += 1
-    account = f"pasted-{n}"
-    try:
-        store(PASTED, account, token)
-        _save(index, {"last": n, "pasted": {**held["pasted"], account: now}})
-    except (ValueError, RuntimeError, OSError, subprocess.SubprocessError):  # locked, or no `security`
-        delete(PASTED, account)  # a read-back that differed, or an unwritten index, leaves no orphan
-        return "[redacted]"
-    return f"[secret:{account}]"
-
-
 def vault(event, index: Path):
-    """`event` with each token-shaped substring stored as a pasted-N item and replaced by
-    `[secret:pasted-N]`, or by `[redacted]` when the Keychain refuses it (D53). The same token
-    twice in one event gets one handle. Only an event holding a token reaches the Keychain."""
-    handles = {}
+    """`event` (the owner's own text, D66) with each token-shaped substring stored as an item
+    named by the event's ledger seq - `pasted-<seq>`, then `pasted-<seq>-2`, ... - and replaced by
+    `[secret:<handle>]`, or by `[redacted]` when the Keychain refuses it (D53). The seq never
+    recurs, so a handle never comes to name another value. The same token twice gets one handle.
+    Only an event holding a token reaches the Keychain, and it sweeps once."""
+    handles, held = {}, None
 
     def swap(m):
-        if m[0] not in handles:
-            handles[m[0]] = _paste(m[0], index)
+        nonlocal held
+        if m[0] in handles:
+            return handles[m[0]]
+        if held is None:
+            held = sweep(index, time.time())
+        account = f"pasted-{event['seq']}" + (f"-{len(handles) + 1}" if handles else "")
+        try:
+            store(PASTED, account, m[0])
+            held[account] = time.time()
+            _save(index, held)
+            handles[m[0]] = f"[secret:{account}]"
+        except (ValueError, RuntimeError, OSError, subprocess.SubprocessError):  # locked, or no `security`
+            held.pop(account, None)
+            delete(PASTED, account)  # a read-back that differed, or an unwritten index, leaves no orphan
+            handles[m[0]] = "[redacted]"
         return handles[m[0]]
-
-    def walk(v):
-        if isinstance(v, str):
-            return TOKEN_RE.sub(swap, v)
-        if isinstance(v, dict):
-            return {walk(k): walk(x) for k, x in v.items()}
-        return [walk(x) for x in v] if isinstance(v, list) else v
-    return walk(event)
+    return _walk(event, swap)

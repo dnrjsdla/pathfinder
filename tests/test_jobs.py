@@ -212,8 +212,9 @@ class JobLinesTest(JobsHarness):
             {"type": "job.end", "id": "j1", "state": "done"}])
         self.assertEqual([e["type"] for e in self.events()], ["job_start", "user", "approval_pending", "job_done"])
 
-    def test_job_lines_show_the_recorded_handle(self):
-        """D53: the screen shows the handle the approval row holds, not the pasted token."""
+    def test_job_lines_show_what_was_recorded(self):
+        """D53: the screen shows what the approval row holds, never the token; a job's goal and
+        call are not the owner's text, so the token is redacted (D66)."""
         token = "ntn_" + "j" * 40  # built by concatenation, so the scanner never flags this file
         lines = []
         mgr = jobs.Manager(self.home, self.record, self.push, None, rules_mod.Rules(), send=lines.append)
@@ -223,8 +224,8 @@ class JobLinesTest(JobsHarness):
             mgr.record("job_start", session="s1", origin="job", id="j1", goal=f"post with {token}")
             mgr.record("approval_pending", session="s1", origin="job", id="a1", call_id="c1", tool="post",
                        args={"key": token}, messages=[], job="j1")
-        self.assertEqual(lines[0]["goal"], "post with [secret:pasted-1]")
-        self.assertEqual(lines[1]["args"], {"key": "[secret:pasted-2]"})
+        self.assertEqual(lines[0]["goal"], "post with [redacted]")
+        self.assertEqual(lines[1]["args"], {"key": "[redacted]"})
         self.assertEqual(self.state.approval("a1")["args"], lines[1]["args"])
 
     def test_job_end_reads_the_passed_state(self):
@@ -311,8 +312,8 @@ class JobControlTest(JobsHarness):
         self.assertEqual((steer_events[0]["origin"], steer_events[0]["job"]), ("user", job_id))
 
     def test_a_pasted_token_never_reaches_the_job(self):
-        """D53: the job keeps a masked goal and masked steers for its model and its notice; the
-        ledger's own copies get handles."""
+        """D53: the job keeps a masked goal and masked steers for its model and its notice; in the
+        ledger the owner's steer gets a handle and the goal, the model's words, is redacted (D66)."""
         token = "ntn_" + "g" * 40  # built by concatenation, so the scanner never flags this file
         for name, fake in (("store", None), ("delete", None), ("secret", lambda s, a: None)):
             patch = mock.patch(f"pathfinder.keychain.{name}", side_effect=fake)
@@ -344,8 +345,9 @@ class JobControlTest(JobsHarness):
         self.assertIn("Goal: post with [redacted]", repr(seen[0]))
         self.assertIn("use [redacted]", repr(seen[1]))
         self.assertNotIn(token, repr(seen) + repr(self.pushed) + repr(self.events()))
-        self.assertEqual(self.events("job_start")[0]["goal"], "post with [secret:pasted-1]")
-        self.assertEqual([e["text"] for e in self.events("user") if e.get("steer")], ["use [secret:pasted-2]"])
+        self.assertEqual(self.events("job_start")[0]["goal"], "post with [redacted]")  # the model's words (D66)
+        (steer,) = [e for e in self.events("user") if e.get("steer")]  # the owner's words: a handle
+        self.assertEqual(steer["text"], f"use [secret:pasted-{steer['seq']}]")
 
 
 class JobGateTest(JobsHarness):

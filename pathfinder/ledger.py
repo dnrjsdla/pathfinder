@@ -108,9 +108,10 @@ class Ledger:
                     "seq": self.last_seq, "ts": ts, "type": type, "session": session,
                     "turn": turn, "origin": origin, "trust": trust, **data,
                 })
-                # D53: a token-shaped string enters the Keychain here and the event, written and
-                # returned, carries only its handle - so state, history and the record do too
-                event = keychain.vault(event, self._index)
+                # D53/D66: a token-shaped string the owner typed enters the Keychain here, and the
+                # event, written and returned, carries only its handle - so state, history and the
+                # record do too; in any other text it is redacted, with no Keychain call
+                event = keychain.vault(event, self._index) if trust == "user" else keychain.mask(event)
                 path = self.dir / f"{partition(ts)}.jsonl"
                 line = json.dumps(event) + "\n"
                 # A crash mid-write leaves a fragment without a newline. Appending straight

@@ -37,7 +37,7 @@ FIXTURE_NPM_ITEM = {
             "runtimeArguments": [{"value": "-y", "type": "positional"}],
             "environmentVariables": [
                 {"name": "API_KEY", "description": "a key", "isRequired": True, "isSecret": True},
-                {"name": "OPTIONAL_FLAG", "description": "optional"},
+                {"name": "OPTIONAL_FLAG", "description": "optional", "default": "off\u200b"},
             ],
         }],
         "remotes": [{"type": "streamable-http", "url": "https://example.com/mcp"}],
@@ -182,8 +182,8 @@ class CandidateTest(unittest.TestCase):
         self.assertEqual(pkg["runtime"], "npx")
         self.assertEqual(pkg["args"], ["-y", f"{pkg['identifier']}@{pkg['version']}"])
         self.assertEqual(pkg["env"], [
-            {"name": "API_KEY", "secret": True, "required": True},
-            {"name": "OPTIONAL_FLAG", "secret": False, "required": False},
+            {"name": "API_KEY", "secret": True, "required": True, "default": None},
+            {"name": "OPTIONAL_FLAG", "secret": False, "required": False, "default": "off"},  # registry text, `oneline`
         ])
         self.assertEqual(pkg["remotes"], FIXTURE_NPM_ITEM["server"]["remotes"])
         self.assertEqual(cand["verification"], {

@@ -32,7 +32,7 @@ from .config import _atomic_write_json, backup_file, merge_json_file
 from . import exec as exec_mod
 from .mcp import pins as mcp_pins
 from .mcp.protocol import qualify
-from .mcp.servers import Entry
+from .mcp.servers import Entry, _resolve
 from .mcp.session import ServerSession
 from .mcp.tools import read_only, refused
 from .mcp.transport import StdioTransport, StreamableHttpTransport
@@ -63,6 +63,16 @@ def _bad_runtime_args(pkg: dict, spec: str) -> str:
         if a not in allowed:
             return f"unexpected runtime argument {a}"
     return ""
+
+
+def _keychain_env(pkg: dict) -> dict:
+    """Every secret or required variable (D40 - the registry omits `isSecret` when false, and some
+    required tokens are not marked) as its config entry, U34's grammar for `mcp.servers._resolve`:
+    `keychain:NAME` when required, `keychain?:NAME` when optional, then `=<default>` when the
+    registry gives one (already `oneline`, by `catalog._package`)."""
+    return {e["name"]: f"keychain{'' if e.get('required') else '?'}:{e['name']}"
+            + (f"={e['default']}" if e.get("default") else "")
+            for e in pkg["env"] if e.get("secret") or e.get("required")}
 
 # The same alphabet as `senses.catalog._server_id` - kept in sync by hand there (a separate
 # copy, not imported: that module imports this one for `propose_install`, so this one must not
@@ -241,21 +251,12 @@ class Installer:
                 return fail("license", f"license {spdx or 'unknown'} is excluded")
             verification["license"]["warning"] = True
 
-        # 4. secrets (D40): every secret or required variable comes from the Keychain - the registry
-        # omits `isSecret` when false, and some required tokens are not marked - and a missing
-        # required one stops here, before the trial, all names at once (`names`, for the asking); a
-        # missing optional one is listed under `needs`
+        # 4. secrets (D40): every secret or required variable comes from the Keychain, read from the
+        # very entry the install writes (U34) - a missing required one without a default stops here,
+        # before the trial, all names at once (`names`, for the asking); a missing optional one
+        # without a default is listed under `needs`
         sid = self._server_id(candidate["name"])
-        needs, missing, resolved_env = [], [], {}
-        for e in pkg["env"]:
-            name = e["name"]
-            if not (e.get("secret") or e.get("required")):
-                continue
-            val = keychain.secret(f"pathfinder-mcp-{sid}", name)
-            if val is not None:
-                resolved_env[name] = val
-            else:
-                (missing if e.get("required") else needs).append(name)
+        resolved_env, missing, needs = _resolve(_keychain_env(pkg), sid, keychain.secret)
         if missing:
             verification["names"] = missing
             one = missing[0] if len(missing) == 1 else ""
@@ -286,8 +287,8 @@ class Installer:
         candidate["install"].update({
             "runtime": runtime, "pinned_version": pkg["version"], "integrity": integrity,
             # every secret or required variable, found or not (B6): the config references each as
-            # `keychain:NAME`, so adding one later is all it takes - the server stays disabled until then
-            "env_from_keychain": sorted(e["name"] for e in pkg["env"] if e.get("secret") or e.get("required")),
+            # `keychain:NAME`, so adding one later is all it takes - a required one keeps the server disabled until then
+            "env_from_keychain": sorted(_keychain_env(pkg)),
             "args": list(pkg["args"]),
             "permissions": [{"tool": t["name"], "grant": "allow" if t["read_only_hint"] else "ask"} for t in tools],
         })
@@ -480,7 +481,7 @@ class Installer:
             self.record("install_step", id=id, step="mcp_servers", ok=False, detail=reason)
             return {**out, "reason": reason, "step": "mcp_servers"}
 
-        env_cfg = {name: f"keychain:{name}" for name in install["env_from_keychain"]}
+        env_cfg = _keychain_env(pkg)
         if pkg["registry_type"] == "remote":
             server_cfg = {"transport": "http", "url": pkg["identifier"], "headers": env_cfg}
         else:

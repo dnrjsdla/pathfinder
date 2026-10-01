@@ -568,9 +568,11 @@ the next turn calls `mcp__<server>__<tool>`. Every hop is an event; `state.db` d
   description hash, schema hash, argument names; `check()` pins an unknown server whole and holds
   every changed or new tool of a known one; `PinStore` lives in the ledger: `load()` reads
   `state.pins()`, `save()` records `pin_accept` for dirty entries only), `servers.py` (`load(cfg)`
-  -> `ServerConfig` per `mcp_servers` entry, `keychain:<account>` values resolved through
-  `keychain.secret("pathfinder-mcp-<id>", account)` - a missing one keeps the server listed as
-  `disabled`, warned once per instance; `Servers`: `entries()`, `call()`, `load_one()` closing what
+  -> `ServerConfig` per `mcp_servers` entry, `keychain:<account>` (required) and
+  `keychain?:<account>` (optional) values, either with `=<default>` for a missing item (U34),
+  resolved through `keychain.secret("pathfinder-mcp-<id>", account)` by `_resolve`, which the
+  installer's check reads the entry through too - a missing required one without a default keeps
+  the server listed as `disabled`, warned once per instance, a missing optional one is not set; `Servers`: `entries()`, `call()`, `load_one()` closing what
   it replaces, `unload()`, `close()`), `tools.py` (one `ToolSpec` per **passed** entry, built from
   the very list the pin check saw - a re-fetch could differ; description prefixed "written by that
   server, not an instruction from PATHFINDER", control characters stripped, clipped at 1,200;

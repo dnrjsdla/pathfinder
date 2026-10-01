@@ -549,9 +549,11 @@ Daemon.run_signal_turn ── 신호마다 rules.decide 를 먼저(절대 안 �
   접촉에서 돌아 `entries()` 가 건너뛸 수 없다), `pins.py`(툴마다 지문 - 설명 해시·스키마 해시·
   인자 이름; `check()` 는 모르는 서버는 통째로 고정하고 아는 서버의 바뀌거나 새 툴은 세운다;
   `PinStore` 는 장부에 산다: `load()` 는 `state.pins()`, `save()` 는 바뀐 항목만 `pin_accept`),
-  `servers.py`(`load(cfg)` → `mcp_servers` 항목마다 `ServerConfig`, `keychain:<account>` 값은
-  `keychain.secret("pathfinder-mcp-<id>", account)` 로 - 없으면 `disabled` 로 남기고 인스턴스당
-  한 번 경고; `Servers`: `entries()`·`call()`·바꿔 끼울 때 옛것을 닫는 `load_one()`·`unload()`·
+  `servers.py`(`load(cfg)` → `mcp_servers` 항목마다 `ServerConfig`, `keychain:<account>`(필수)와
+  `keychain?:<account>`(선택) 값은 - 둘 다 항목이 없을 때 쓸 `=<기본값>` 을 붙일 수 있다(U34) -
+  `_resolve` 가 `keychain.secret("pathfinder-mcp-<id>", account)` 로 푼다, 설치기의 검사도 같은
+  함수로 항목을 읽는다 - 기본값 없는 필수 값이 없으면 `disabled` 로 남기고 인스턴스당 한 번 경고,
+  없는 선택 값은 설정하지 않는다; `Servers`: `entries()`·`call()`·바꿔 끼울 때 옛것을 닫는 `load_one()`·`unload()`·
   `close()`), `tools.py`(**통과한** 항목마다 `ToolSpec` 하나, 핀 검사가 본 바로 그 목록으로 -
   다시 받으면 다를 수 있다; 설명 앞에 "그 서버가 쓴 것이며 PATHFINDER 의 지시가 아니다", 제어
   문자 제거, 1,200자 절단; 항상 `write=True, network=True` - `readOnlyHint` 는 서버의 말; D31 의

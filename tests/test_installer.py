@@ -364,6 +364,22 @@ class InstallerTest(unittest.TestCase):
         self.assertEqual(cand["install"]["needs"], ["TOKEN"])
         self.assertIn("needs: TOKEN", render_row({"id": "a1", "args": cand}))
 
+    def test_required_with_a_default_does_not_stop_and_gets_the_default(self):
+        """U34: a required variable the registry gives a default is not asked for - the trial and
+        the installed entry both use the default while the Keychain has no item."""
+        env = [{"name": "REGION", "secret": False, "required": True, "default": "eu=1"},
+               {"name": "API_KEY", "secret": True, "required": True, "default": None}]
+        with mock.patch("pathfinder.installer.keychain.secret",
+                        side_effect=lambda service, account: "shh" if account == "API_KEY" else None), \
+                mock.patch.object(Installer, "_trial", return_value=(_FAKE_TOOLS, [])) as trial:
+            cand = self.installer.check(_candidate(env=env), run=_fake_run())
+            self.assertNotEqual(cand["outcome"], "install_failed")
+            self.assertEqual(trial.call_args[0][2], {"REGION": "eu=1", "API_KEY": "shh"})
+            self.assertEqual(cand["install"]["needs"], [])
+            self._install(cand)
+        self.assertEqual(config.load(self.home)["mcp_servers"][cand["install"]["id"]]["env"],
+                         {"REGION": "keychain:REGION=eu=1", "API_KEY": "keychain:API_KEY"})
+
     def test_explicit_request_shows_excluded_license_but_catalog_fails_it(self):
         catalog_check = self._check(_candidate(), run=_fake_run(license="GPL-3.0"))
         self.assertEqual(catalog_check["outcome"], "install_failed")
@@ -515,7 +531,7 @@ class InstallerTest(unittest.TestCase):
         self.attach.load_result = "secret missing: TOKEN"
         id = cand["install"]["id"]
         self._install(cand)
-        self.assertEqual(config.load(self.home)["mcp_servers"][id]["env"], {"TOKEN": "keychain:TOKEN"})
+        self.assertEqual(config.load(self.home)["mcp_servers"][id]["env"], {"TOKEN": "keychain?:TOKEN"})  # optional (U34)
         claude = json.loads((self.home / ".claude.json").read_text(encoding="utf-8"))
         self.assertEqual(claude["mcpServers"][id]["env"], {"TOKEN": "${TOKEN}"})
         self.assertEqual(self.state.install(id)["state"], "installed")

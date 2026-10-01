@@ -49,3 +49,10 @@ def store(service: str, account: str, value: str, run=None) -> None:
         raise RuntimeError(f"security could not store {account} for {service} (exit {result.returncode})")
     if secret(service, account, run) != value:
         raise RuntimeError(f"the Keychain gave back a different value for {account} in {service}")
+
+
+def valid_target(id: str, name: str) -> bool:
+    """`secret ID NAME`'s one check, for the shell and the screen alike: ID is a server id, NAME an
+    env variable name."""
+    from .config import _MCP_SERVER_ID
+    return bool(_MCP_SERVER_ID.match(id)) and name.isidentifier() and name.isascii()

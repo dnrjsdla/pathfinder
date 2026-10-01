@@ -1,9 +1,11 @@
 """Invariants that are properties of the source, not of one function (blueprint section 11)."""
 import importlib.util
+import os
 import re
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from pathfinder.ledger import Ledger
 from pathfinder.state import State
@@ -157,6 +159,27 @@ class SignalEnvelopeInvariants(unittest.TestCase):
         from pathfinder import signals
         self.assertEqual(signals.SIGNAL_ENVELOPE, self.bench.SIGNAL_ENVELOPE)
         self.assertEqual(signals.SIGNAL_TURNS_CLAUSE, self.bench.SIGNAL_TURNS_CLAUSE)
+
+
+class HomeInvariants(unittest.TestCase):
+    def test_home_stays_private(self):
+        """A pre-partition home (0644 files, 0755 dirs) through the daemon start path: nothing under
+        it, `workspace/` aside, keeps a group or other bit."""
+        from pathfinder import __main__ as cli
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict("os.environ", {"PATHFINDER_HOME": tmp}), \
+                mock.patch.object(cli, "Daemon", **{"return_value.serve": mock.AsyncMock()}):
+            home = Path(tmp)
+            for rel in ("events/0.jsonl", "events/.lock", "hooks/pathfinder.zsh", "state.db", "daemon.log",
+                        "workspace/mine.txt"):
+                (home / rel).parent.mkdir(exist_ok=True)
+                (home / rel).write_text("x")
+            for p in [home, *home.rglob("*")]:
+                os.chmod(p, 0o755 if p.is_dir() else 0o644)
+            self.assertEqual(cli.main(["daemon"]), 0)
+            loose = [p for p in [home, *home.rglob("*")]
+                     if p.stat().st_mode & 0o077 and "workspace" not in p.relative_to(home).parts]
+            self.assertEqual(loose, [])
+            self.assertEqual((home / "workspace" / "mine.txt").stat().st_mode & 0o777, 0o644)
 
 
 if __name__ == "__main__":

@@ -86,6 +86,14 @@ class NoRowTest(unittest.TestCase):
             self.assertEqual([(r[0], r[2]) for r in loaded.by_kind["job_done"]], [("always", "speak")])
             self.assertEqual((home / "RULES.md").read_text(encoding="utf-8"), stale)
 
+    def test_fresh_home_rules_and_user_born_0600(self):
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            rules.load(home, [])
+            self.assertEqual([(home / n).stat().st_mode & 0o777 for n in ("RULES.md", "USER.md")], [0o600, 0o600])
+
 
 class PrefiltersTest(unittest.TestCase):
     def test_rules_prefilters(self):

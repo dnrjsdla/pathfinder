@@ -58,7 +58,7 @@ STRINGS = {
     "secret_stored": "저장됨 · {name} stored for {id}; an installed server picks it up at the next "
                      "`pathfinder service restart`",
     "secret_cancelled": "저장 안 함 · nothing stored",
-    "secret_one_line": "저장 안 함 · nothing stored: a secret is one line - paste only the value",
+    "secret_one_line": "저장 안 함 · nothing stored: a secret is one line - enter only the value",
     "no_approvals": "대기 중인 승인 없음 · no approvals seen this sitting",
     "no_jobs": "확인된 작업 없음 · no jobs seen this sitting",
 }

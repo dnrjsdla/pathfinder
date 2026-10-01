@@ -81,7 +81,7 @@ class FakeAttach:
     have left behind - "ok" registers `mcp__<id>__echo` into the shared `tools.TOOLS` (B5's load
     check reads that same registry `install()` does); "dead" registers nothing (a server that
     dies before listing a tool); any other string is the reason `servers.disabled()` reports for
-    `id` (B6's secret-missing case)."""
+    `id` (a required secret missing at load)."""
     def __init__(self):
         self.servers = FakeServers()
         self.reloaded = []
@@ -364,6 +364,37 @@ class InstallerTest(unittest.TestCase):
         self.assertEqual(cand["install"]["needs"], ["TOKEN"])
         self.assertIn("needs: TOKEN", render_row({"id": "a1", "args": cand}))
 
+    def test_required_with_a_default_does_not_stop_and_gets_the_default(self):
+        """U34: a required variable the registry gives a default is not asked for - the trial and
+        the installed entry both use the default while the Keychain has no item."""
+        env = [{"name": "REGION", "secret": False, "required": True, "default": "eu=1"},
+               {"name": "API_KEY", "secret": True, "required": True, "default": None}]
+        with mock.patch("pathfinder.installer.keychain.secret",
+                        side_effect=lambda service, account: "shh" if account == "API_KEY" else None), \
+                mock.patch.object(Installer, "_trial", return_value=(_FAKE_TOOLS, [])) as trial:
+            cand = self.installer.check(_candidate(env=env), run=_fake_run())
+            self.assertNotEqual(cand["outcome"], "install_failed")
+            self.assertEqual(trial.call_args[0][2], {"REGION": "eu=1", "API_KEY": "shh"})
+            self.assertEqual(cand["install"]["needs"], [])
+            self._install(cand)
+        self.assertEqual(config.load(self.home)["mcp_servers"][cand["install"]["id"]]["env"],
+                         {"REGION": "keychain:REGION=eu=1", "API_KEY": "keychain:API_KEY"})
+
+    def test_a_secret_with_a_registry_default_is_still_asked(self):
+        """D65: a secret's registry default is a placeholder - the check stops for it; only a
+        variable not marked secret takes its default."""
+        secret = [{"name": "API_KEY", "secret": True, "required": True, "default": "your-key-here"}]
+        plain = [{"name": "REGION", "secret": False, "required": True, "default": "eu"}]
+        with mock.patch("pathfinder.installer.keychain.secret", return_value=None), \
+                mock.patch.object(Installer, "_trial", return_value=(_FAKE_TOOLS, [])) as trial:
+            stopped = self.installer.check(_candidate(env=secret), run=_fake_run())
+            ok = self.installer.check(_candidate(env=plain), run=_fake_run())
+        self.assertEqual((stopped["verification"].get("failed_step"), stopped["verification"].get("names")),
+                         ("secrets", ["API_KEY"]))
+        self.assertTrue(stopped["verification"]["reason"].startswith("needs API_KEY"))
+        self.assertNotEqual(ok["outcome"], "install_failed")
+        self.assertEqual(trial.call_args[0][2], {"REGION": "eu"})
+
     def test_explicit_request_shows_excluded_license_but_catalog_fails_it(self):
         catalog_check = self._check(_candidate(), run=_fake_run(license="GPL-3.0"))
         self.assertEqual(catalog_check["outcome"], "install_failed")
@@ -451,18 +482,23 @@ class InstallerTest(unittest.TestCase):
         failed = [e for e in self.ledger.read() if e["type"] == "install_failed"]
         self.assertEqual(failed[-1]["step"], "load")
 
-    def test_load_step_ok_when_only_problem_is_a_listed_secret(self):
-        """B6: a server held `disabled` only because of a secret the row already listed under
-        `needs` is still `install_done`, not rolled back."""
-        env = [{"name": "TOKEN", "secret": True, "required": False}]
-        with mock.patch("pathfinder.installer.keychain.secret", return_value=None):
+    def test_load_step_fails_when_a_required_secret_vanished(self):
+        """U34: a missing optional secret never disables a server, so `secret missing` at load is a
+        required one gone from the Keychain since the check - rolled back, not `install_done`."""
+        env = [{"name": "TOKEN", "secret": True, "required": True},
+               {"name": "OPT", "secret": True, "required": False}]  # so `needs` is not empty
+        with mock.patch("pathfinder.installer.keychain.secret",
+                        side_effect=lambda service, account: "tok" if account == "TOKEN" else None):
             cand = self._check(_candidate(env=env), run=_fake_run())
+        self.assertEqual(cand["install"]["needs"], ["OPT"])
         id = self.installer._server_id(cand["name"])
         self.attach.load_result = "secret missing: TOKEN"
         self._install(cand)
-        self.assertIn(id, config.load(self.home)["mcp_servers"])
-        self.assertEqual(self.state.install(id)["state"], "installed")
-        self.assertIn("install_done", [e["type"] for e in self.ledger.read()])
+        self.assertNotIn(id, config.load(self.home)["mcp_servers"])
+        self.assertEqual(self.state.install(id)["state"], "failed")
+        self.assertNotIn("install_done", [e["type"] for e in self.ledger.read()])
+        failed = [e for e in self.ledger.read() if e["type"] == "install_failed"]
+        self.assertEqual((failed[-1]["step"], failed[-1]["reason"]), ("load", "disabled: secret missing: TOKEN"))
 
     def test_uninstall_is_the_reverse(self):
         """Two installs; uninstalling one leaves the other exactly as installed (B1: uninstall
@@ -512,10 +548,9 @@ class InstallerTest(unittest.TestCase):
         with mock.patch("pathfinder.installer.keychain.secret", return_value=None):
             cand = self._check(_candidate(env=env), run=_fake_run())
         self.assertEqual(cand["install"]["needs"], ["TOKEN"])
-        self.attach.load_result = "secret missing: TOKEN"
         id = cand["install"]["id"]
         self._install(cand)
-        self.assertEqual(config.load(self.home)["mcp_servers"][id]["env"], {"TOKEN": "keychain:TOKEN"})
+        self.assertEqual(config.load(self.home)["mcp_servers"][id]["env"], {"TOKEN": "keychain?:TOKEN"})  # optional (U34)
         claude = json.loads((self.home / ".claude.json").read_text(encoding="utf-8"))
         self.assertEqual(claude["mcpServers"][id]["env"], {"TOKEN": "${TOKEN}"})
         self.assertEqual(self.state.install(id)["state"], "installed")

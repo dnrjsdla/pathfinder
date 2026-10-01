@@ -13,7 +13,6 @@ import io
 import json
 import os
 import re
-import select
 import selectors
 import socket
 import sys
@@ -22,14 +21,12 @@ import tty
 import termios
 from pathlib import Path
 
-from . import keychain
+from . import tui_secret
 from .daemon import SOCKET
 from .mcp.protocol import sanitize
 from .tools import visible
 
 PROMPT = "> "
-SECRET_PROMPT = "비밀 · secret> "  # the masked input line: this, then one `*` per character
-SECRET_DRAIN_S = 0.05           # input within this after a masked Enter is a paste that ran past the value
 _UNIT = re.compile(r"\\U[0-9a-f]{8}|\\u[0-9a-f]{4}|\\.|.")  # an escape, JSON's or `visible`'s, is one unit
 SELECT_TIMEOUT = 0.05           # how often the main loop wakes up to check the timers below
 PRESENCE_ACTIVE_S = 1.0         # at most one presence{idle_s: 0} per second while keys arrive
@@ -53,12 +50,6 @@ STRINGS = {
     "notice": "알림 · notice: {text} ({why})",
     "retract": "철회 · withdrawn: the answer above {what} without calling a tool - trying again with the tools",
     "help": "알 수 없는 명령 · unknown command - try /approve, /deny, /approvals, /jobs, /secret, /quit",
-    "secret_usage": "사용법 · /secret ID NAME takes a server id and an env variable name",
-    "secret_ask": "비밀 입력 · {name} for {id} (hidden; stored in the Keychain, never shown to the assistant)",
-    "secret_stored": "저장됨 · {name} stored for {id}; an installed server picks it up at the next "
-                     "`pathfinder service restart`",
-    "secret_cancelled": "저장 안 함 · nothing stored",
-    "secret_one_line": "저장 안 함 · nothing stored: a secret is one line - enter only the value",
     "no_approvals": "대기 중인 승인 없음 · no approvals seen this sitting",
     "no_jobs": "확인된 작업 없음 · no jobs seen this sitting",
 }
@@ -110,11 +101,11 @@ class _Session:
     def __init__(self, sock, in_fd, out, home):
         self.sock, self.in_fd, self.out, self.home = sock, in_fd, out, home
         self.buf = ""
-        self.secret = None  # (id, NAME) while the input line is masked for `/secret`
+        self.secret = None  # a `tui_secret.Entry` while the input line is masked for `/secret`
         self.turn_running = False
         self.interrupt_sent = False  # one Ctrl-C interrupts, the second quits
         self._esc = 0  # 1 after ESC, 2 inside ESC [ (CSI), 3 after ESC O (SS3): such keys are dropped
-        self._seq, self._paste = "", None  # the escape's bytes; in a paste: False, "\n" after a newline, True with text after one
+        self._seq = ""  # the escape's bytes
         self._recv_buf = b""
         self._keys = codecs.getincrementaldecoder("utf-8")("replace")  # a Hangul syllable is 3 bytes (D6)
         now = time.monotonic()
@@ -128,13 +119,13 @@ class _Session:
         self.sock.sendall((json.dumps(msg, ensure_ascii=False) + "\n").encode())
 
     def _masked(self, target):
-        """Into (`(id, NAME)`) or out of (None) the masked input. Bracketed paste is on only while
-        masked, so a paste comes between marks however slow the link; main() turns it off on exit too."""
-        self.secret, self.buf, self._paste = target, "", None
+        """Into (a `tui_secret.Entry`) or out of (None) the masked input. Bracketed paste is on only
+        while masked, so a paste comes between marks however slow the link; main() turns it off on exit too."""
+        self.secret, self.buf = target, ""
         self.out.write("\033[?2004h" if target else "\033[?2004l")
 
     def redraw(self):
-        self.out.write("\r\033[K" + (SECRET_PROMPT + "*" * len(self.buf) if self.secret else PROMPT + self.buf))
+        self.out.write("\r\033[K" + (tui_secret.SECRET_PROMPT + "*" * len(self.buf) if self.secret else PROMPT + self.buf))
         self.out.flush()
 
     def show(self, text):
@@ -188,11 +179,8 @@ class _Session:
             return 0
         chars = self._keys.decode(data)
         for i, ch in enumerate(chars):
-            if self._paste is not None and ch != "\x1b" and not ch.isprintable():  # in a paste no control is a key
-                self._paste = self._paste or ("\n" if ch in "\r\n" else False)
+            if self.secret and self.secret.swallow(ch, self._esc):  # in a paste no control is a key
                 continue
-            if self._paste == "\n" and not self._esc and ch != "\x1b":  # text after a newline: more than one line
-                self._paste = True
             if self.secret and ch in "\r\n":
                 return self._secret_enter(spill=i + 1 < len(chars))
             rc = self._key(ord(ch))
@@ -201,29 +189,20 @@ class _Session:
         return None
 
     def _secret_enter(self, spill):
-        """A secret is one line: Enter stores the masked value only when silence follows it. Input
-        after it in the same read, or readable within SECRET_DRAIN_S (a paste spread over reads), is
-        read and dropped unseen, the value with it - nothing is stored, shown or sent."""
-        while select.select([self.in_fd], [], [], SECRET_DRAIN_S)[0] and os.read(self.in_fd, 1024):
-            spill = True
-        (id, name), value = self.secret, self.buf
+        try:  # stored in this process, never sent on the socket (`tui_secret.Entry.enter`)
+            text = self.secret.enter(self.buf, self.in_fd, spill)
+        except Exception as e:  # store's messages never carry the value
+            text = STRINGS["error"].format(message=e)
         self._masked(None)
         self._esc = 0
         self._keys.reset()
-        if spill:
-            self.show(STRINGS["secret_one_line"])
-            return None
-        try:  # stored in this process, never sent on the socket
-            keychain.store(f"pathfinder-mcp-{id}", name, value)
-            self.show(STRINGS["secret_stored"].format(name=name, id=id))
-        except Exception as e:  # store's messages never carry the value
-            self.show(STRINGS["error"].format(message=e))
+        self.show(text)
         return None
 
     def _ctrl_c(self):
         if self.secret:  # cancels the masked entry and nothing else
             self._masked(None)
-            self.show(STRINGS["secret_cancelled"])
+            self.show(tui_secret.STRINGS["secret_cancelled"])
             return None
         if self.turn_running and not self.interrupt_sent:
             self.send({"type": "interrupt"})
@@ -240,11 +219,9 @@ class _Session:
             self._seq = "" if byte == 0x1b else self._seq + chr(byte)
             self._esc = (1 if byte == 0x1b else {0x5b: 2, 0x4f: 3}.get(byte, 0) if self._esc == 1 else
                          2 if self._esc == 2 and not 0x40 <= byte <= 0x7e else 0)
-            if self.secret and not self._esc and self._seq in ("[200~", "[201~"):  # a paste's marks
-                if self._seq == "[201~" and self._paste is True:  # more than one line: all of it goes, unseen
-                    self._masked(None)
-                    self.show(STRINGS["secret_one_line"])
-                self._paste = False if self._seq == "[200~" else None
+            if self.secret and not self._esc and self.secret.mark(self._seq):  # a paste of more than one line
+                self._masked(None)
+                self.show(tui_secret.STRINGS["secret_one_line"])
             return None
         now = time.monotonic()
         self.last_key = now
@@ -286,12 +263,10 @@ class _Session:
         elif cmd in ("approvals", "jobs"):
             self._cli_list(cmd)
         elif cmd == "secret":
-            args = rest.split()
-            if len(args) == 2 and keychain.valid_target(*args):
-                self._masked(tuple(args))
-                self.show(STRINGS["secret_ask"].format(id=args[0], name=args[1]))
-            else:
-                self.show(STRINGS["secret_usage"])
+            entry, text = tui_secret.entry(rest)
+            if entry:
+                self._masked(entry)
+            self.show(text)
         elif cmd == "quit":
             return 0
         else:

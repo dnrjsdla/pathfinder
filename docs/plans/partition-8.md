@@ -1165,6 +1165,11 @@ line says how to get past it.**
   skill's step still names `/secret mail` for the case where no screen is attached. The value
   never passes through the chat, the ledger or the model. A model-callable ask for any procedure
   stays later work ("disagree" 11). Cost: `daemon.py` +~4, after U3 and U4 have made room.
+  - **As built (U26):** the daemon asks when a screen attaches and the item is missing. At a start
+    no screen is attached yet (the socket is bound inside `start()`), so an ask sent then reaches
+    no one; `attach` asks the attaching screen instead, while the mail sense is on and
+    `keychain.missing` finds no item - one Keychain read per attach while the sense is on. The
+    answer is `/secret mail`'s masked entry, stored in the screen's own process.
 
 **What the owner does by hand: 7 steps, 3 of them on Google's pages.**
 1. The check above (`myaccount.google.com/apppasswords`).
@@ -1571,11 +1576,11 @@ parallel. **Deploy gate: U15a, U21, U31 and U33.**
 | U14a | **done, merged** | Born private | `ledger.py`, `state.py` | +1 | U12, U24 | `test_partition_and_lock_born_0600_dir_0700` |
 | U14b | **done, merged** | Existing files private | `config.py` (`make_private`), `__main__.py` (daemon branch), `init.py` (literals) | +11 | U10 | `test_make_private_drops_group_other_keeps_owner_x_skips_symlinks_and_workspace` |
 | U15a | **done, merged** | D53's backstop: the vault at the ledger door (**deploy gate**); D66: handles are `pasted-<seq>[-i]`, only the owner's text is vaulted | `ledger.py`, `keychain.py` (`TOKEN_RE`, vault, mask, sweep, index), `scripts/scan_personal.py`, `daemon.py` (gate and steer lines from the recorded event), `jobs.py` (the same; a job's own masked copies) | +127 (`keychain.py` +114 to 172, `ledger.py` +7 to 140, scanner +3, `daemon.py` +2 to 768, `jobs.py` +1) | U14a, U10 | `test_paste_vaulted_and_handle_returned`, `test_handle_is_the_event_seq`, `test_a_token_in_a_tool_result_is_redacted_without_the_keychain`, `test_pasted_token_reaches_the_record_as_a_handle` |
-| U15b | not started | Binding a handle | `__main__.py` (`secret --from`), `tui.py` (`/secret --from`; the masked prompt lists live handles) | +7 | U15a, U11, U14b | `test_bind_moves_and_deletes_the_pasted_item` |
-| U16 | not started | D53's main path: the harness asks | `daemon.py` (`record` hook, `secret` handler), `tui.py` (`secret.ask`), `installer.py` (event fields) | daemon +9, tui +12, installer +1 | U15b | `test_secret_value_never_reaches_ledger_or_state` |
+| U15b | done, in review | Binding a handle | `__main__.py` (`secret --from`), `tui.py` (`/secret --from`; the masked prompt lists live handles) | +7 | U15a, U11, U14b | `test_bind_moves_and_deletes_the_pasted_item` |
+| U16 | done, in review | D53's main path: the harness asks | `daemon.py` (`record` hook, `secret` handler), `tui.py` (`secret.ask`), `installer.py` (event fields) | daemon +9, tui +12, installer +1 | U15b | `test_secret_value_never_reaches_ledger_or_state` |
 | U25 | **done, merged** | Gmail: `search_mail`, the filter, `HOME`, the watermark, the IMAP move | `senses/_imap.py` (new), `senses/mail.py` | +65 / −30 | U21 | `test_query_goes_as_a_literal_utf8`, `test_first_poll_takes_the_watermark_silently` |
 | U31 | **done, merged** | Every tool result passes `tools.clean` (D62); `oneline` is `clean` plus flattening; the mail body filter becomes `clean` | `tools.py`, `broker.py`, `senses/mail.py` | tools +5, broker +6, mail −1 | U25, U6 | `test_tool_result_loses_bidi_zero_width_ansi_and_controls`, `test_tool_result_keeps_newlines_tabs_and_spacing`, `test_error_text_passes_the_filter`, `test_ledger_keeps_the_raw_result`, `test_oneline_is_clean_then_flatten` |
-| U26 | not started | The mail password intake; the daemon asks at start when the item is missing | `keychain.py` (`target`), `tui.py`, `__main__.py`, `daemon.py` | +12, daemon +4 | U16, U15b | `test_secret_mail_resolves_service_and_user`, `test_missing_mail_password_is_asked_at_start` |
+| U26 | done, in review | The mail password intake; the daemon asks when a screen attaches and the item is missing | `keychain.py` (`target`), `tui.py`, `__main__.py`, `daemon.py` | +12, daemon +4 | U16, U15b | `test_secret_mail_resolves_service_and_user`, `test_missing_mail_password_is_asked_at_start` |
 | U32 | **done, merged** | D63: only the owner's activity keeps a session alive; notice text passes `clean`; the approval line's way out | `state.py`, `daemon.py`, `jobs.py`, `broker.py` | +6 | U7a, U31 | `test_say_after_a_job_gate_in_an_aged_session_lands_in_the_new_session` |
 | U33 | **done, merged** | The remaining raw exits: the agenda, sense summaries, MCP parameter schemas, gate lines, `sanitize` (**deploy gate**) | `senses/*.py`, `mcp/tools.py`, `mcp/protocol.py`, `tui.py` | +10 | U31, U7b | `test_agenda_lines_pass_the_filter` |
 | U34 | **done, merged** | An installed server's entry records which variables are optional and which have a default; start agrees with the check | `installer.py`, `catalog.py`, `mcp/servers.py` | ~+7 | U10 | `test_required_with_a_default_does_not_stop_and_gets_the_default` |

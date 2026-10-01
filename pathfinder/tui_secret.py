@@ -16,7 +16,9 @@ SECRET_DRAIN_S = 0.05           # input within this after a masked Enter is a pa
 # Fixed strings, Korean and English side by side (D6), as in `tui.STRINGS`.
 STRINGS = {
     "secret_usage": "사용법 · /secret ID NAME takes a server id and an env variable name "
-                    "(then --from pasted-<seq> binds a pasted token)",
+                    "(then --from pasted-<seq> binds a pasted token), or /secret mail the mail password",
+    "mail_ask": "비밀 입력 · the app password for {user} (hidden; stored in the Keychain, never shown to the assistant)",
+    "mail_stored": "저장됨 · the app password for {user} is in the Keychain",
     "secret_ask": "비밀 입력 · {name} for {id} (hidden; stored in the Keychain, never shown to the assistant)",
     "secret_stored": "저장됨 · {name} stored for {id}; an installed server picks it up at the next "
                      "`pathfinder service restart`",
@@ -36,6 +38,13 @@ def entry(rest, home):
     `ID NAME --from pasted-<seq>` binds a pasted item at once (D53) - None and how it went; anything
     else - None and the usage line."""
     args = rest.split()
+    if args == ["mail"]:  # alone, the mail password (U26); an MCP secret always names its variable
+        try:
+            service, user = keychain.target(home, "mail")
+        except LookupError as e:  # the mail sense is not configured
+            return None, STRINGS["secret_failed"].format(message=e)
+        return (Entry(lambda value: keychain.take(home, service, user, value), STRINGS["mail_stored"].format(user=user)),
+                _prompt(home, "mail_ask", user=user))
     if len(args) in (2, 4) and args[2:3] in ([], ["--from"]) and keychain.valid_target(*args[:2]):
         service, account = keychain.target(home, *args[:2])
         stored = STRINGS["secret_stored"].format(id=args[0], name=args[1])
@@ -54,6 +63,8 @@ def asked(msg, home, send):
     """D53's main path, `secret.ask`: the harness asks for an MCP server's variable. The same masked
     input, but Enter sends the value to the daemon, which stores it and proposes the server again."""
     id, name = msg.get("server_id"), msg.get("name")
+    if not id:  # the mail password, asked as the screen attaches (U26): `/secret mail`, stored here
+        return entry("mail", home)
     answer = {"type": "secret", "server_id": id, "name": name, "server": msg.get("server")}
     return (Entry(lambda value: send({**answer, "value": value}), STRINGS["secret_sent"].format(id=id, name=name)),
             _prompt(home, id=id, name=name))

@@ -75,11 +75,29 @@ def store(service: str, account: str, value: str, run=None) -> None:
         raise RuntimeError(f"the Keychain gave back a different value for {account} in {service}")
 
 
-def target(home, id: str, name: str) -> tuple:
-    """`secret ID NAME`'s (service, account): an MCP server's variable, `pathfinder-mcp-<id>`/NAME."""
-    if not valid_target(id, name):
-        raise ValueError("secret ID NAME takes a server id and an env variable name")
+def target(home, id: str, name: str | None = None) -> tuple:
+    """`secret`'s one resolver, (service, account): `ID NAME` is an MCP server's variable,
+    `pathfinder-mcp-<id>`/NAME; `mail` alone is the mail sense's password, its `keychain_service`/
+    `user` (U26) - arity tells the two apart, so a server whose id is `mail` is not shadowed."""
+    if id == "mail" and name is None:
+        from .config import load
+        from .senses.mail import OPTIONS
+        mail = (load(home).get("senses") or {}).get("mail")
+        if not mail or not mail.get("user"):
+            raise LookupError("turn the mail sense on first")
+        return {**OPTIONS, **mail}["keychain_service"], mail["user"]
+    if name is None or not valid_target(id, name):
+        raise ValueError("secret ID NAME takes a server id and an env variable name "
+                         "(then --from pasted-<seq> binds a pasted token), or secret mail the mail password")
     return f"pathfinder-mcp-{id}", name
+
+
+def missing(home, id: str, name: str | None = None) -> bool:
+    """True when the target resolves and its item is not in the Keychain - the daemon's cue to ask."""
+    try:
+        return secret(*target(home, id, name)) is None
+    except (ValueError, LookupError):
+        return False
 
 
 def take(home, service: str, account: str, value: str, run=None) -> None:

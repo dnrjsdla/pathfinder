@@ -2054,6 +2054,27 @@ class SecretAskTest(DaemonHarness):
         self.assertIn("/secret notion NOTION_TOKEN", reply["message"])
         self.assertEqual(after["type"], "error")  # the next line is the next reply: no ask came between
 
+    def test_missing_mail_password_is_asked_at_start(self):
+        """U26: at a start no screen is attached, so a screen is asked as it attaches while the mail
+        sense is on and its item is missing; once stored, it is not asked again."""
+        config.set(self.home, "senses", {"mail": {"host": "imap.example.invalid", "user": "mailbox-user"}})
+
+        async def scenario(daemon):
+            seen = []
+            for _ in range(2):
+                c = await Client.open(self.home)
+                c.send({"type": "attach"})
+                await c.recv()
+                c.send({"type": "nothing"})
+                seen.append(await c.until("error"))
+                c.close()
+                self.items[("pathfinder-mail", "mailbox-user")] = "stored-" + "x" * 8
+            return seen
+
+        first, second = self.run_with(fake_model("ok"), scenario)
+        self.assertEqual(first[0], {"type": "secret.ask", "server_id": "", "name": "mail", "server": ""})
+        self.assertNotIn("secret.ask", [m["type"] for m in second])
+
     def test_secret_value_never_reaches_ledger_or_state(self):
         async def scenario(daemon):
             proposed = []

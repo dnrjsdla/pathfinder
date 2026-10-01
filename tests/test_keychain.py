@@ -204,6 +204,61 @@ class BindTest(unittest.TestCase):
         self.assertEqual(bind.call_args_list, [mock.call(self.home, "pasted-7", "pathfinder-mcp-gh", "TOKEN")] * 2)
 
 
+class MailTargetTest(unittest.TestCase):
+    """U26: `secret mail` is the mail sense's password; arity tells it from an MCP server's id."""
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.home = Path(self._tmp.name)
+        env = mock.patch.dict("os.environ", {"PATHFINDER_HOME": str(self.home)})
+        env.start()
+        self.addCleanup(env.stop)
+
+    def _mail(self, **options):
+        from pathfinder import config
+        config.set(self.home, "senses", {"mail": {"host": "imap.example.invalid", "user": "mailbox-user", **options}})
+
+    def _cli(self, *args):
+        from pathfinder.__main__ import main
+        with mock.patch("pathfinder.__main__.getpass.getpass", return_value="v4lue") as ask, \
+                mock.patch("pathfinder.keychain.store") as store, \
+                contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()) as err:
+            return main(["secret", *args]), store, ask, err.getvalue()
+
+    def test_secret_mail_resolves_service_and_user(self):
+        from pathfinder import tui_secret
+        self._mail()
+        self.assertEqual(keychain.target(self.home, "mail"), ("pathfinder-mail", "mailbox-user"))
+        rc, store, ask, _ = self._cli("mail")
+        self.assertEqual(rc, 0)
+        store.assert_called_once_with("pathfinder-mail", "mailbox-user", "v4lue")
+        self.assertIn("app password for mailbox-user", ask.call_args[0][0])
+        entry, prompt = tui_secret.entry("mail", self.home)
+        self.assertIsNotNone(entry)
+        self.assertIn("app password for mailbox-user (hidden;", prompt)
+        self._mail(keychain_service="other-mail")
+        self.assertEqual(keychain.target(self.home, "mail"), ("other-mail", "mailbox-user"))
+
+    def test_secret_mail_unconfigured_says_so(self):
+        from pathfinder import tui_secret
+        with self.assertRaisesRegex(LookupError, "turn the mail sense on first"):
+            keychain.target(self.home, "mail")
+        rc, store, _, err = self._cli("mail")
+        self.assertEqual(rc, 2)
+        self.assertIn("turn the mail sense on first", err)
+        store.assert_not_called()
+        self.assertEqual(tui_secret.entry("mail", self.home)[0], None)
+        self.assertIn("turn the mail sense on first", tui_secret.entry("mail", self.home)[1])
+        self.assertFalse(keychain.missing(self.home, "mail"))  # nothing to ask for, no Keychain call
+
+    def test_mcp_server_named_mail_is_not_shadowed(self):
+        self._mail()
+        self.assertEqual(keychain.target(self.home, "mail", "TOKEN"), ("pathfinder-mcp-mail", "TOKEN"))
+        rc, store, _, _ = self._cli("mail", "TOKEN")
+        self.assertEqual(rc, 0)
+        store.assert_called_once_with("pathfinder-mcp-mail", "TOKEN", "v4lue")
+
+
 class TokenPatternTest(unittest.TestCase):
     # Every token-shaped string is built by concatenation, so the scanner never flags this file.
     MUST_MATCH = {

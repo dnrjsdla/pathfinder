@@ -286,27 +286,31 @@ def search_cmd(home, text):
     return 0
 
 
-def secret_cmd(home, id, name, handle=None):
-    """`pathfinder secret ID NAME [--from pasted-<seq>]`: the value read hidden, or a pasted item
-    moved (D53), put straight into the Keychain - no socket, no daemon, no ledger."""
-    if not keychain.valid_target(id, name):
-        print("pathfinder: secret ID NAME takes a server id and an env variable name "
-              "(then --from pasted-<seq> binds a pasted token)", file=sys.stderr)
-        return 2
+def secret_cmd(home, id, name=None, handle=None):
+    """`pathfinder secret ID NAME [--from pasted-<seq>]`, or `pathfinder secret mail` (U26): the value
+    read hidden, or a pasted item moved (D53), put straight into the Keychain - no socket, no daemon,
+    no ledger."""
     try:
-        value = None if handle else getpass.getpass(f"{name} for {id} (hidden; stored in the Keychain): ")
+        service, account = keychain.target(home, id, name)
+    except (ValueError, LookupError) as e:
+        print(f"pathfinder: {e}", file=sys.stderr)
+        return 2
+    what = f"{name} for {id}" if name else f"the app password for {account}"
+    try:
+        value = None if handle else getpass.getpass(f"{what} (hidden; stored in the Keychain): ")
     except (EOFError, KeyboardInterrupt):
         print("\nnothing stored", file=sys.stderr)
         return 1
     try:
         if handle:
-            keychain.bind(home, handle, f"pathfinder-mcp-{id}", name)
+            keychain.bind(home, handle, service, account)
         else:
-            keychain.store(f"pathfinder-mcp-{id}", name, value)
+            keychain.store(service, account, value)
     except Exception as e:  # store's messages never carry the value
         print(f"pathfinder: {e}", file=sys.stderr)
         return 1
-    print(f"{name} stored for {id}; an installed server picks it up at the next `pathfinder service restart`")
+    print(f"{name} stored for {id}; an installed server picks it up at the next `pathfinder service restart`"
+          if name else f"{what} is in the Keychain")
     return 0
 
 
@@ -466,8 +470,8 @@ def main(argv=None):
         return uninstall_cmd(home, args[1])
     if len(args) >= 2 and args[0] == "search":
         return search_cmd(home, " ".join(args[1:]))
-    if len(args) in (3, 5) and args[0] == "secret" and args[3:4] in ([], ["--from"]):
-        return secret_cmd(home, args[1], args[2], *args[4:])
+    if args[:1] == ["secret"] and (args[1:] == ["mail"] or len(args) in (3, 5) and args[3:4] in ([], ["--from"])):
+        return secret_cmd(home, *args[1:3], *args[4:])
     if args == ["jobs"]:
         return jobs_list(home)
     if len(args) == 3 and args[0] == "job" and args[1] == "stop":

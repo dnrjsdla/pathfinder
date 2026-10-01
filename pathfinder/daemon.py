@@ -439,6 +439,8 @@ class Daemon:
             s.last_cwd = cwd
         _write(writer, {"type": "attached", "session": sid, "resumed": bool(known),
                         "turns": known["turns"] if known else 0})
+        if "mail" in self.senses and keychain.missing(self.home, "mail"):  # U26: no screen is attached at a start
+            self._ask_secret("mail", writer=writer)
         return s
 
     def send(self, s, msg):

@@ -3,10 +3,10 @@
 **Where this stands (2026-09-30).**
 - **Code:** branch `partition-8` (worktree `.claude/worktrees/partition-8`). Merged, each after
   review: U0, U1, U2, U5 (U5b), U9, U13, and on 2026-09-30 U21, U22, U24, U3, U4, U23, U30, U6,
-  U12, U25, U31, U7a, U7b, U8, U32, U33, U10, U14a, U11, U14b. `daemon.py` 766/780, `tui.py`
-  392/400, `installer.py` 664/700, `loop.py` 295/520.
-- **Next:** U15a (in review; deploy gate), U34 (done, in review; D65), U15b, U16, U26, U27-U29,
-  U17, U18. `tui.py` has 8 lines left for U15b, U16 and U26 (about +20 planned).
+  U12, U25, U31, U7a, U7b, U8, U32, U33, U10, U14a, U11, U14b, D64, U34. `daemon.py` 766/780, `tui.py`
+  367/400 + `tui_secret.py` 71/150, `installer.py` 664/700, `loop.py` 295/520.
+- **Next:** U15a (in review; deploy gate), U34 (D65), U15b, U16, U26, U27-U29,
+  U17, U18. `tui.py` has room for U15b, U16 and U26 after D64.
 
 The unit table at the end is where the next session starts. Every row carries its state, its
 files, its size, what it waits for, and its tests.
@@ -1562,7 +1562,7 @@ parallel. **Deploy gate: U15a, U21, U31 and U33.**
 | U26 | not started | The mail password intake; the daemon asks at start when the item is missing | `keychain.py` (`target`), `tui.py`, `__main__.py`, `daemon.py` | +12, daemon +4 | U16, U15b | `test_secret_mail_resolves_service_and_user`, `test_missing_mail_password_is_asked_at_start` |
 | U32 | **done, merged** | D63: only the owner's activity keeps a session alive; notice text passes `clean`; the approval line's way out | `state.py`, `daemon.py`, `jobs.py`, `broker.py` | +6 | U7a, U31 | `test_say_after_a_job_gate_in_an_aged_session_lands_in_the_new_session` |
 | U33 | **done, merged** | The remaining raw exits: the agenda, sense summaries, MCP parameter schemas, gate lines, `sanitize` (**deploy gate**) | `senses/*.py`, `mcp/tools.py`, `mcp/protocol.py`, `tui.py` | +10 | U31, U7b | `test_agenda_lines_pass_the_filter` |
-| U34 | done, in review | An installed server's entry records which variables are optional and which have a default; start agrees with the check | `installer.py`, `catalog.py`, `mcp/servers.py` | ~+7 | U10 | `test_required_with_a_default_does_not_stop_and_gets_the_default` |
+| U34 | **done, merged** | An installed server's entry records which variables are optional and which have a default; start agrees with the check | `installer.py`, `catalog.py`, `mcp/servers.py` | ~+7 | U10 | `test_required_with_a_default_does_not_stop_and_gets_the_default` |
 | U27 | not started | Skills (D58, D61): the seed copy, the index, `read_skill` | `skills.py` (new), `pyproject.toml`, `daemon.py` (`skills.bind`) | ~80, +1, daemon +1 | — | `test_seed_is_copied_when_missing_and_never_overwrites`, `test_index_lists_every_skill_sorted_and_uncut` |
 | U28 | not started | Skills: the write path (a proposal from a user turn, always approved) | `memory.py` (`vault_path`), `prompts/system.txt` | +4 | U27, U8 | `test_skills_target_user_only_and_always_approved` |
 | U29 | not started | The first seed | `pathfinder/skills/connect-gmail.md` | ~35 | U27, U25, U26 | `test_connect_gmail_is_shipped_and_parses` |

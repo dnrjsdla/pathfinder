@@ -306,6 +306,25 @@ class TuiCase(unittest.TestCase):
             self.assertTrue(_wait_for(lambda: self._secrets()))
             self.assertEqual(self._secrets(), [_answer("v4lue")])  # the open entry's own name, not the ask's
 
+    def test_secret_enter_with_no_daemon_says_so(self):
+        """Round 3: a value whose `secret` line cannot be sent - the daemon went away - is a plain
+        "nothing stored" line, not an errno."""
+        real = tui._Session.send
+
+        def send(session, msg):
+            if msg.get("type") == "secret":
+                raise BrokenPipeError(32, "Broken pipe")
+            return real(session, msg)
+        with mock.patch.object(tui._Session, "send", send):
+            self.type_("/secret rv11test TOKEN\r")
+            self.assertTrue(_wait_for(lambda: self.out_text().endswith(tui_secret.SECRET_PROMPT)))
+            self.type_("v4lue")
+            self.assertTrue(_wait_for(lambda: self.out_text().endswith(tui_secret.SECRET_PROMPT + "*" * 5)))
+            self.type_("\r")
+            self.assertTrue(_wait_for(lambda: "저장 안 함 · nothing stored: the daemon is not running" in self.out_text()))
+        self.assertNotIn("Broken pipe", self.out_text())
+        self.assertNotIn("v4lue", self.out_text())
+
     def test_ctrl_c_cancels_secret_entry(self):
         with mock.patch("pathfinder.keychain.store") as store:
             self.type_("/secret rv11test TOKEN\r")

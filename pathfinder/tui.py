@@ -199,7 +199,9 @@ class _Session:
     def _secret_enter(self, spill):
         try:  # sent to the daemon, which stores it (`tui_secret.Entry.enter`)
             text = self.secret.enter(self.buf, self.in_fd, spill)
-        except Exception as e:  # store's messages never carry the value
+        except OSError:  # the socket: the daemon went away (a broken pipe)
+            text = tui_secret.STRINGS["secret_failed"].format(message="the daemon is not running")
+        except Exception as e:  # never the value: the entry's messages do not carry it
             text = STRINGS["error"].format(message=e)
         self._masked(None)
         self._esc = 0

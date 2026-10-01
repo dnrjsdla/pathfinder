@@ -789,10 +789,10 @@ below:
 - The same checks. The next line is read masked: the input line shows `*`, and the screen draws
   its own input line in cbreak mode.
 - Enter stores the value in the screen's own process. Ctrl-C cancels. Nothing goes on the socket.
-  *As built after U16's review (round 2):* Enter sends `secret {server_id, name, value}` to the
-  daemon instead (`/secret mail` sends `{server_id: "mail", value}`, and `--from pasted-<seq>` is
-  sent the same way), so a `/secret` typed after a dropped ask proposes again the install waiting
-  on that id. The value still reaches no other screen, the ledger or the model.
+  *As built (U16):* the screen's `/secret` sends `secret {server_id, name, value}` to the daemon
+  over the 0600 socket so a pending install is proposed again (`/secret mail` sends
+  `{server_id: "mail", value}`, and `--from pasted-<seq>` goes the same way); the CLI still stores
+  locally; the value reaches no other screen, the ledger or the model.
 - The confirmation says an already-installed server picks the value up at the next
   `service restart`.
 - D53's `secret.ask` (U16) reuses this masked mode. Its Enter sends the value to the daemon
@@ -1099,6 +1099,13 @@ line says how to get past it.**
   stores any value.
 - **One Keychain read per attach while the mail sense is on** (U26), `say` clients included:
   the ask on attach reads whether the item is there, found or not.
+- **The installer's record of installs waiting on a secret can go stale** (U16): `_asked` maps a
+  server id to the install its secrets stop is waiting on, and only a stored answer for that id
+  removes it. An uninstall, or a later proposal of the same server that stops elsewhere or passes,
+  leaves it, so a later `/secret <id> NAME` proposes that server once more (a check then refuses an
+  installed one). Popping it in `uninstall` and `propose` would take `installer.py` past 700.
+- **`close()` ends only the latest stdio trial** (U16): `_trialing` holds the last trial's session,
+  so with two trials running at once the earlier one's process is left to its own timeout.
 - **A stop during a remote server's re-proposal waits for its trial** (U16): `close()` cancels the
   re-proposal and ends a stdio trial's process, but an HTTP trial has no process to end, so the
   interpreter's join waits for its request to time out (at most 60 s).
@@ -1196,7 +1203,10 @@ line says how to get past it.**
     no screen is attached yet (the socket is bound inside `start()`), so an ask sent then reaches
     no one; `attach` asks the attaching screen instead, while the mail sense is on and
     `keychain.missing` finds no item - one Keychain read per attach while the sense is on. The
-    answer is `/secret mail`'s masked entry, stored in the screen's own process.
+    answer is `/secret mail`'s masked entry. *As built (U16):* the screen's `/secret` sends
+    `secret {server_id, name, value}` to the daemon over the 0600 socket so a pending install is
+    proposed again; the CLI still stores locally; the value reaches no other screen, the ledger or
+    the model.
 
 **What the owner does by hand: 7 steps, 3 of them on Google's pages.**
 1. The check above (`myaccount.google.com/apppasswords`).

@@ -120,10 +120,18 @@ class SourceInvariants(unittest.TestCase):
                     "deliver.py": 325, "broker.py+policy.py": 455, "signals.py+rules.py": 585,
                     "mirror.py": 200, "llm/**/*.py": 600, "mcp/**/*.py": 1858}
         for row, ceiling in ceilings.items():
-            files = [list(SRC.glob(part)) for part in row.split("+")]
-            self.assertTrue(all(files), f"{row} matches no file; a renamed module keeps its ceiling")
-            n = sum(len(p.read_text(encoding="utf-8").splitlines()) for ps in files for p in ps)
-            self.assertLessEqual(n, ceiling, f"{row} is {n} lines, over its ceiling of {ceiling}")
+            with self.subTest(row):
+                files = [list(SRC.glob(part)) for part in row.split("+")]
+                self.assertTrue(all(files), f"{row} matches no file; a renamed module keeps its ceiling")
+                n = sum(len(p.read_text(encoding="utf-8").splitlines()) for ps in files for p in ps)
+                self.assertLessEqual(n, ceiling, f"{row} is {n} lines, over its ceiling of {ceiling}")
+
+    def test_core_under_5500_lines(self):
+        """D49: the core is the blueprint §6 rows, capped at 5,500 together."""
+        core = ["ledger", "state", "daemon", "loop", "broker", "policy", "exec", "tools", "signals", "rules",
+                "deliver", "jobs", "memory"]
+        n = sum(len((SRC / f"{m}.py").read_text(encoding="utf-8").splitlines()) for m in core)
+        self.assertLessEqual(n, 5500, f"the core is {n} lines, over the §6 cap of 5,500")
 
     def test_no_new_ledger_type(self):
         """Partition 8 adds two fields (`assistant.withdrawn`, `turn_end.check`) and no type."""
@@ -238,7 +246,8 @@ class SecondLookInvariants(unittest.TestCase):
             self.assertIn(added, prompt)
             prompt = prompt.replace(added, "", 1)
         self.assertEqual(prompt, (REPO_ROOT / "bench" / "m10" / "system.txt").read_text(encoding="utf-8"),
-                         "system.txt is no longer bench/m10/system.txt plus U8's four additions")
+                         "system.txt has a line that is neither bench/m10/system.txt nor in ADDITIONS: m10 did "
+                         "not measure it; add it to ADDITIONS if it is meant to be there")
 
 
 class HomeInvariants(unittest.TestCase):

@@ -16,6 +16,7 @@ from unittest import mock
 
 from pathfinder import config
 from pathfinder import tools as tools_mod
+from pathfinder import tui
 from pathfinder.daemon import SOCKET, Daemon
 from pathfinder.deliver import Notice
 from pathfinder.ledger import Ledger
@@ -1938,6 +1939,29 @@ class PastedTokenScreenTest(DaemonHarness):
         self.addCleanup(state.close)
         for gate in gates:
             self.assertEqual(state.approval(gate["id"])["args"], gate["args"])
+
+    def test_pasted_notice_shows_the_handle(self):
+        """U15b: the owner's line was vaulted - the screen and `say` are told the handle; a handle
+        merely typed again is not announced."""
+        async def scenario(daemon):
+            c = await Client.open(self.home)
+            c.send({"type": "attach"})
+            await c.recv()
+            c.send({"type": "say", "text": f"use {self.TOKEN}"})
+            seen = await c.until("turn.end")
+            c.send({"type": "say", "text": "bind [secret:pasted-1] please"})
+            seen += await c.until("turn.end")
+            c.close()
+            return seen
+
+        seen = self.run_with(fake_model("ok"), scenario)
+        pasted = [m for m in seen if m["type"] == "pasted"]
+        self.assertEqual(len(pasted), 1)
+        (handle,) = pasted[0]["handles"]
+        self.assertEqual(self.items, {handle: self.TOKEN})
+        self.assertIn(f"stored as {handle} for 24 h - bind it with /secret <id> NAME --from {handle}",
+                      tui.render(pasted[0]))
+        self.assertNotIn(self.TOKEN, json.dumps(seen))
 
     def test_daemon_start_sweeps_expired_pastes(self):
         """D53: a daemon start sweeps once; opening a ledger does not (a CLI command, the memory

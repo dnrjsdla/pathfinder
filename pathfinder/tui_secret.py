@@ -22,6 +22,8 @@ STRINGS = {
     "secret_cancelled": "저장 안 함 · nothing stored",
     "secret_one_line": "저장 안 함 · nothing stored: a secret is one line - enter only the value",
     "secret_failed": "저장 안 함 · nothing stored: {message}",
+    "pasted": "토큰을 붙여넣었습니다 · you pasted a token; it is stored as {handle} for 24 h - bind it with "
+              "/secret <id> NAME --from {handle}",
 }
 
 

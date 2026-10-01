@@ -161,6 +161,12 @@ def _save(index: Path, held: dict) -> None:
     os.replace(tmp, index)
 
 
+def handles(event) -> list:
+    """The handles `vault` gave this event's own tokens - named by its seq (D66), so a handle the
+    owner merely typed again is not one - for the owner's notice."""
+    return re.findall(rf"\[secret:(pasted-{event['seq']}(?:-\d+)?)\]", str(event.get("text", "")))
+
+
 def vault(event, index: Path):
     """`event` (the owner's own text, D66) with each token-shaped substring stored as an item
     named by the event's ledger seq - `pasted-<seq>`, then `pasted-<seq>-2`, ... - and replaced by

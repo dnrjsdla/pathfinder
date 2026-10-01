@@ -92,6 +92,8 @@ def render(msg: dict) -> str | None:
         return STRINGS["job_end"].format(id=msg.get("id"), state=msg.get("state"))
     if kind == "error":
         return STRINGS["error"].format(message=msg.get("message"))
+    if kind == "pasted":  # D53: a token in the owner's own line went to the Keychain under a handle
+        return "\n".join(tui_secret.STRINGS["pasted"].format(handle=h) for h in msg.get("handles") or [])
     return None
 
 

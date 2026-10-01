@@ -164,6 +164,8 @@ class Daemon:
             args = installer_mod.brief(event["args"]) if fields["tool"] == "install_server" else event["args"]
             line = {"type": "gate", "id": fields["id"], "tool": fields["tool"], "args": args}
             self.dispatch(lambda: self._send_to_session(fields.get("session"), line))
+        if type == "user" and (pasted := keychain.handles(event)):  # D53: the owner sees where the token went
+            self._send_to_session(fields.get("session"), {"type": "pasted", "handles": pasted})
         return event
 
     # -- socket ------------------------------------------------------------------------

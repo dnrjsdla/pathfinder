@@ -118,7 +118,8 @@ def _package(server: dict) -> dict:
             args += [_arg_str(a) for a in (pkg.get("packageArguments") or [])]
             env = [{"name": e["name"], "secret": bool(e.get("isSecret")), "required": bool(e.get("isRequired")),
                     "default": oneline(e["default"]) if isinstance(e.get("default"), str) else None}  # registry text
-                  for e in (pkg.get("environmentVariables") or [])]
+                  for e in (pkg.get("environmentVariables") or [])
+                  if e["name"].isidentifier()]  # a name with `=` would read as account and default (D65)
             return {"registry_type": rtype, "identifier": pkg["identifier"],
                     "version": pkg.get("version", server.get("version", "")),
                     "runtime": runtime,

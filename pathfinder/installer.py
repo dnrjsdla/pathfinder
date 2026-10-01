@@ -69,9 +69,10 @@ def _keychain_env(pkg: dict) -> dict:
     """Every secret or required variable (D40 - the registry omits `isSecret` when false, and some
     required tokens are not marked) as its config entry, U34's grammar for `mcp.servers._resolve`:
     `keychain:NAME` when required, `keychain?:NAME` when optional, then `=<default>` when the
-    registry gives one (already `oneline`, by `catalog._package`)."""
+    registry gives one (already `oneline`, by `catalog._package`) to a variable not marked secret -
+    a secret's registry default is a placeholder, not a value (D65)."""
     return {e["name"]: f"keychain{'' if e.get('required') else '?'}:{e['name']}"
-            + (f"={e['default']}" if e.get("default") else "")
+            + (f"={e['default']}" if e.get("default") and not e.get("secret") else "")
             for e in pkg["env"] if e.get("secret") or e.get("required")}
 
 # The same alphabet as `senses.catalog._server_id` - kept in sync by hand there (a separate
@@ -287,7 +288,8 @@ class Installer:
         candidate["install"].update({
             "runtime": runtime, "pinned_version": pkg["version"], "integrity": integrity,
             # every secret or required variable, found or not (B6): the config references each as
-            # `keychain:NAME`, so adding one later is all it takes - a required one keeps the server disabled until then
+            # `keychain:NAME` (`keychain?:NAME` when optional, `=<default>` after a non-secret one's, D65),
+            # so adding one later is all it takes - a required one keeps the server disabled until then
             "env_from_keychain": sorted(_keychain_env(pkg)),
             "args": list(pkg["args"]),
             "permissions": [{"tool": t["name"], "grant": "allow" if t["read_only_hint"] else "ask"} for t in tools],

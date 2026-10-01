@@ -38,6 +38,7 @@ FIXTURE_NPM_ITEM = {
             "environmentVariables": [
                 {"name": "API_KEY", "description": "a key", "isRequired": True, "isSecret": True},
                 {"name": "OPTIONAL_FLAG", "description": "optional", "default": "off\u200b"},
+                {"name": "BAD=NAME", "isRequired": True},  # not an identifier: dropped (D65)
             ],
         }],
         "remotes": [{"type": "streamable-http", "url": "https://example.com/mcp"}],

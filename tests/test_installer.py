@@ -380,6 +380,21 @@ class InstallerTest(unittest.TestCase):
         self.assertEqual(config.load(self.home)["mcp_servers"][cand["install"]["id"]]["env"],
                          {"REGION": "keychain:REGION=eu=1", "API_KEY": "keychain:API_KEY"})
 
+    def test_a_secret_with_a_registry_default_is_still_asked(self):
+        """D65: a secret's registry default is a placeholder - the check stops for it; only a
+        variable not marked secret takes its default."""
+        secret = [{"name": "API_KEY", "secret": True, "required": True, "default": "your-key-here"}]
+        plain = [{"name": "REGION", "secret": False, "required": True, "default": "eu"}]
+        with mock.patch("pathfinder.installer.keychain.secret", return_value=None), \
+                mock.patch.object(Installer, "_trial", return_value=(_FAKE_TOOLS, [])) as trial:
+            stopped = self.installer.check(_candidate(env=secret), run=_fake_run())
+            ok = self.installer.check(_candidate(env=plain), run=_fake_run())
+        self.assertEqual((stopped["verification"].get("failed_step"), stopped["verification"].get("names")),
+                         ("secrets", ["API_KEY"]))
+        self.assertTrue(stopped["verification"]["reason"].startswith("needs API_KEY"))
+        self.assertNotEqual(ok["outcome"], "install_failed")
+        self.assertEqual(trial.call_args[0][2], {"REGION": "eu"})
+
     def test_explicit_request_shows_excluded_license_but_catalog_fails_it(self):
         catalog_check = self._check(_candidate(), run=_fake_run(license="GPL-3.0"))
         self.assertEqual(catalog_check["outcome"], "install_failed")
@@ -470,9 +485,12 @@ class InstallerTest(unittest.TestCase):
     def test_load_step_fails_when_a_required_secret_vanished(self):
         """U34: a missing optional secret never disables a server, so `secret missing` at load is a
         required one gone from the Keychain since the check - rolled back, not `install_done`."""
-        env = [{"name": "TOKEN", "secret": True, "required": True}]
-        with mock.patch("pathfinder.installer.keychain.secret", return_value="tok"):
+        env = [{"name": "TOKEN", "secret": True, "required": True},
+               {"name": "OPT", "secret": True, "required": False}]  # so `needs` is not empty
+        with mock.patch("pathfinder.installer.keychain.secret",
+                        side_effect=lambda service, account: "tok" if account == "TOKEN" else None):
             cand = self._check(_candidate(env=env), run=_fake_run())
+        self.assertEqual(cand["install"]["needs"], ["OPT"])
         id = self.installer._server_id(cand["name"])
         self.attach.load_result = "secret missing: TOKEN"
         self._install(cand)

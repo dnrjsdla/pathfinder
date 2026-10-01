@@ -81,7 +81,7 @@ Every check the code did not run is the literal string `"not_checked"`. The fiel
 | `id` | string | the installer (`check()`: the server id, decided once - the registry name's last segment sanitized to the config's id rule) | (only present once checked) |
 | `needs[]` | array of env names | the installer (`check()`: secrets not yet in the Keychain, required values not set - the row prints them) | (only present once checked) |
 | `runtime/pinned_version/integrity` | string x3 | the installer (after a successful trial) | (only present once the trial ran) |
-| `env_from_keychain[]` | array of names | the installer (every `secret` env the package declares, found or not - the config references each as `keychain:<NAME>` when required or `keychain?:<NAME>` when optional, with `=<default>` appended when the registry gives one; `mcp.servers._resolve` reads it for the check and the start alike, U34) | (only present once the trial ran) |
+| `env_from_keychain[]` | array of names | the installer (every secret or required env the package declares, found or not; a record only - nothing reads it back. The config entry is what is read: `keychain:<NAME>` when required, `keychain?:<NAME>` when optional, `=<default>` appended when the registry gives a non-secret one a default; `mcp.servers._resolve` reads that entry for the check and the start alike, D65) | (only present once the trial ran) |
 | `args[]` | array | the installer (`[runtime, *args]` is the installed command) | (only present once the trial ran) |
 | `permissions[]` | array of `{tool, grant}` | the installer (D31: `allow` for every read-only-hinted tool the trial saw; every other tool asks) | (only present once installed) |
 

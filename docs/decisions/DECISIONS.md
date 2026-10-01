@@ -501,7 +501,7 @@ is for is handing over tool PACKAGES that are useful as they arrive - not wiring
 one. Partition 8 connects single services because the secret path and the registry copy need a
 real case; the server's design starts from the package.
 
-## 2026-10-01 — The screen's masked input (owner's choice)
+## 2026-10-01 — The screen's masked input, and an entry's optional and default (owner's choices)
 
 **D64. The screen's masked `/secret` input moves to `tui_secret.py`, ceiling 150** (decided
 2026-10-01). `tui.py` was 392/400 with U15b, U16 and U26 still to add about 20 lines to it. The
@@ -513,3 +513,16 @@ other way, and D34's intent is that a module past its line is cut, not its ceili
 trimming the three units would cut the intake the secret path depends on. — *Reversed if*
 `tui_secret.py` ends up needing the screen's state: then the split goes back and `tui.py`'s
 ceiling is raised instead.
+
+**D65. An installed server's entry says which variables are optional and which have a default,
+in its value grammar** (decided 2026-10-01). `keychain:NAME` is required, `keychain?:NAME`
+optional, and after the first `=` comes the value used when the Keychain item is missing:
+`keychain:NAME=<default>`, `keychain?:NAME=<default>`. The installer writes a default only for a
+variable not marked secret - a secret's registry default is a placeholder, not a value - and an
+empty default is none. One resolver, `mcp/servers._resolve`, reads the entry for the check and
+for the start, so the two agree: a required variable with a default no longer stops the check,
+and a missing optional secret no longer disables a server the check trialled without it. New
+config keys (`optional`, `defaults`) were rejected because the entry would then live in two
+places; keeping the grammar and reinstalling was rejected because an optional secret added later
+would need a reinstall. Entries written before D65 keep `keychain:NAME` and stay disabled while
+the item is missing; there is no migration - a reinstall is the way.

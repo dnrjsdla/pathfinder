@@ -92,6 +92,8 @@ def render(msg: dict) -> str | None:
         return STRINGS["job_end"].format(id=msg.get("id"), state=msg.get("state"))
     if kind == "error":
         return STRINGS["error"].format(message=msg.get("message"))
+    if kind == "secret.ask":  # D53, for a client with no masked input (`say`, `listen`)
+        return tui_secret.needed(msg)
     if kind == "secret.stored":  # D53: the daemon stored an asked-for value; the proposal follows
         return tui_secret.STRINGS["secret_stored_ask"].format(name=msg.get("name"), id=msg.get("server_id"))
     if kind == "pasted":  # D53: a token in the owner's own line went to the Keychain under a handle
@@ -105,6 +107,7 @@ class _Session:
     def __init__(self, sock, in_fd, out, home):
         self.sock, self.in_fd, self.out, self.home = sock, in_fd, out, home
         self.buf = ""
+        self._typed = ""  # the line being typed, put aside while a masked entry is open
         self.secret = None  # a `tui_secret.Entry` while the input line is masked for `/secret`
         self.turn_running = False
         self.interrupt_sent = False  # one Ctrl-C interrupts, the second quits
@@ -125,7 +128,8 @@ class _Session:
     def _masked(self, target):
         """Into (a `tui_secret.Entry`) or out of (None) the masked input. Bracketed paste is on only
         while masked, so a paste comes between marks however slow the link; main() turns it off on exit too."""
-        self.secret, self.buf = target, ""
+        self._typed, self.buf = (self.buf, "") if target else ("", self._typed)  # the typed line comes back
+        self.secret = target
         self.out.write("\033[?2004h" if target else "\033[?2004l")
 
     def redraw(self):
@@ -318,10 +322,15 @@ class _Session:
             self.redraw()
             return
         if kind == "secret.ask":  # D53: the harness asks; the value is typed masked, never into the chat
+            if self.secret:  # never in place of an open entry, whose value would go to the wrong name
+                return self.show(tui_secret.STRINGS["secret_busy"])
             entry, text = tui_secret.asked(msg, self.home, self.send)
-            self._masked(entry)
+            if entry:
+                self._masked(entry)
             self.show(text)
             return
+        if kind == "secret.stored" and self.secret and self.secret.ask == (msg.get("server_id"), msg.get("name")):
+            self._masked(None)  # another screen answered this ask
         text = render(msg)
         if text is None:
             return

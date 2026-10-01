@@ -63,7 +63,7 @@ def _stream(sock, messages):
         elif msg["type"] == "retract":  # D51: the draft above is withdrawn, the re-run follows
             print(flush=True)  # the withdrawn draft and the re-run stay on lines of their own
             print(tui.STRINGS["retract"].format(what=msg["what"]), file=sys.stderr)
-        elif msg["type"] == "pasted":  # D53: the handle a pasted token got, as the screen shows it
+        elif msg["type"] in ("pasted", "secret.ask"):  # D53: a token's handle, or how to enter a secret
             print("\n" + tui.render(msg), file=sys.stderr)
         elif msg["type"] == "gate":
             args = json.dumps(msg["args"], ensure_ascii=False)  # the same rendering as the screen's and `approvals`'

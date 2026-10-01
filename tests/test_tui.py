@@ -275,6 +275,30 @@ class TuiCase(unittest.TestCase):
         self.assertTrue(_wait_for(lambda: "NOTION_TOKEN stored for notion; proposing it again" in self.out_text()))
         self.assertNotIn(value, self.out_text())
 
+    def test_secret_ask_keeps_the_typed_line_and_never_replaces_an_open_entry(self):
+        """Review: an ask puts the half-typed line aside and gives it back; an ask that arrives while
+        an entry is open is dropped with a line, so the open entry's value never goes to the ask's
+        name; an answer from another screen closes this screen's entry."""
+        ask = {"type": "secret.ask", "server_id": "notion", "name": "NOTION_TOKEN", "server": "io.example/notion"}
+        self.type_("half")
+        self.assertTrue(_wait_for(lambda: self.out_text().endswith("> half")))
+        self.daemon.send(ask)
+        self.assertTrue(_wait_for(lambda: self.out_text().endswith(tui_secret.SECRET_PROMPT)))
+        self.daemon.send({"type": "secret.stored", "server_id": "notion", "name": "NOTION_TOKEN"})
+        self.assertTrue(_wait_for(lambda: self.out_text().endswith("> half")))  # left the entry; the line is back
+        self.type_("\x7f" * 4)
+        with mock.patch("pathfinder.keychain.store") as store:
+            self.type_("/secret rv11test TOKEN\r")
+            self.assertTrue(_wait_for(lambda: self.out_text().endswith(tui_secret.SECRET_PROMPT)))
+            self.daemon.send(ask)
+            self.assertTrue(_wait_for(lambda: "another secret entry is open" in self.out_text()))
+            self.type_("v4lue")
+            self.assertTrue(_wait_for(lambda: self.out_text().endswith(tui_secret.SECRET_PROMPT + "*" * 5)))
+            self.type_("\r")
+            self.assertTrue(_wait_for(lambda: store.called))
+            store.assert_called_once_with("pathfinder-mcp-rv11test", "TOKEN", "v4lue", None)
+        self.assertNotIn("secret", [m["type"] for m in self.daemon.received])
+
     def test_ctrl_c_cancels_secret_entry(self):
         with mock.patch("pathfinder.keychain.store") as store:
             self.type_("/secret rv11test TOKEN\r")

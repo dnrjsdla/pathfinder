@@ -89,6 +89,8 @@ def target(home, id: str, name: str | None = None) -> tuple:
     if name is None or not valid_target(id, name):
         raise ValueError("secret ID NAME takes a server id and an env variable name "
                          "(then --from pasted-<seq> binds a pasted token), or secret mail the mail password")
+    if TOKEN_RE.search(name):  # the value typed where the name goes: never echoed or stored as a name
+        raise ValueError("that looks like a token, not a name")
     return f"pathfinder-mcp-{id}", name
 
 
@@ -185,8 +187,11 @@ def bind(home, handle: str, service: str, account: str, run=None) -> None:
         raise LookupError("expired - enter it again with /secret")
     store(service, account, value, run)
     if delete(PASTED, handle, run):  # a refused delete keeps the handle, so the sweep still finds the item
-        held.pop(handle)
-        _save(index, held)
+        from .ledger import locked  # lazy: the ledger imports this module
+        with locked(home):  # `vault` writes the index under it: a paste meanwhile keeps its handle
+            held = _held(index)
+            held.pop(handle, None)
+            _save(index, held)
 
 
 def live(home) -> list:

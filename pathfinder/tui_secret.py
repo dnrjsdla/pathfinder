@@ -28,6 +28,8 @@ STRINGS = {
     "secret_handles": " - 또는 · or --from {handles}",
     "secret_sent": "보냄 · {name} for {id} went to the daemon, not the chat",
     "secret_stored_ask": "저장됨 · {name} stored for {id}; proposing it again",
+    "secret_busy": "건너뜀 · another secret entry is open, so this ask is dropped - answer it later with /secret",
+    "secret_needed": "비밀 필요 · {what} is needed - enter it with {how} in the screen, never in the chat",
     "pasted": "토큰을 붙여넣었습니다 · you pasted a token; it is stored as {handle} for 24 h - bind it with "
               "/secret <id> NAME --from {handle}",
 }
@@ -46,7 +48,10 @@ def entry(rest, home):
         return (Entry(lambda value: keychain.take(home, service, user, value), STRINGS["mail_stored"].format(user=user)),
                 _prompt(home, "mail_ask", user=user))
     if len(args) in (2, 4) and args[2:3] in ([], ["--from"]) and keychain.valid_target(*args[:2]):
-        service, account = keychain.target(home, *args[:2])
+        try:
+            service, account = keychain.target(home, *args[:2])
+        except ValueError as e:  # a NAME that looks like a token
+            return None, STRINGS["secret_failed"].format(message=e)
         stored = STRINGS["secret_stored"].format(id=args[0], name=args[1])
         if len(args) == 2:
             return (Entry(lambda value: keychain.take(home, service, account, value), stored),
@@ -66,8 +71,15 @@ def asked(msg, home, send):
     if not id:  # the mail password, asked as the screen attaches (U26): `/secret mail`, stored here
         return entry("mail", home)
     answer = {"type": "secret", "server_id": id, "name": name, "server": msg.get("server")}
-    return (Entry(lambda value: send({**answer, "value": value}), STRINGS["secret_sent"].format(id=id, name=name)),
-            _prompt(home, id=id, name=name))
+    return (Entry(lambda value: send({**answer, "value": value}), STRINGS["secret_sent"].format(id=id, name=name),
+                  ask=(id, name)), _prompt(home, id=id, name=name))
+
+
+def needed(msg):
+    """`secret.ask` for a client with no masked input (`say`, `listen`): the line that says how."""
+    id, name = msg.get("server_id"), msg.get("name")
+    return STRINGS["secret_needed"].format(what=f"{name} for {id}" if id else "the mail password",
+                                           how=f"/secret {id} {name}" if id else "/secret mail")
 
 
 def _prompt(home, key="secret_ask", **fields):
@@ -81,8 +93,8 @@ class Entry:
     a harness ask - and `done` is the line after it. `paste` is None outside a bracketed paste;
     inside one it is False, "\\n" after a newline, True with text after one (more than one line)."""
 
-    def __init__(self, put, done):
-        self.put, self.done, self.paste = put, done, None
+    def __init__(self, put, done, ask=None):
+        self.put, self.done, self.ask, self.paste = put, done, ask, None  # `ask`: (id, NAME) of a harness ask
 
     def swallow(self, ch, in_esc) -> bool:
         """In a paste no control is a key: True drops `ch`. Text after a pasted newline marks the

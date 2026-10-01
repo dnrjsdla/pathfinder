@@ -248,13 +248,13 @@ words and leaves no dangling `user` message (D30).
   session lane - see §9), `signal {sense, fields}` (a push door — the sense must be loaded and
   push-capable, i.e. export `build(fields)`; `jobs` never is), `presence {idle_s}`,
   `react {vote, id?}`, `job.stop {id}`, `job.steer {id, text}`, `secret {server_id, name, server,
-  value}` (D53's main path: the screen's masked answer, handed to `installer.secret` - stored on a
+  value}` (D53's main path: the screen's masked answer, handed to `installer.secret` - fields checked first, stored on a
   worker thread through `keychain.take`, never recorded, then the server proposed again in the
-  background). Out: `attached`, `turn.start`,
+  background, cancelled at a stop; `server_id: "mail"` with no name is the mail password). Out: `attached`, `turn.start`,
   `delta`, `tool {name, ok}`, `gate {id, tool, args}`, `turn.end {kind}`, `notice {id, text, why}`,
   `job.start {id, goal}`, `job.gate {id, approval, tool, args}`, `job.end {id, state}`, `secret.ask {server_id, name, server}` (to every attached screen when D40's
   check stops on a missing secret: the first name, then the next at the re-proposal; the screen
-  takes it masked and lists the live pasted handles for `--from`), `secret.stored {server_id, name}`,
+  takes it masked and lists the live pasted handles for `--from`), `secret.stored {server_id, name}` (to every screen, so the others leave the entry),
   `pasted {handles}` (the owner's own line was vaulted), `error`. A malformed or unknown line, an unknown
   or already decided approval id, an interrupt with no running turn: an `error` line, the
   connection stays open.

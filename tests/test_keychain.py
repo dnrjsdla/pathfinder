@@ -3,6 +3,7 @@ import importlib.util
 import io
 import json
 import shlex
+import threading
 import tempfile
 import time
 import unittest
@@ -190,6 +191,42 @@ class BindTest(unittest.TestCase):
         self.assertEqual(self.items, {("pathfinder-mcp-gh", "TOKEN"): self.TOKEN, ("pathfinder-mcp-gh", "OTHER"): "pl41n-value"})
         self.assertEqual(keychain.live(self.home), [])
         self.real.assert_not_called()
+
+    def test_bind_keeps_a_handle_pasted_meanwhile(self):
+        """Review: bind rewrites the index under the ledger's lock and reads it again there, so a paste
+        vaulted while it talks to the Keychain keeps its handle."""
+        from pathfinder import ledger
+        self._index(**{"pasted-7": time.time()})
+        paused, go = threading.Event(), threading.Event()
+
+        def security(argv, input=None, **kw):
+            if argv[1] == "delete-generic-password":
+                paused.set()
+                go.wait(5)
+            return self._security(argv, input, **kw)
+        t = threading.Thread(target=keychain.bind, args=(self.home, "pasted-7", "pathfinder-mcp-gh", "TOKEN"),
+                             kwargs={"run": security})
+        t.start()
+        self.assertTrue(paused.wait(5))
+        index = self.home / "pasted.json"
+        with ledger.locked(self.home):  # what `vault` does under append's lock: read, add, save
+            held = keychain._held(index)
+            go.set()
+            time.sleep(0.2)  # bind, done with the Keychain, now waits for this lock
+            held["pasted-9"] = time.time()
+            keychain._save(index, held)
+        t.join(5)
+        self.assertEqual(sorted(json.loads(index.read_text())["pasted"]), ["pasted-9"])
+
+    def test_a_name_that_looks_like_a_token_is_refused(self):
+        from pathfinder import tui_secret
+        name = "ghp_" + "a1" * 18  # built by concatenation, so the scanner never flags this file
+        with self.assertRaisesRegex(ValueError, "looks like a token, not a name"):
+            keychain.target(self.home, "gh", name)
+        entry, text = tui_secret.entry(f"gh {name}", self.home)
+        self.assertIsNone(entry)
+        self.assertIn("looks like a token", text)
+        self.assertNotIn(name, text)
 
     def test_cli_and_screen_bind_through_one_function(self):
         from pathfinder import tui_secret

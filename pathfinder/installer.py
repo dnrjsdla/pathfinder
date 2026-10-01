@@ -177,6 +177,7 @@ class Installer:
         self.attach = attach
         self.dispatch = dispatch
         self._lock = asyncio.Lock()  # S1: install/uninstall never interleave (id clash, config races)
+        self._again = None  # the background re-proposal after a stored secret (D53)
 
     def record(self, type, **fields):
         self.dispatch(lambda: self._record(type, **fields))
@@ -259,7 +260,7 @@ class Installer:
         sid = self._server_id(candidate["name"])
         resolved_env, missing, needs = _resolve(_keychain_env(pkg), sid, keychain.secret)
         if missing:
-            verification["names"] = missing
+            verification["names"], verification["server_id"] = missing, sid  # the asking stores under this id
             one = missing[0] if len(missing) == 1 else ""
             return fail("secrets", f"needs {', '.join(missing)} - store {'it' if one else 'each'} with /secret {sid} "
                         f"{one or 'NAME'} in the screen, or pathfinder secret {sid} {one or 'NAME'}, then ask "
@@ -345,7 +346,7 @@ class Installer:
         if candidate.get("outcome") == "install_failed":
             vf = candidate["verification"]
             self.record("install_failed", id="", name=candidate["name"], names=vf.get("names", []),  # D53 asks for them
-                        step=vf.get("failed_step", ""), reason=vf.get("reason", ""))
+                        server_id=vf.get("server_id", ""), step=vf.get("failed_step", ""), reason=vf.get("reason", ""))
             signal = Signal(sense="catalog", kind="install_failed",
                 key=f"install_failed:{candidate['name']}:{int(time.time())}",
                 summary=f"Could not install {candidate['name']}: {vf.get('reason', '')}",
@@ -390,9 +391,7 @@ class Installer:
         status = ((item.get("_meta") or {}).get("io.modelcontextprotocol.registry/official") or {}).get("status")
         return {"id": aid, "line": line + ("  deprecated in the registry" if status == "deprecated" else "")}
 
-    async def handle(self, msg: dict, session: str = "") -> dict:
-        if msg["type"] == "secret":
-            return await self.secret(msg, session)
+    async def handle(self, msg: dict) -> dict:
         install = msg["type"] == "install"
         arg = msg.get("name" if install else "id")
         if not isinstance(arg, str) or not arg:
@@ -410,15 +409,26 @@ class Installer:
     async def secret(self, msg: dict, session: str = "") -> dict:
         """D53's main path: the screen's masked answer to `secret.ask`. The value goes to the Keychain
         on a worker thread and nowhere else - no event holds it - and the server is proposed again in
-        the background, so its gate line (or the ask for the next missing name) follows."""
+        the background, so its gate line (or the ask for the next missing name) follows. `mail` with no
+        name is the mail password (U26)."""
+        if not (isinstance(msg.get("server_id"), str) and isinstance(msg.get("value"), str)
+                and isinstance(msg.get("name"), (str, type(None))) and isinstance(msg.get("server"), (str, type(None)))):
+            return {"type": "error", "message": "secret needs a \"server_id\" and a \"value\" (and a \"name\" unless mail)"}
         try:
-            service, account = keychain.target(self.home, msg.get("server_id"), msg.get("name"))
-            await asyncio.to_thread(keychain.take, self.home, service, account, msg.get("value"))
+            service, account = keychain.target(self.home, msg["server_id"], msg.get("name"))
+            await asyncio.to_thread(keychain.take, self.home, service, account, msg["value"])
         except Exception as e:  # keychain's messages never carry the value
             return {"type": "error", "message": f"{type(e).__name__}: {e}"[:300]}
-        if msg.get("server"):  # held, so the task is not collected before it runs
+        if msg.get("server"):  # held, so the task is not collected before it runs, and close() can cancel it
             self._again = asyncio.ensure_future(asyncio.to_thread(self.propose_by_name, msg["server"], "user", session))
-        return {"type": "secret.stored", "server_id": msg["server_id"], "name": msg["name"]}
+        return {"type": "secret.stored", "server_id": msg["server_id"], "name": msg.get("name")}
+
+    def close(self) -> None:
+        """At a stop: no late record, and a re-proposal in flight is cancelled rather than awaited - its
+        trial is sandboxed, and the ask comes again at the next check."""
+        self.dispatch = lambda fn: None
+        if self._again is not None:
+            self._again.cancel()
 
     # -- install / rollback --------------------------------------------------------------
     async def decide(self, approval_id: str, decision: str) -> None:

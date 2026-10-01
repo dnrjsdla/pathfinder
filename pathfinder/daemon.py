@@ -31,7 +31,6 @@ SOCKET = "pathfinder.sock"
 PROMPT = Path(__file__).parent / "prompts" / "system.txt"
 LINE_LIMIT = 1 << 20  # one NDJSON line; asyncio's 64 KiB default is too small for a pasted file
 SIGNAL_TURN_BUDGET = 4  # D20: a signal turn is a few tool calls plus a sentence, not a conversation
-PUSH_FIELDS_LIMIT = 4096  # a pushed signal's `fields` text goes verbatim into the envelope
 
 
 def default_step_factory(cfg, control, tools_for_origin):
@@ -170,7 +169,8 @@ class Daemon:
             self._ask_secret(fields["names"][0], fields.get("server_id", ""), fields["name"])
         return event
 
-    def _ask_secret(self, name, server_id="", server="", writer=None) -> None:  # D53: every screen, or the one attaching
+    def _ask_secret(self, name, server_id="", server="", writer=None) -> None:
+        """D53: the harness asks every screen (or the one attaching) for a missing secret, typed masked."""
         for w in [writer] if writer else [w for s in self.sessions.values() for w in s.conns if not w.is_closing()]:
             _write(w, {"type": "secret.ask", "server_id": server_id, "name": name, "server": server})
 
@@ -369,21 +369,8 @@ class Daemon:
                     _write(writer, await self.installer.handle(msg))
                 elif kind == "secret":  # D53: stored, never recorded; every screen hears the answer and leaves its entry
                     self._send_all(await self.installer.secret(msg, session.id if session else ""))
-                elif kind == "signal":
-                    sense_name, fields = msg.get("sense"), msg.get("fields")
-                    sense = self.senses.get(sense_name)
-                    if sense is None or not sense.push_capable or not isinstance(fields, dict):
-                        _write(writer, {"type": "error", "message": f"unknown or non-push sense: {sense_name!r}"})
-                        continue
-                    if len(json.dumps(fields, ensure_ascii=False)) > PUSH_FIELDS_LIMIT:
-                        _write(writer, {"type": "error", "message": "fields too large (4 KB limit)"})
-                        continue
-                    try:
-                        signal = sense.module.build(fields)
-                    except Exception as e:  # the only untrusted local input - never take the daemon down
-                        _write(writer, {"type": "error", "message": f"bad fields for {sense_name}: {e}"})
-                        continue
-                    self.push_signal(signal)
+                elif kind == "signal":  # the push door, checked and built in `signals.pushed` (D67)
+                    signals.pushed(self.senses, msg, self.push_signal, lambda reply: _write(writer, reply))
                 elif kind == "presence":
                     idle_s = msg.get("idle_s")
                     if (not isinstance(idle_s, (int, float)) or isinstance(idle_s, bool)

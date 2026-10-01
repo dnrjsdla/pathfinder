@@ -235,7 +235,7 @@ dict 를 키 튜플로 바꿔 버린다.
   켜져 있으면 - `attach` 감각의 `context` 신호를 push 한다) · `say {text}` · `interrupt` ·
   `approve {id}` · `deny {id}`(작업자 자신의 승인은 세션 lane 대신 `jobs.Manager.resume` 으로
   간다 — §9) · `signal {sense, fields}`(push 문 — 감각이 로드되어 있고 push 가능해야 한다, 즉
-  `build(fields)` 를 내보내야 한다; `jobs` 는 절대 아니다) · `presence {idle_s}` ·
+  `build(fields)` 를 내보내야 한다; `jobs` 는 절대 아니다; 확인과 생성은 `signals.pushed`, D67) · `presence {idle_s}` ·
   `react {vote, id?}` · `job.stop {id}` · `job.steer {id, text}` · `secret {server_id, name, server,
   value}`(D53 의 주 경로: 화면이 가려 받은 답, `installer.secret` 가 받아 필드를 먼저 확인하고 워커 스레드에서
   `keychain.take` 로 저장하고 기록하지 않으며, 뒤에서 그 서버를 다시 제안하되 멈출 때는 취소한다;

@@ -141,6 +141,26 @@ def load(cfg: dict, home=None) -> list:
     return senses
 
 
+PUSH_FIELDS_LIMIT = 4096  # a pushed signal's `fields` text goes verbatim into the envelope
+
+
+def pushed(senses: dict, msg: dict, push: Callable, reply: Callable) -> None:
+    """The socket's push door, `signal {sense, fields}` (D67, moved from the daemon): a loaded,
+    push-capable sense builds a Signal from `fields` and it goes to `push`; anything else is one
+    `error` line through `reply`, and the connection stays open."""
+    name, fields = msg.get("sense"), msg.get("fields")
+    sense = senses.get(name)
+    if sense is None or not sense.push_capable or not isinstance(fields, dict):
+        return reply({"type": "error", "message": f"unknown or non-push sense: {name!r}"})
+    if len(json.dumps(fields, ensure_ascii=False)) > PUSH_FIELDS_LIMIT:
+        return reply({"type": "error", "message": "fields too large (4 KB limit)"})
+    try:
+        signal = sense.module.build(fields)
+    except Exception as e:  # the only untrusted local input - never take the daemon down
+        return reply({"type": "error", "message": f"bad fields for {name}: {e}"})
+    push(signal)
+
+
 class SenseLoop:
     """One asyncio task; every sense's `poll` runs in a thread on its own cadence. A raising
     sense is logged through `on_error` and retried next cadence - never crashes the daemon."""

@@ -246,7 +246,7 @@ words and leaves no dangling `user` message (D30).
   `attach` sense's `context` signal, when that sense is on), `say {text}`, `interrupt`,
   `approve {id}`, `deny {id}` (a job's own approval routes to `jobs.Manager.resume` instead of a
   session lane - see §9), `signal {sense, fields}` (a push door — the sense must be loaded and
-  push-capable, i.e. export `build(fields)`; `jobs` never is), `presence {idle_s}`,
+  push-capable, i.e. export `build(fields)`; `jobs` never is; checked and built in `signals.pushed`, D67), `presence {idle_s}`,
   `react {vote, id?}`, `job.stop {id}`, `job.steer {id, text}`, `secret {server_id, name, server,
   value}` (D53's main path: the screen's masked answer, handed to `installer.secret` - fields checked first, stored on a
   worker thread through `keychain.take`, never recorded, then the server proposed again in the

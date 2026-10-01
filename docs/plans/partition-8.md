@@ -277,14 +277,14 @@ Counts are `splitlines()` on `partition-8` at 939c831; "with U2" is the review w
 
 | Module | Now | Ceiling | After this plan |
 |---|---|---|---|
-| `daemon.py` | **779** | 780 | ~771 (U3 −21, U4 −10, U6 +7, U7a +6, U16 +9, U27 +1) |
+| `daemon.py` | **779** | 780 | ~771 (U3 −21, U4 −10, U6 +7, U7a +6, U16 +9, U27 +1); 780 after U16's review, 767 after D67 (−14, a docstring back +1) |
 | `state.py` | 681 | 780 (added) | ~688 (U6 +6, U14a +1) |
 | `memory.py` | 710 | 780 | ~711 (U23) |
 | `loop.py` | 197 | 520 (added) | ~244 (U7a) |
 | `broker.py` + `policy.py` | 84 + 57 | 455 (added) | ~116 + 57 (U6 +26, U31 +6) |
 | `ledger.py` | 122 | 520 (added) | ~142 (U24 +8, U15a +12) |
 | `tools.py` | 212; 225 after U21 | 390 (added) | ~230 (U21 moved `oneline` here; U31 +5) |
-| `signals.py` + `rules.py` | 201 + 220 | 585 (added) | ~205 + 220 (U21) |
+| `signals.py` + `rules.py` | 201 + 220 | 585 (added) | ~205 + 220 (U21); 227 + 222 after D67's `pushed` (+20) |
 | `jobs.py` | 267 | 350 | ~283 (U4 +15, U23 +1) |
 | `exec.py`, `deliver.py` | 217, 86 | 390, 325 (added) | unchanged |
 | `mirror.py` | 188; 191 with U2 | **200** (D56) | 191 |
@@ -359,6 +359,13 @@ owns the protocol, the way `PROPOSALS` already routes approvals to their owners.
 
 Nothing else moves. The lane, the signal turns and the rest of `handle()` depend on daemon state,
 and splitting them would add a seam only to buy lines.
+
+**Move 3 (D67, 2026-10-02): the `signal` branch to `signals.pushed(senses, msg, push, reply)`.**
+- U16 and its review brought the daemon back to 780. The push door's checks (a loaded,
+  push-capable sense, the 4 KB `fields` limit, the sense's `build`) are the signal path's own and
+  depend on no daemon state but the senses it is handed.
+- In the daemon it becomes `elif kind == "signal":` and one call; `PUSH_FIELDS_LIMIT` moves too.
+- **−14 in the daemon (767 with `_ask_secret`'s docstring back); `signals.py` +20.**
 
 ## The second look and the adopted prompt (D51)
 

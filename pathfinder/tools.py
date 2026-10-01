@@ -192,11 +192,12 @@ def normalize_local_datetime(*keys):
 
 def _absolute_path(args):
     """`~` expands; a relative path lands in the workspace, like the shell's cwd - never in
-    the daemon's own cwd. The gate shows the result, so the user sees where it really goes."""
+    the daemon's own cwd; a symlink is followed. The gate shows the result, so the user sees
+    where it really goes, not a link's name."""
     p = Path(args["path"]).expanduser()
     if not p.is_absolute():
         p = _exec.workspace() / p
-    return {**args, "path": str(p)}
+    return {**args, "path": str(p.resolve())}
 
 
 def _read_file(path, control=None):
@@ -210,11 +211,11 @@ def _write_file(path, content, control=None):
     p = Path(path)
     if _exec.is_secret(p):  # a shell rc or a key file is code execution on the next login
         raise ValueError(f"refused: {path} is a secret path")
-    p.parent.mkdir(parents=True, exist_ok=True)
     from . import skills  # here: skills.py imports this module
-    folder = skills._home / "skills" if skills._home else None  # by inode: no `..`, symlink or case gets past
-    if folder and folder.is_dir() and os.path.samefile(p.parent, folder):
+    folder, parent = skills._home and skills._home / "skills", p.resolve().parent  # through any symlink
+    if folder and folder.is_dir() and parent.is_dir() and os.path.samefile(parent, folder):  # by inode: case too
         raise ValueError(f"refused: {path} - a skill is written only by the owner, the seed copy or an approved edit_memory")
+    p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(content, encoding="utf-8")
     return {"path": str(p), "bytes": len(content.encode("utf-8"))}
 

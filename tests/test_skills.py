@@ -1,5 +1,4 @@
 """Skills (D58, D61): the seed copy, the index and `read_skill`, on a temp home - no daemon."""
-import logging
 import tempfile
 import unittest
 from pathlib import Path
@@ -8,7 +7,7 @@ from unittest import mock
 from pathfinder import skills
 from pathfinder import tools as tools_mod
 from pathfinder.broker import Broker, Gate
-from pathfinder.mcp.attach import _McpLogHandler
+from pathfinder.mcp import attach as mcp_attach
 
 
 def _skill(name, description, body="Do the thing.\n"):
@@ -74,17 +73,18 @@ class SkillsTest(unittest.TestCase):
         with self.assertLogs("pathfinder.skills", "WARNING") as logs:
             self.assertEqual(skills.index(self.home),
                              "(index too large: 28 skills not listed - shorten their descriptions)")
-        self.assertIn("over 4000", logs.output[-1])
+        self.assertEqual(len(logs.output), 1)  # only the new problem; the four old ones are not repeated
+        self.assertIn("over 4000", logs.output[0])
 
-    def test_a_refused_file_reaches_the_owner_as_an_error_event(self):
-        events = []
-        handler = _McpLogHandler(lambda fn: fn(), lambda type, **f: events.append((type, f["message"])))
-        logging.getLogger("pathfinder.skills").addHandler(handler)
+    def test_a_refused_file_reaches_the_ledger_as_an_error_event(self):
+        events = []  # the daemon's own registration: mcp/attach.py's handler, no handler of the test's
+        attach = mcp_attach.Attach(self.home, None, lambda type, **f: events.append((type, f["message"])),
+                                   None, lambda fn: fn())
         try:
             self.write("bad", _skill("not-bad", "Use for bad."))
             skills.index(self.home)  # not under assertLogs: it swaps the logger's handlers out
         finally:
-            logging.getLogger("pathfinder.skills").removeHandler(handler)
+            attach.close()
         self.assertEqual(events, [("error", "skill bad.md is not loaded: its name must equal the file's "
                                             "stem (lowercase, digits, hyphens)")])
 
@@ -108,6 +108,23 @@ class SkillsTest(unittest.TestCase):
                 self.assertFalse(out["ok"], (origin, path))
                 self.assertIn("a skill is written only by the owner", out["error"])
         self.assertEqual(sorted(p.name for p in (self.home / "skills").glob("*.md")), [])
+        seed = _skill("a", "Use for a.")
+        self.write("a", seed)
+        link = self.home / "workspace" / "l.md"  # what a user-turn shell can do in the workspace
+        link.parent.mkdir()
+        link.symlink_to(self.home / "skills" / "a.md")
+        out = Broker({"write_file": spec}, "user", {"write_file": "allow"}, control=None, emit=lambda *a: None
+                     ).call("c3", "write_file", {"path": str(link), "content": "overwritten"})
+        self.assertIn("a skill is written only by the owner", out["error"])
+        for path in (link, self.home / "skills" / "new" / ".." / "b.md"):  # the handler resolves too, no gate in front
+            with self.assertRaises(ValueError):
+                spec.handler(path=str(path), content="overwritten")
+        self.assertFalse((self.home / "skills" / "new").exists())  # a refused write makes no directory
+        self.assertEqual((self.home / "skills" / "a.md").read_text(encoding="utf-8"), seed)
+        with self.assertRaises(Gate) as cm:  # no grant: the approval line names the target, not the link
+            Broker({"write_file": spec}, "user", {}, control=None, emit=lambda *a: None
+                   ).call("c4", "write_file", {"path": str(link), "content": "overwritten"})
+        self.assertEqual(cm.exception.arguments["path"], str((self.home / "skills" / "a.md").resolve()))
         out = Broker({"write_file": spec}, "user", {"write_file": "allow"}, control=None, emit=lambda *a: None
                      ).call("c2", "write_file", {"path": str(self.home / "notes.md"), "content": "ok"})
         self.assertTrue(out["ok"])  # anywhere else it writes as before

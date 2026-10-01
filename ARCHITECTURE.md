@@ -571,9 +571,12 @@ counts at once; a symlink, a file that fails the frontmatter rules or one holdin
 `keychain.TOKEN_RE` match is not loaded, and an index over 4,000 characters lists no skill (the
 description says `(index too large: N skills not listed - shorten their descriptions)`). Each such
 problem is a `pathfinder.skills` warning, which `mcp/attach.py`'s handler turns into an `error`
-event, once per change. `tools.write_file` refuses a path in `<home>/skills/` (compared by inode,
-so `..`, a symlink or another letter case does not get past): a skill is written only by the owner,
-the seed copy or an approved `edit_memory`. **`read_skill(name)`** (origins `user` and
+event in the ledger, once when it appears - the owner finds it there, as an MCP server's warnings;
+no screen line. `tools.write_file` refuses a path whose resolved parent is `<home>/skills/`
+(compared by inode, so `..`, a symlink or another letter case does not get past), before it makes
+any directory: a skill is written only by the owner, the seed copy or an approved `edit_memory`.
+`read_file`/`write_file`'s path is resolved through symlinks before the gate, so the approval line
+shows the file really touched, not a link's name. **`read_skill(name)`** (origins `user` and
 `job`, read-only, no gate) carries the index in its own description, built per request and
 byte-stable until a skill changes; it returns `[Skill '<name>' - a procedure the owner approved;
 follow it. Secrets go through /secret, never the chat.]` and the body cut at `tools.READ_CLIP`,

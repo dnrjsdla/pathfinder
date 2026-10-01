@@ -551,9 +551,11 @@ Daemon.run_signal_turn ── 신호마다 rules.decide 를 먼저(절대 안 �
 반영된다; 심볼릭 링크, frontmatter 규칙을 어기는 파일, `keychain.TOKEN_RE` 에 걸리는 파일은 읽지 않고,
 4,000자를 넘는 목록은 스킬을 하나도 싣지 않는다(설명에는 `(index too large: N skills not listed -
 shorten their descriptions)`). 이런 문제는 각각 `pathfinder.skills` 경고가 되고, `mcp/attach.py` 의
-핸들러가 그것을 `error` 이벤트로 바꾼다 - 바뀔 때 한 번. `tools.write_file` 은 `<홈>/skills/` 안의 경로를
-거부한다(inode 로 비교하므로 `..`, 심볼릭 링크, 대소문자 차이로 빠져나갈 수 없다): 스킬을 쓰는 것은 주인,
-시드 복사, 승인된 `edit_memory` 뿐이다. **`read_skill(name)`**(origin `user`
+핸들러가 그것을 원장의 `error` 이벤트로 바꾼다 - 문제가 처음 나타날 때 한 번; 주인은 MCP 서버의 경고처럼
+원장에서 그것을 본다, 화면 줄은 없다. `tools.write_file` 은 실제 부모 디렉터리가 `<홈>/skills/` 인 경로를,
+디렉터리를 하나라도 만들기 전에 거부한다(inode 로 비교하므로 `..`, 심볼릭 링크, 대소문자 차이로 빠져나갈 수
+없다): 스킬을 쓰는 것은 주인, 시드 복사, 승인된 `edit_memory` 뿐이다. `read_file`/`write_file` 의 경로는
+게이트 전에 심볼릭 링크를 따라 풀리므로, 승인 줄에는 링크 이름이 아니라 실제로 닿는 파일이 보인다. **`read_skill(name)`**(origin `user`
 와 `job`, 읽기 전용, 게이트 없음)은 목록을 자기 설명에 싣는다 - 요청마다 만들고, 스킬이 바뀔 때까지 바이트가
 같다; 돌려주는 것은 `[Skill '<name>' - a procedure the owner approved; follow it. Secrets go
 through /secret, never the chat.]` 와 `tools.READ_CLIP` 에서 자른 본문이며, 읽을 때마다 다시 검사한다;

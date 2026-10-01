@@ -24,7 +24,7 @@ HEADER = ("[Skill '{name}' - a procedure the owner approved; follow it. "
           "Secrets go through /secret, never the chat.]")
 _log = logging.getLogger("pathfinder.skills")  # mcp/attach.py turns its warnings into `error` events
 _home: Path | None = None
-_warned: list = []  # the problems last warned about: once per change, not once per request
+_warned: list = []  # the problems at the last read: each is warned once, when it appears
 
 
 def bind(home) -> None:
@@ -74,10 +74,10 @@ def index(home) -> str:
     if len(text) > INDEX_MAX:
         problems.append(f"the skills index is {len(text)} characters, over {INDEX_MAX}: no skill is listed")
         text = f"(index too large: {len(lines)} skills not listed - shorten their descriptions)"
-    if problems != _warned:
-        _warned = problems
-        for problem in problems:
+    for problem in problems:
+        if problem not in _warned:
             _log.warning("%s", problem)
+    _warned = problems
     return text
 
 

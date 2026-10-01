@@ -53,7 +53,7 @@ daemon.Daemon ── one lane (queue + worker) per session; lane items: say | re
 | `<home>/RULES.md` | the speak/silence/defer/ask_model rules, one person can read | created from `pathfinder/prompts/RULES.md` on first start; edited by hand, or by an approved `edit_memory` row; either way reloads without a restart | rewritten from the shipped default on next start |
 | `<home>/USER.md` | `USER.xxx` lists RULES.md conditions read, plus a free body (resident context) | created empty on first start; filled by approved `edit_memory` rows (or a user-turn grant's auto-apply, D28) | an empty frontmatter - memory starts from zero |
 | `<home>/wiki/*.md` | wiki pages, one topic per file | `memory.Manager.apply` (`edit_memory`, applies at once) | the knowledge is gone - files are the truth |
-| `<home>/skills/<name>.md` (0600, directory 0700) | skills: procedures the owner approved, frontmatter `name`/`description` and a body (D58, D61) | the owner by hand; `skills.bind` at daemon start copies each shipped seed (`pathfinder/skills/*.md`) whose file is missing, never over an existing one | a deleted seed comes back at the next start; any other skill is gone |
+| `<home>/skills/<name>.md` (0600, directory 0700) | skills: procedures the owner approved, frontmatter `name`/`description` and a body (D58, D61) | the owner by hand; `skills.bind` at daemon start copies each shipped seed (`pathfinder/skills/*.md`) whose file is missing, never over an existing one or through a symlink; `write_file` refuses it | a deleted seed comes back at the next start; any other skill is gone |
 | `~/.claude.json` (the user's, not `<home>`) | Claude Code's user-scope `mcpServers` (D33) - one entry per approved install, secrets as `${VAR}` references | `installer.Installer` only, atomically (the resolved target of a symlink, in its own mode), after a byte copy to `~/.claude.json.pathfinder-<ts>` | Claude Code's own concern; the installer restores from its backup on rollback and uninstall |
 | `~/Library/LaunchAgents/pathfinder.daemon.plist` | the launchd agent: the running interpreter `-m pathfinder daemon`, a literal `PATH`, `PATHFINDER_HOME` when set, `KeepAlive`, log to `<home>/daemon.log`, `WorkingDirectory` = the package's parent | `init` (plistlib), after a yes | `pathfinder service start` fails until `init` is run again |
 | `<home>/daemon.log` | the daemon's stderr under launchd | launchd | nothing |
@@ -566,9 +566,14 @@ once in `Daemon.__init__` beside `memory.bind`, writes every shipped `pathfinder
 data) whose home file is missing, as `rules.load` writes `RULES.md`; an existing file is never
 touched, so an edited skill stays the owner's and a fix to a shipped one does not reach a home that
 has it (D61). **The index**: `skills.index(home)` is `- <name>: <description>` per skill, sorted
-by name, never cut, recomputed when the directory's mtime moves; a file that fails the frontmatter
-rules or holds a `keychain.TOKEN_RE` match is not loaded, and an index over 4,000 characters loads
-no skill - each with a warning in `<home>/daemon.log`. **`read_skill(name)`** (origins `user` and
+by name, never cut, read on every request (about a millisecond for 50 skills), so an edit in place
+counts at once; a symlink, a file that fails the frontmatter rules or one holding a
+`keychain.TOKEN_RE` match is not loaded, and an index over 4,000 characters lists no skill (the
+description says `(index too large: N skills not listed - shorten their descriptions)`). Each such
+problem is a `pathfinder.skills` warning, which `mcp/attach.py`'s handler turns into an `error`
+event, once per change. `tools.write_file` refuses a path in `<home>/skills/` (compared by inode,
+so `..`, a symlink or another letter case does not get past): a skill is written only by the owner,
+the seed copy or an approved `edit_memory`. **`read_skill(name)`** (origins `user` and
 `job`, read-only, no gate) carries the index in its own description, built per request and
 byte-stable until a skill changes; it returns `[Skill '<name>' - a procedure the owner approved;
 follow it. Secrets go through /secret, never the chat.]` and the body cut at `tools.READ_CLIP`,

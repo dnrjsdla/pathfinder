@@ -52,7 +52,7 @@ daemon.Daemon ── 세션마다 lane 하나 (큐 + 워커); 큐 항목: say | 
 | `<홈>/RULES.md` | speak/silence/defer/ask_model 규칙, 사람이 읽을 수 있는 한 장 | 첫 시작에 `pathfinder/prompts/RULES.md` 에서 만들어짐; 손으로 고치거나 승인된 `edit_memory` 줄로; 어느 쪽이든 재시작 없이 다시 읽힘 | 다음 시작에 기본값으로 다시 씀 |
 | `<홈>/USER.md` | RULES.md 의 `USER.xxx` 조건이 읽는 목록에 자유 본문(상주 문맥)이 더해짐 | 첫 시작에 빈 채로 만들어짐; 승인된 `edit_memory` 줄이 채움(또는 사용자 턴 grant 의 자동 적용, D28) | 빈 앞머리 - 기억이 처음부터 다시 시작 |
 | `<홈>/wiki/*.md` | wiki 페이지, 파일 하나에 주제 하나 | `memory.Manager.apply`(`edit_memory`, 그 자리에서 적용) | 그 지식이 사라짐 - 파일이 진실이다 |
-| `<홈>/skills/<name>.md`(0600, 디렉터리 0700) | 스킬: 주인이 승인한 절차, frontmatter `name`/`description` 과 본문(D58, D61) | 주인이 손으로; 데몬 시작 때 `skills.bind` 가 파일이 없는 출하 시드(`pathfinder/skills/*.md`)를 하나씩 복사하고, 있는 파일 위엔 절대 쓰지 않는다 | 지운 시드는 다음 시작 때 돌아온다; 다른 스킬은 사라진다 |
+| `<홈>/skills/<name>.md`(0600, 디렉터리 0700) | 스킬: 주인이 승인한 절차, frontmatter `name`/`description` 과 본문(D58, D61) | 주인이 손으로; 데몬 시작 때 `skills.bind` 가 파일이 없는 출하 시드(`pathfinder/skills/*.md`)를 하나씩 복사하고, 있는 파일 위에도 심볼릭 링크를 거쳐서도 절대 쓰지 않는다; `write_file` 은 거부한다 | 지운 시드는 다음 시작 때 돌아온다; 다른 스킬은 사라진다 |
 | `~/.claude.json`(사용자의 것, `<홈>` 아님) | Claude Code 의 user scope `mcpServers`(D33) - 승인된 설치마다 항목 하나, 비밀은 `${VAR}` 참조 | `installer.Installer` 만, 원자적으로, `~/.claude.json.pathfinder-<ts>` 로 바이트 복사한 뒤 | Claude Code 의 몫; 설치기는 롤백·제거 때 백업에서 되돌린다 |
 | `~/Library/LaunchAgents/pathfinder.daemon.plist` | launchd 에이전트: 지금 인터프리터로 `-m pathfinder daemon`, 리터럴 `PATH`, 설정돼 있으면 `PATHFINDER_HOME`, `KeepAlive`, 로그는 `<home>/daemon.log`, `WorkingDirectory` = 패키지의 부모 | `init`(plistlib), 예라고 한 뒤 | `init` 을 다시 돌리기 전까지 `pathfinder service start` 가 실패 |
 | `<home>/daemon.log` | launchd 아래 데몬의 stderr | launchd | 없음 |
@@ -547,9 +547,13 @@ Daemon.run_signal_turn ── 신호마다 rules.decide 를 먼저(절대 안 �
 `skills.bind(home)` 이, 홈에 파일이 없는 출하본 `pathfinder/skills/*.md`(패키지 데이터)를 `rules.load` 가
 `RULES.md` 를 쓰듯 써 둔다; 있는 파일은 절대 건드리지 않으므로, 고친 스킬은 주인의 것으로 남고 출하본의
 수정은 그 파일이 이미 있는 홈에 닿지 않는다(D61). **목록**: `skills.index(home)` 는 스킬마다
-`- <name>: <description>` 한 줄, 이름순, 자르지 않음, 디렉터리 mtime 이 움직이면 다시 만든다;
-frontmatter 규칙을 어기거나 `keychain.TOKEN_RE` 에 걸리는 파일은 읽지 않고, 4,000자를 넘는 목록은
-스킬을 하나도 싣지 않는다 - 각각 `<홈>/daemon.log` 에 경고 한 줄. **`read_skill(name)`**(origin `user`
+`- <name>: <description>` 한 줄, 이름순, 자르지 않음, 요청마다 읽는다(스킬 50개에 1밀리초 안팎) - 그래서 제자리 수정도 바로
+반영된다; 심볼릭 링크, frontmatter 규칙을 어기는 파일, `keychain.TOKEN_RE` 에 걸리는 파일은 읽지 않고,
+4,000자를 넘는 목록은 스킬을 하나도 싣지 않는다(설명에는 `(index too large: N skills not listed -
+shorten their descriptions)`). 이런 문제는 각각 `pathfinder.skills` 경고가 되고, `mcp/attach.py` 의
+핸들러가 그것을 `error` 이벤트로 바꾼다 - 바뀔 때 한 번. `tools.write_file` 은 `<홈>/skills/` 안의 경로를
+거부한다(inode 로 비교하므로 `..`, 심볼릭 링크, 대소문자 차이로 빠져나갈 수 없다): 스킬을 쓰는 것은 주인,
+시드 복사, 승인된 `edit_memory` 뿐이다. **`read_skill(name)`**(origin `user`
 와 `job`, 읽기 전용, 게이트 없음)은 목록을 자기 설명에 싣는다 - 요청마다 만들고, 스킬이 바뀔 때까지 바이트가
 같다; 돌려주는 것은 `[Skill '<name>' - a procedure the owner approved; follow it. Secrets go
 through /secret, never the chat.]` 와 `tools.READ_CLIP` 에서 자른 본문이며, 읽을 때마다 다시 검사한다;

@@ -7,6 +7,7 @@ approved `edit_memory` from a user turn. The model sees each skill's name and de
 from __future__ import annotations
 
 import logging
+import os
 import re
 from pathlib import Path
 
@@ -21,27 +22,31 @@ DESCRIPTION_MAX = 160
 INDEX_MAX = 4000
 HEADER = ("[Skill '{name}' - a procedure the owner approved; follow it. "
           "Secrets go through /secret, never the chat.]")
-_log = logging.getLogger("pathfinder.skills")  # the daemon's stderr is <home>/daemon.log
+_log = logging.getLogger("pathfinder.skills")  # mcp/attach.py turns its warnings into `error` events
 _home: Path | None = None
-_cache: tuple = (None, "")  # ((directory, its mtime), the index it gave)
+_warned: list = []  # the problems last warned about: once per change, not once per request
 
 
 def bind(home) -> None:
     """Once at daemon start: every shipped seed whose file is missing is written into the home,
     as `rules.load` writes RULES.md; an existing file, edited or not, is never touched."""
-    global _home
-    _home = Path(home)
+    global _home, _warned
+    _home, _warned = Path(home), []
     folder = _home / "skills"
     folder.mkdir(mode=0o700, exist_ok=True)
     for seed in sorted(SEEDS.glob("*.md")):
-        path = folder / seed.name
-        if not path.exists():
-            path.touch(mode=0o600)  # born private, as everything under the home
-            path.write_text(seed.read_text(encoding="utf-8"), encoding="utf-8")
+        try:  # born private; O_EXCL: never through a symlink, a dangling one included
+            fd = os.open(folder / seed.name, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        except FileExistsError:
+            continue
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(seed.read_text(encoding="utf-8"))
 
 
 def _load(path: Path) -> tuple:
     """(description, body) of one skill file, or ValueError saying why it is not a skill."""
+    if path.is_symlink():
+        raise ValueError("it is a symlink; a skill is a file in the skills directory itself")
     text = path.read_text(encoding="utf-8")
     meta, body = _parse_frontmatter(text)
     description = meta.get("description")
@@ -55,29 +60,24 @@ def _load(path: Path) -> tuple:
 
 
 def index(home) -> str:
-    """Every skill as `- <name>: <description>`, sorted by name, never cut; redone when the
-    directory's mtime moves. A file that is not a skill, and an index over INDEX_MAX characters,
-    are refused here with a warning in the daemon's log."""
-    global _cache
-    folder = Path(home) / "skills"
-    try:
-        key = (folder, folder.stat().st_mtime_ns)
-    except FileNotFoundError:
-        return ""
-    if _cache[0] == key:
-        return _cache[1]
-    lines = []
-    for path in sorted(folder.glob("*.md"), key=lambda p: p.stem):
+    """Every skill as `- <name>: <description>`, sorted by name, never cut; read on every request,
+    so an edit in place counts at once (50 skills cost about a millisecond). A file that is not a
+    skill, and an index over INDEX_MAX characters, are refused with a warning to the owner."""
+    global _warned
+    lines, problems = [], []
+    for path in sorted((Path(home) / "skills").glob("*.md"), key=lambda p: p.stem):
         try:
             lines.append(f"- {path.stem}: {_load(path)[0]}")
         except (OSError, ValueError) as e:  # a hand-written file must not break every turn
-            _log.warning("skill %s is not loaded: %s", path.name, e)
+            problems.append(f"skill {path.name} is not loaded: {e}")
     text = "\n".join(lines)
     if len(text) > INDEX_MAX:
-        _log.warning("the skills index is %d characters, over %d: no skill is loaded until "
-                     "descriptions are shortened or skills removed", len(text), INDEX_MAX)
-        text = ""
-    _cache = (key, text)
+        problems.append(f"the skills index is {len(text)} characters, over {INDEX_MAX}: no skill is listed")
+        text = f"(index too large: {len(lines)} skills not listed - shorten their descriptions)"
+    if problems != _warned:
+        _warned = problems
+        for problem in problems:
+            _log.warning("%s", problem)
     return text
 
 
@@ -97,7 +97,7 @@ class _SkillSpec(ToolSpec):
 
     def schema(self) -> dict:
         out = super().schema()
-        out["function"]["description"] = f"{self.description}\n{index(_home) or '(none yet)'}"
+        out["function"]["description"] = f"{self.description}\n{(index(_home) if _home else '') or '(none yet)'}"
         return out
 
 

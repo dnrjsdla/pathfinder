@@ -1,4 +1,5 @@
 """Skills (D58, D61): the seed copy, the index and `read_skill`, on a temp home - no daemon."""
+import logging
 import tempfile
 import unittest
 from pathlib import Path
@@ -6,6 +7,8 @@ from unittest import mock
 
 from pathfinder import skills
 from pathfinder import tools as tools_mod
+from pathfinder.broker import Broker, Gate
+from pathfinder.mcp.attach import _McpLogHandler
 
 
 def _skill(name, description, body="Do the thing.\n"):
@@ -43,6 +46,11 @@ class SkillsTest(unittest.TestCase):
         with mock.patch.object(skills, "SEEDS", self.seeds):
             skills.bind(self.home)
         self.assertTrue((folder / "a.md").exists())
+        (folder / "b.md").unlink()
+        (folder / "b.md").symlink_to(self.home / "elsewhere.md")  # dangling: O_EXCL never writes through it
+        with mock.patch.object(skills, "SEEDS", self.seeds):
+            skills.bind(self.home)
+        self.assertFalse((self.home / "elsewhere.md").exists())
 
     def test_index_is_sorted_and_bounded(self):
         self.write("b-x", _skill("b-x", "Use for b-x."))
@@ -51,16 +59,58 @@ class SkillsTest(unittest.TestCase):
         self.write("long", _skill("long", "x" * 161))
         self.write("other", _skill("not-other", "Use for other."))
         self.write("Upper", _skill("Upper", "Use for Upper."))
+        (self.home / "linked.md").write_text(_skill("linked", "Use for linked."), encoding="utf-8")
+        (self.home / "skills" / "linked.md").symlink_to(self.home / "linked.md")
         with self.assertLogs("pathfinder.skills", "WARNING") as logs:
             text = skills.index(self.home)
         self.assertEqual(text, "- a: Use for a.\n- a-b: Use for a-b.\n- b-x: Use for b-x.")
-        self.assertEqual(len(logs.output), 3)
-        self.assertEqual(skills.index(self.home), text)  # cached: the same bytes, no new warning
+        self.assertEqual(len(logs.output), 4)
+        with self.assertNoLogs("pathfinder.skills", "WARNING"):  # the same problems: warned once, not per request
+            self.assertEqual(skills.index(self.home), text)
+        self.write("a", _skill("a", "Edited in place."))  # the directory's mtime does not move
+        self.assertTrue(skills.index(self.home).startswith("- a: Edited in place.\n"))
         for i in range(25):  # 25 lines of ~167 characters pass 4,000: the whole index is refused
             self.write(f"s{i:02d}", _skill(f"s{i:02d}", "y" * 160))
         with self.assertLogs("pathfinder.skills", "WARNING") as logs:
-            self.assertEqual(skills.index(self.home), "")
+            self.assertEqual(skills.index(self.home),
+                             "(index too large: 28 skills not listed - shorten their descriptions)")
         self.assertIn("over 4000", logs.output[-1])
+
+    def test_a_refused_file_reaches_the_owner_as_an_error_event(self):
+        events = []
+        handler = _McpLogHandler(lambda fn: fn(), lambda type, **f: events.append((type, f["message"])))
+        logging.getLogger("pathfinder.skills").addHandler(handler)
+        try:
+            self.write("bad", _skill("not-bad", "Use for bad."))
+            skills.index(self.home)  # not under assertLogs: it swaps the logger's handlers out
+        finally:
+            logging.getLogger("pathfinder.skills").removeHandler(handler)
+        self.assertEqual(events, [("error", "skill bad.md is not loaded: its name must equal the file's "
+                                            "stem (lowercase, digits, hyphens)")])
+
+    def test_schema_builds_before_bind(self):
+        with mock.patch.object(skills, "_home", None):  # bench/m10 copies the specs with no daemon
+            description = tools_mod.TOOLS["read_skill"].schema()["function"]["description"]
+        self.assertTrue(description.endswith("\n(none yet)"))
+
+    def test_write_file_cannot_write_a_skill(self):
+        spec = tools_mod.TOOLS["write_file"]
+        for origin, grants in (("user", {"write_file": "allow"}), ("signal", {}), ("job", {})):
+            for path in (self.home / "skills" / "x.md", self.home / "skills" / "new" / ".." / "y.md"):
+                args = {"path": str(path), "content": _skill("x", "Use for x.")}
+                broker = Broker({"write_file": spec}, origin, grants, control=None, emit=lambda *a: None)
+                if origin != "user":
+                    with self.assertRaises(Gate) as cm:  # policy asks first; the owner says yes
+                        broker.call("c1", "write_file", args)
+                    broker = Broker({"write_file": spec}, origin, grants, control=None, emit=lambda *a: None,
+                                    approved={"c1": ("write_file", cm.exception.arguments)})
+                out = broker.call("c1", "write_file", args)
+                self.assertFalse(out["ok"], (origin, path))
+                self.assertIn("a skill is written only by the owner", out["error"])
+        self.assertEqual(sorted(p.name for p in (self.home / "skills").glob("*.md")), [])
+        out = Broker({"write_file": spec}, "user", {"write_file": "allow"}, control=None, emit=lambda *a: None
+                     ).call("c2", "write_file", {"path": str(self.home / "notes.md"), "content": "ok"})
+        self.assertTrue(out["ok"])  # anywhere else it writes as before
 
     def test_a_skill_with_a_token_is_not_loaded(self):
         token = "gh" + "p_" + "A1b2C3d4E5" * 4

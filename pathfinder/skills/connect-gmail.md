@@ -17,9 +17,10 @@ time; three of them are on Google's pages. Never ask for the app password in the
      Verification, app passwords or IMAP itself; then see the last paragraph.
 2. **2-Step Verification on**, if it is not.
 3. **Create an app password** named PATHFINDER, and keep its 16 characters on screen.
-4. **Turn the mail sense on.** `config set` replaces the whole `senses` object, so the line keeps
-   the senses already on and adds mail (`pathfinder init` prints the merged line):
-   `pathfinder config set senses '{<the senses already on>, "mail": {"host": "imap.gmail.com", "user": "<your address>"}}'`
+4. **Turn the mail sense on.** `config set` replaces the whole `senses` object, so use the
+   `pathfinder config set senses '...'` line that `pathfinder init` prints for mail: it already
+   carries the senses that are on. In it, set `"host"` to `imap.gmail.com` and `"user"` to
+   `<your address>`, then run it.
 5. **`/secret mail`** in the screen (`pathfinder secret mail` in a shell), then paste the app
    password. The input is masked and goes to the Keychain; it never passes through the chat. If
    the screen asks for the app password by itself, that prompt is the same intake.

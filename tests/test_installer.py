@@ -81,7 +81,7 @@ class FakeAttach:
     have left behind - "ok" registers `mcp__<id>__echo` into the shared `tools.TOOLS` (B5's load
     check reads that same registry `install()` does); "dead" registers nothing (a server that
     dies before listing a tool); any other string is the reason `servers.disabled()` reports for
-    `id` (B6's secret-missing case)."""
+    `id` (a required secret missing at load)."""
     def __init__(self):
         self.servers = FakeServers()
         self.reloaded = []
@@ -467,18 +467,20 @@ class InstallerTest(unittest.TestCase):
         failed = [e for e in self.ledger.read() if e["type"] == "install_failed"]
         self.assertEqual(failed[-1]["step"], "load")
 
-    def test_load_step_ok_when_only_problem_is_a_listed_secret(self):
-        """B6: a server held `disabled` only because of a secret the row already listed under
-        `needs` is still `install_done`, not rolled back."""
-        env = [{"name": "TOKEN", "secret": True, "required": False}]
-        with mock.patch("pathfinder.installer.keychain.secret", return_value=None):
+    def test_load_step_fails_when_a_required_secret_vanished(self):
+        """U34: a missing optional secret never disables a server, so `secret missing` at load is a
+        required one gone from the Keychain since the check - rolled back, not `install_done`."""
+        env = [{"name": "TOKEN", "secret": True, "required": True}]
+        with mock.patch("pathfinder.installer.keychain.secret", return_value="tok"):
             cand = self._check(_candidate(env=env), run=_fake_run())
         id = self.installer._server_id(cand["name"])
         self.attach.load_result = "secret missing: TOKEN"
         self._install(cand)
-        self.assertIn(id, config.load(self.home)["mcp_servers"])
-        self.assertEqual(self.state.install(id)["state"], "installed")
-        self.assertIn("install_done", [e["type"] for e in self.ledger.read()])
+        self.assertNotIn(id, config.load(self.home)["mcp_servers"])
+        self.assertEqual(self.state.install(id)["state"], "failed")
+        self.assertNotIn("install_done", [e["type"] for e in self.ledger.read()])
+        failed = [e for e in self.ledger.read() if e["type"] == "install_failed"]
+        self.assertEqual((failed[-1]["step"], failed[-1]["reason"]), ("load", "disabled: secret missing: TOKEN"))
 
     def test_uninstall_is_the_reverse(self):
         """Two installs; uninstalling one leaves the other exactly as installed (B1: uninstall
@@ -528,7 +530,6 @@ class InstallerTest(unittest.TestCase):
         with mock.patch("pathfinder.installer.keychain.secret", return_value=None):
             cand = self._check(_candidate(env=env), run=_fake_run())
         self.assertEqual(cand["install"]["needs"], ["TOKEN"])
-        self.attach.load_result = "secret missing: TOKEN"
         id = cand["install"]["id"]
         self._install(cand)
         self.assertEqual(config.load(self.home)["mcp_servers"][id]["env"], {"TOKEN": "keychain?:TOKEN"})  # optional (U34)

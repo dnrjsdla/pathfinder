@@ -432,7 +432,7 @@ class Installer:
                 except Exception as e:
                     outcome["ok"], outcome["step"], outcome["reason"] = False, "load", f"{type(e).__name__}: {e}"
                 else:
-                    outcome["ok"], outcome["step"], outcome["reason"] = self._check_loaded(id, candidate)
+                    outcome["ok"], outcome["step"], outcome["reason"] = self._check_loaded(id)
         if outcome["ok"]:
             tools = candidate["verification"]["sandbox_trial"]["tools"]
             names = [t["name"] for t in tools]
@@ -453,18 +453,15 @@ class Installer:
                     summary=f"Could not install {candidate['name']}: {outcome['reason']}",
                     fields={"id": id, "step": outcome["step"]}, trust="self", exempt=True))
 
-    def _check_loaded(self, id: str, candidate: dict) -> tuple:
-        """B5/B6: the load step can fail - `attach.reload` not raising is not enough, a server
-        that dies (or never listed a tool) must not become `install_done`. The one exception is
-        a server whose only problem is a secret the proposal already listed under `needs`
-        (Mark.5's rule): that one stays `disabled` until the user adds it, step `load` records ok."""
+    def _check_loaded(self, id: str) -> tuple:
+        """B5: the load step can fail - `attach.reload` not raising is not enough, a server that
+        dies (or never listed a tool) must not become `install_done`. A missing optional secret
+        does not disable a server (U34), so a `secret missing` here is a required one that left
+        the Keychain after the check: that fails too."""
         if any(name.startswith(f"mcp__{id}__") for name in _TOOLS):
             self.record("install_step", id=id, step="load", ok=True, detail="")
             return True, "", ""
         reason = dict(self.attach.servers.disabled()).get(id, "")
-        if reason.startswith("secret missing") and candidate["install"].get("needs"):
-            self.record("install_step", id=id, step="load", ok=True, detail=f"disabled: {reason}")
-            return True, "", ""
         detail = f"disabled: {reason}" if reason else "no tools registered"
         self.record("install_step", id=id, step="load", ok=False, detail=detail)
         return False, "load", detail

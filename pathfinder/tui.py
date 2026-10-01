@@ -263,7 +263,7 @@ class _Session:
         elif cmd in ("approvals", "jobs"):
             self._cli_list(cmd)
         elif cmd == "secret":
-            entry, text = tui_secret.entry(rest)
+            entry, text = tui_secret.entry(rest, self.home)
             if entry:
                 self._masked(entry)
             self.show(text)

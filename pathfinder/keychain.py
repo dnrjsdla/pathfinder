@@ -81,11 +81,11 @@ def valid_target(id: str, name: str) -> bool:
     return bool(_MCP_SERVER_ID.match(id)) and name.isidentifier() and name.isascii()
 
 
-def delete(service: str, account: str) -> bool:
+def delete(service: str, account: str, run=None) -> bool:
     """Remove the item; True when it is gone (exit 44: it was never there)."""
     try:
         argv = ["security", "delete-generic-password", "-s", service, "-a", account]
-        return subprocess.run(argv, capture_output=True, timeout=5).returncode in (0, 44)
+        return (run or subprocess.run)(argv, capture_output=True, timeout=5).returncode in (0, 44)
     except (OSError, subprocess.SubprocessError):
         return False
 
@@ -119,10 +119,7 @@ def sweep(index: Path, now: float) -> dict:
     whose item is gone (D53, D66); returns the index left, handle -> creation time. A delete the
     Keychain refuses stays for next time. An index that is missing or unusable reads as empty, and
     an item whose handle it lost stays unknown (no item is ever found without its handle)."""
-    try:
-        held = {str(h): float(t) for h, t in json.loads(index.read_text())["pasted"].items()}
-    except Exception:  # missing, garbage, or the wrong shape: never a reason for an append to fail
-        held = {}
+    held = _held(index)
     live = {h: t for h, t in held.items()  # expired: deleted; still young: asked whether it is there
             if not (delete(PASTED, h) if now - t >= 24 * 3600 else _gone(h))}
     if live != held:
@@ -131,6 +128,29 @@ def sweep(index: Path, now: float) -> dict:
         except OSError:  # the deletes are done; the next sweep repeats them harmlessly
             pass
     return live
+
+
+def _held(index: Path) -> dict:
+    """The index, handle -> creation time."""
+    try:
+        return {str(h): float(t) for h, t in json.loads(index.read_text())["pasted"].items()}
+    except Exception:  # missing, garbage, or the wrong shape: never a reason for an append to fail
+        return {}
+
+
+def bind(home, handle: str, service: str, account: str, run=None) -> None:
+    """`secret <id> NAME --from <handle>` (D53): the pasted item moves to (service, account) - read,
+    stored there, then deleted and its handle dropped from the index. A handle the index does not
+    hold, or one 24 hours old, is expired (a seq never recurs, D66); the sweep deletes its item."""
+    index = Path(home) / "pasted.json"  # the ledger's `pasted`
+    held = _held(index)
+    value = secret(PASTED, handle, run) if time.time() - held.get(handle, 0) < 24 * 3600 else None
+    if value is None:
+        raise LookupError("expired - enter it again with /secret")
+    store(service, account, value, run)
+    if delete(PASTED, handle, run):  # a refused delete keeps the handle, so the sweep still finds the item
+        held.pop(handle)
+        _save(index, held)
 
 
 def _save(index: Path, held: dict) -> None:

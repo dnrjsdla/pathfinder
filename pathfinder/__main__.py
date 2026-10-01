@@ -284,19 +284,22 @@ def search_cmd(home, text):
     return 0
 
 
-def secret_cmd(id, name):
-    """`pathfinder secret ID NAME`: the value read hidden and put straight into the Keychain -
-    no socket, no daemon, no ledger."""
+def secret_cmd(home, id, name, handle=None):
+    """`pathfinder secret ID NAME [--from pasted-<seq>]`: the value read hidden, or a pasted item
+    moved (D53), put straight into the Keychain - no socket, no daemon, no ledger."""
     if not keychain.valid_target(id, name):
         print("pathfinder: secret ID NAME takes a server id and an env variable name", file=sys.stderr)
         return 2
     try:
-        value = getpass.getpass(f"{name} for {id} (hidden; stored in the Keychain): ")
+        value = None if handle else getpass.getpass(f"{name} for {id} (hidden; stored in the Keychain): ")
     except (EOFError, KeyboardInterrupt):
         print("\nnothing stored", file=sys.stderr)
         return 1
     try:
-        keychain.store(f"pathfinder-mcp-{id}", name, value)
+        if handle:
+            keychain.bind(home, handle, f"pathfinder-mcp-{id}", name)
+        else:
+            keychain.store(f"pathfinder-mcp-{id}", name, value)
     except Exception as e:  # store's messages never carry the value
         print(f"pathfinder: {e}", file=sys.stderr)
         return 1
@@ -460,8 +463,8 @@ def main(argv=None):
         return uninstall_cmd(home, args[1])
     if len(args) >= 2 and args[0] == "search":
         return search_cmd(home, " ".join(args[1:]))
-    if len(args) == 3 and args[0] == "secret":
-        return secret_cmd(args[1], args[2])
+    if len(args) in (3, 5) and args[0] == "secret" and args[3:4] in ([], ["--from"]):
+        return secret_cmd(home, args[1], args[2], *args[4:])
     if args == ["jobs"]:
         return jobs_list(home)
     if len(args) == 3 and args[0] == "job" and args[1] == "stop":

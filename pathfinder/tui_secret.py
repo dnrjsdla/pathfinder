@@ -21,14 +21,23 @@ STRINGS = {
                      "`pathfinder service restart`",
     "secret_cancelled": "저장 안 함 · nothing stored",
     "secret_one_line": "저장 안 함 · nothing stored: a secret is one line - enter only the value",
+    "secret_failed": "저장 안 함 · nothing stored: {message}",
 }
 
 
-def entry(rest):
-    """`/secret`'s arguments: the Entry and the line to show, or None and the usage line."""
+def entry(rest, home):
+    """`/secret`'s arguments: `ID NAME` opens the masked entry - the Entry and the line to show;
+    `ID NAME --from pasted-<seq>` binds a pasted item at once (D53) - None and how it went; anything
+    else - None and the usage line."""
     args = rest.split()
-    if len(args) == 2 and keychain.valid_target(*args):
-        return Entry(*args), STRINGS["secret_ask"].format(id=args[0], name=args[1])
+    if len(args) in (2, 4) and args[2:3] in ([], ["--from"]) and keychain.valid_target(*args[:2]):
+        if len(args) == 2:
+            return Entry(*args), STRINGS["secret_ask"].format(id=args[0], name=args[1])
+        try:
+            keychain.bind(home, args[3], f"pathfinder-mcp-{args[0]}", args[1])
+            return None, STRINGS["secret_stored"].format(id=args[0], name=args[1])
+        except Exception as e:  # bind's messages never carry the value
+            return None, STRINGS["secret_failed"].format(message=e)
     return None, STRINGS["secret_usage"]
 
 

@@ -3,9 +3,10 @@
 **Where this stands (2026-09-30).**
 - **Code:** branch `partition-8` (worktree `.claude/worktrees/partition-8`). Merged, each after
   review: U0, U1, U2, U5 (U5b), U9, U13, and on 2026-09-30 U21, U22, U24, U3, U4, U23, U30, U6,
-  U12, U25, U31, U7a, U7b, U8. `daemon.py` 762/780, `loop.py` 293/520, `installer.py` 655/700.
-- **Next:** U32 (D63) and U33 (the remaining raw exits), then U10, U11, U14a, U14b, U15a, U15b,
-  U16, U26, U27-U29, U17, U18.
+  U12, U25, U31, U7a, U7b, U8, U32, U33, U10, U14a, U11, U14b. `daemon.py` 766/780, `tui.py`
+  392/400, `installer.py` 664/700, `loop.py` 295/520.
+- **Next:** U15a (in review; deploy gate), U34 (waits for the owner), U15b, U16, U26, U27-U29,
+  U17, U18. `tui.py` has 8 lines left for U15b, U16 and U26 (about +20 planned).
 
 The unit table at the end is where the next session starts. Every row carries its state, its
 files, its size, what it waits for, and its tests.
@@ -845,7 +846,7 @@ call errors.
 - **5b.** Job lines reach a moved screen, through move 2. **U4, not started.**
 - **5c.** One EventKit store, built and reset under a lock. **Done (U13).**
 - **5d.** `tui.render` clips `gate` and `job.gate` args at 300 characters with an
-  `...(clipped; /approvals)` tail. **U11, not started.**
+  `...(clipped; /approvals)` tail. **Done (U11).**
 - **5e.** A forced pass that succeeds clears the retry wait. **Done (U9).**
 - **5f.** `keychain.secret` misreads a non-ASCII value. **U10, not started.**
   - `find-generic-password -w` prints it as bare hex (a throwaway `비밀abc` came back as
@@ -1546,10 +1547,10 @@ parallel. **Deploy gate: U15a, U21, U31 and U33.**
 | U7b | **done, merged** | The `retract` line | `tui.py` (`render`), `__main__.py` (`_stream`) | +4 | U7a | `test_retract_rendered` |
 | U8 | **done, merged** | The adopted prompt | `prompts/system.txt` | — | before U18 | `test_second_look_matches_the_bench` (in U17) |
 | U10 | **done, merged** | Intake, D40, 5f | `keychain.py` (`store`, fixed `secret`), `installer.py` (`check` step 4), `__main__.py` (`secret`) | +36 | U3, U7b | `test_store_escapes_backslash_then_quote`, `test_missing_required_secret_stops_before_the_trial` |
-| U11 | not started | `/secret`, 5d | `tui.py` | +22 | U7b, U10 | `test_slash_secret_masks_and_never_touches_the_socket` |
+| U11 | **done, merged** | `/secret`, 5d (bracketed paste, a 50 ms drain) | `tui.py` | +22 | U7b, U10 | `test_slash_secret_masks_and_never_touches_the_socket` |
 | U12 | **done, merged** | 5a | `state.py`, `deliver.py`, `daemon.py` line 573 | ~0 | U6 | `test_presence_is_the_newest_row_across_sessions` |
 | U14a | **done, merged** | Born private | `ledger.py`, `state.py` | +1 | U12, U24 | `test_partition_and_lock_born_0600_dir_0700` |
-| U14b | not started | Existing files private | `config.py` (`make_private`), `__main__.py` (daemon branch), `init.py` (literals) | +11 | U10 | `test_make_private_drops_group_other_keeps_owner_x_skips_symlinks_and_workspace` |
+| U14b | **done, merged** | Existing files private | `config.py` (`make_private`), `__main__.py` (daemon branch), `init.py` (literals) | +11 | U10 | `test_make_private_drops_group_other_keeps_owner_x_skips_symlinks_and_workspace` |
 | U15a | not started | D53's backstop: the vault at the ledger door (**deploy gate**) | `ledger.py`, `keychain.py` (`TOKEN_RE`, vault, sweep, index), `scripts/scan_personal.py` | +45 | U14a, U10 | `test_paste_vaulted_and_handle_returned`, `test_pasted_token_reaches_the_record_as_a_handle` |
 | U15b | not started | Binding a handle | `__main__.py` (`secret --from`), `tui.py` (`/secret --from`; the masked prompt lists live handles) | +7 | U15a, U11, U14b | `test_bind_moves_and_deletes_the_pasted_item` |
 | U16 | not started | D53's main path: the harness asks | `daemon.py` (`record` hook, `secret` handler), `tui.py` (`secret.ask`), `installer.py` (event fields) | daemon +9, tui +12, installer +1 | U15b | `test_secret_value_never_reaches_ledger_or_state` |

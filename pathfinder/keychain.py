@@ -25,6 +25,7 @@ TOKEN_RE = re.compile(
     r"|xox[abprs]-[A-Za-z0-9-]{10,}|xapp-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|ntn_[A-Za-z0-9]{20,}"
     r"|secret_[A-Za-z0-9]{40,}|[sr]k_(?:live|test)_[A-Za-z0-9]{20,}|\d{8,10}:[A-Za-z0-9_-]{35}(?![A-Za-z0-9_-]))")
 PASTED = "pathfinder-pasted"  # a pasted token's service; its account is its handle, pasted-<seq>[-i]
+INDEX = "pasted.json"  # under the home: the ledger's `pasted`, handles and times only
 
 
 def secret(service: str, account: str, run=None) -> str | None:
@@ -74,6 +75,43 @@ def store(service: str, account: str, value: str, run=None) -> None:
         raise RuntimeError(f"the Keychain gave back a different value for {account} in {service}")
 
 
+def target(home, id: str, name: str | None = None) -> tuple:
+    """`secret`'s one resolver, (service, account): `ID NAME` is an MCP server's variable,
+    `pathfinder-mcp-<id>`/NAME; `mail` alone is the mail sense's password, its `keychain_service`/
+    `user` (U26) - arity tells the two apart, so a server whose id is `mail` is not shadowed."""
+    if id == "mail" and name is None:
+        from .config import load
+        from .senses.mail import OPTIONS
+        mail = (load(home).get("senses") or {}).get("mail")
+        if not mail or not mail.get("user"):
+            raise LookupError("turn the mail sense on first")
+        return {**OPTIONS, **mail}["keychain_service"], mail["user"]
+    if name is None or not valid_target(id, name):
+        raise ValueError("secret ID NAME takes a server id and an env variable name "
+                         "(then --from pasted-<seq> binds a pasted token), or secret mail the mail password")
+    if TOKEN_RE.search(name):  # the value typed where the name goes: never echoed or stored as a name
+        raise ValueError("that looks like a token, not a name")
+    return f"pathfinder-mcp-{id}", name
+
+
+def missing(home, id: str, name: str | None = None) -> bool:
+    """True when the target resolves and its item is not in the Keychain - the daemon's cue to ask."""
+    try:
+        return secret(*target(home, id, name)) is None
+    except (ValueError, LookupError):
+        return False
+
+
+def take(home, service: str, account: str, value: str, run=None) -> None:
+    """A masked input's value (D53): the secret itself, or `--from pasted-<seq>[-i]` to bind a pasted
+    item instead - the masked prompt lists the live handles."""
+    flag, _, handle = value.strip().partition(" ")
+    if flag == "--from":
+        bind(home, handle.strip(), service, account, run)
+    else:
+        store(service, account, value, run)
+
+
 def valid_target(id: str, name: str) -> bool:
     """`secret ID NAME`'s one check, for the shell and the screen alike: ID is a server id, NAME an
     env variable name."""
@@ -81,11 +119,11 @@ def valid_target(id: str, name: str) -> bool:
     return bool(_MCP_SERVER_ID.match(id)) and name.isidentifier() and name.isascii()
 
 
-def delete(service: str, account: str) -> bool:
+def delete(service: str, account: str, run=None) -> bool:
     """Remove the item; True when it is gone (exit 44: it was never there)."""
     try:
         argv = ["security", "delete-generic-password", "-s", service, "-a", account]
-        return subprocess.run(argv, capture_output=True, timeout=5).returncode in (0, 44)
+        return (run or subprocess.run)(argv, capture_output=True, timeout=5).returncode in (0, 44)
     except (OSError, subprocess.SubprocessError):
         return False
 
@@ -119,10 +157,7 @@ def sweep(index: Path, now: float) -> dict:
     whose item is gone (D53, D66); returns the index left, handle -> creation time. A delete the
     Keychain refuses stays for next time. An index that is missing or unusable reads as empty, and
     an item whose handle it lost stays unknown (no item is ever found without its handle)."""
-    try:
-        held = {str(h): float(t) for h, t in json.loads(index.read_text())["pasted"].items()}
-    except Exception:  # missing, garbage, or the wrong shape: never a reason for an append to fail
-        held = {}
+    held = _held(index)
     live = {h: t for h, t in held.items()  # expired: deleted; still young: asked whether it is there
             if not (delete(PASTED, h) if now - t >= 24 * 3600 else _gone(h))}
     if live != held:
@@ -133,12 +168,51 @@ def sweep(index: Path, now: float) -> dict:
     return live
 
 
+def _held(index: Path) -> dict:
+    """The index, handle -> creation time."""
+    try:
+        return {str(h): float(t) for h, t in json.loads(index.read_text())["pasted"].items()}
+    except Exception:  # missing, garbage, or the wrong shape: never a reason for an append to fail
+        return {}
+
+
+def bind(home, handle: str, service: str, account: str, run=None) -> None:
+    """`secret <id> NAME --from <handle>` (D53): the pasted item moves to (service, account) - read,
+    stored there, then deleted and its handle dropped from the index. A handle the index does not
+    hold, or one 24 hours old, is expired (a seq never recurs, D66); the sweep deletes its item."""
+    index = Path(home) / INDEX
+    held = _held(index)
+    value = secret(PASTED, handle, run) if time.time() - held.get(handle, 0) < 24 * 3600 else None
+    if value is None:
+        raise LookupError("expired - enter it again with /secret")
+    store(service, account, value, run)
+    if delete(PASTED, handle, run):  # a refused delete keeps the handle, so the sweep still finds the item
+        from .ledger import locked  # lazy: the ledger imports this module
+        with locked(home):  # `vault` writes the index under it: a paste meanwhile keeps its handle
+            held = _held(index)
+            held.pop(handle, None)
+            _save(index, held)
+
+
+def live(home) -> list:
+    """The handles a masked prompt offers for `--from`, oldest first: younger than 24 hours, by the
+    index alone - no Keychain call."""
+    held = _held(Path(home) / INDEX)
+    return sorted((h for h, t in held.items() if time.time() - t < 24 * 3600), key=held.get)
+
+
 def _save(index: Path, held: dict) -> None:
     """Handles and times, never values; replaced whole, so a crash never leaves half an index."""
     tmp = index.with_name(index.name + ".tmp")
     with open(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as f:
         json.dump({"pasted": held}, f)
     os.replace(tmp, index)
+
+
+def handles(event) -> list:
+    """The handles `vault` gave this event's own tokens - named by its seq (D66), so a handle the
+    owner merely typed again is not one - for the owner's notice."""
+    return re.findall(rf"\[secret:(pasted-{event['seq']}(?:-\d+)?)\]", str(event.get("text", "")))
 
 
 def vault(event, index: Path):

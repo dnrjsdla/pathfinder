@@ -354,6 +354,24 @@ class InstallerTest(unittest.TestCase):
         self.assertTrue(vf["reason"].startswith("needs API_KEY, WORKSPACE - store each "))
         self.assertIn(f"/secret {sid} NAME", vf["reason"])
 
+    def test_secrets_stop_records_the_server_id_it_asks_under(self):
+        """Review: the ask stores under the check's own id, carried in `install_failed`, never one
+        the daemon computes again later (an install landing between could change it)."""
+        env = [{"name": "API_KEY", "secret": True, "required": True}]
+        with mock.patch("pathfinder.installer.keychain.secret", return_value=None):
+            cand = self._check(_candidate(env=env), run=_fake_run())
+        self.installer.propose(cand, "user")
+        [event] = [e for e in self.ledger.read() if e["type"] == "install_failed"]
+        self.assertEqual(event["names"], ["API_KEY"])
+        self.assertTrue(event["server_id"])
+        self.assertIn(f"/secret {event['server_id']} API_KEY", event["reason"])
+
+    def test_close_ends_a_trial_in_flight(self):
+        """Round 2: a stop ends the stdio trial's process, so the exit does not wait out its timeout."""
+        self.installer._trialing = mock.Mock()
+        self.installer.close()
+        self.installer._trialing.close.assert_called_once_with()
+
     def test_missing_optional_secret_still_trials(self):
         env = [{"name": "TOKEN", "secret": True, "required": False}]
         with mock.patch("pathfinder.installer.keychain.secret", return_value=None), \

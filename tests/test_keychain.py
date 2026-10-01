@@ -1,6 +1,9 @@
 import contextlib
 import importlib.util
 import io
+import json
+import shlex
+import threading
 import tempfile
 import time
 import unittest
@@ -135,6 +138,166 @@ class SecretCliTest(unittest.TestCase):
                 self.assertEqual(self._main("rv11test", "TOKEN", answer=answer), 1)
                 self.assertNotIn("Traceback", self.err.getvalue())
             run.assert_not_called()
+
+
+class BindTest(unittest.TestCase):
+    """U15b: a pasted item moves to an MCP server's variable. `security` is the injected `run`
+    over a dict; the module's own `subprocess.run` is a mock that must never be called."""
+    TOKEN = "ntn_" + "q" * 40  # built by concatenation, so the scanner never flags this file
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.home = Path(self._tmp.name)
+        self.items = {(keychain.PASTED, "pasted-7"): self.TOKEN}
+        real = mock.patch("pathfinder.keychain.subprocess.run")
+        self.real = real.start()
+        self.addCleanup(real.stop)
+
+    def _index(self, **held):
+        (self.home / "pasted.json").write_text(json.dumps({"pasted": held}))
+
+    def _security(self, argv, input=None, **kw):
+        if argv[1] == "-i":  # add-generic-password -U -s "..." -a "..." -w "..."
+            cmd = shlex.split(input)
+            self.items[(cmd[cmd.index("-s") + 1], cmd[cmd.index("-a") + 1])] = cmd[cmd.index("-w") + 1]
+            return mock.Mock(returncode=0, stdout="", stderr="")
+        key = (argv[argv.index("-s") + 1], argv[argv.index("-a") + 1])
+        if key not in self.items:
+            return mock.Mock(returncode=44, stdout="", stderr="")
+        value = self.items.pop(key) if argv[1] == "delete-generic-password" else self.items[key]
+        return mock.Mock(returncode=0, stdout=value + "\n", stderr="")
+
+    def test_bind_moves_and_deletes_the_pasted_item(self):
+        self._index(**{"pasted-7": time.time() - 60, "pasted-9": time.time()})
+        keychain.bind(self.home, "pasted-7", "pathfinder-mcp-gh", "TOKEN", run=self._security)
+        self.assertEqual(self.items, {("pathfinder-mcp-gh", "TOKEN"): self.TOKEN})
+        self.assertEqual(sorted(json.loads((self.home / "pasted.json").read_text())["pasted"]), ["pasted-9"])
+        self.real.assert_not_called()
+
+    def test_bind_expired_handle_says_so(self):
+        self._index(**{"pasted-7": time.time() - 25 * 3600})
+        for handle in ("pasted-7", "pasted-8"):  # too old, and never held
+            with self.assertRaisesRegex(LookupError, "^expired - enter it again with /secret$"):
+                keychain.bind(self.home, handle, "pathfinder-mcp-gh", "TOKEN", run=self._security)
+        self.assertEqual(self.items, {(keychain.PASTED, "pasted-7"): self.TOKEN})  # the sweep's to delete
+        self.real.assert_not_called()
+
+    def test_take_binds_from_a_handle_or_stores_the_value(self):
+        """U16: a masked value `--from <handle>` binds the pasted item; any other value is stored."""
+        self._index(**{"pasted-7": time.time()})
+        keychain.take(self.home, "pathfinder-mcp-gh", "TOKEN", " --from pasted-7 ", run=self._security)
+        keychain.take(self.home, "pathfinder-mcp-gh", "OTHER", "pl41n-value", run=self._security)
+        self.assertEqual(self.items, {("pathfinder-mcp-gh", "TOKEN"): self.TOKEN, ("pathfinder-mcp-gh", "OTHER"): "pl41n-value"})
+        self.assertEqual(keychain.live(self.home), [])
+        self.real.assert_not_called()
+
+    def test_bind_keeps_a_handle_pasted_meanwhile(self):
+        """Review: bind rewrites the index under the ledger's lock and reads it again there, so a paste
+        vaulted while it talks to the Keychain keeps its handle."""
+        from pathfinder import ledger
+        self._index(**{"pasted-7": time.time()})
+        paused, go = threading.Event(), threading.Event()
+
+        def security(argv, input=None, **kw):
+            if argv[1] == "delete-generic-password":
+                paused.set()
+                go.wait(5)
+            return self._security(argv, input, **kw)
+        t = threading.Thread(target=keychain.bind, args=(self.home, "pasted-7", "pathfinder-mcp-gh", "TOKEN"),
+                             kwargs={"run": security})
+        t.start()
+        self.assertTrue(paused.wait(5))
+        index = self.home / "pasted.json"
+        with ledger.locked(self.home):  # what `vault` does under append's lock: read, add, save
+            held = keychain._held(index)
+            go.set()
+            time.sleep(0.2)  # bind, done with the Keychain, now waits for this lock
+            held["pasted-9"] = time.time()
+            keychain._save(index, held)
+        t.join(5)
+        self.assertEqual(sorted(json.loads(index.read_text())["pasted"]), ["pasted-9"])
+
+    def test_a_name_that_looks_like_a_token_is_refused(self):
+        from pathfinder import tui_secret
+        name = "ghp_" + "a1" * 18  # built by concatenation, so the scanner never flags this file
+        with self.assertRaisesRegex(ValueError, "looks like a token, not a name"):
+            keychain.target(self.home, "gh", name)
+        entry, text = tui_secret.entry(f"gh {name}", self.home, mock.Mock())
+        self.assertIsNone(entry)
+        self.assertIn("looks like a token", text)
+        self.assertNotIn(name, text)
+
+    def test_cli_binds_and_the_screen_sends_from_to_the_daemon(self):
+        """The CLI binds in its own process; the screen sends `--from` to the daemon, whose
+        `keychain.take` binds it (and proposes again an install waiting for it)."""
+        from pathfinder import tui_secret
+        from pathfinder.__main__ import main
+        send = mock.Mock()
+        with mock.patch("pathfinder.keychain.bind") as bind, \
+                mock.patch.dict("os.environ", {"PATHFINDER_HOME": str(self.home)}), \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(main(["secret", "gh", "TOKEN", "--from", "pasted-7"]), 0)
+            entry, text = tui_secret.entry("gh TOKEN --from pasted-7", self.home, send)
+        self.assertIsNone(entry)
+        self.assertIn("TOKEN for gh went to the daemon", text)
+        bind.assert_called_once_with(self.home, "pasted-7", "pathfinder-mcp-gh", "TOKEN")
+        send.assert_called_once_with({"type": "secret", "server_id": "gh", "name": "TOKEN", "value": "--from pasted-7"})
+
+
+class MailTargetTest(unittest.TestCase):
+    """U26: `secret mail` is the mail sense's password; arity tells it from an MCP server's id."""
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.home = Path(self._tmp.name)
+        env = mock.patch.dict("os.environ", {"PATHFINDER_HOME": str(self.home)})
+        env.start()
+        self.addCleanup(env.stop)
+
+    def _mail(self, **options):
+        from pathfinder import config
+        config.set(self.home, "senses", {"mail": {"host": "imap.example.invalid", "user": "mailbox-user", **options}})
+
+    def _cli(self, *args):
+        from pathfinder.__main__ import main
+        with mock.patch("pathfinder.__main__.getpass.getpass", return_value="v4lue") as ask, \
+                mock.patch("pathfinder.keychain.store") as store, \
+                contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()) as err:
+            return main(["secret", *args]), store, ask, err.getvalue()
+
+    def test_secret_mail_resolves_service_and_user(self):
+        from pathfinder import tui_secret
+        self._mail()
+        self.assertEqual(keychain.target(self.home, "mail"), ("pathfinder-mail", "mailbox-user"))
+        rc, store, ask, _ = self._cli("mail")
+        self.assertEqual(rc, 0)
+        store.assert_called_once_with("pathfinder-mail", "mailbox-user", "v4lue")
+        self.assertIn("app password for mailbox-user", ask.call_args[0][0])
+        entry, prompt = tui_secret.entry("mail", self.home, mock.Mock())
+        self.assertIsNotNone(entry)
+        self.assertIn("app password for mailbox-user (hidden;", prompt)
+        self._mail(keychain_service="other-mail")
+        self.assertEqual(keychain.target(self.home, "mail"), ("other-mail", "mailbox-user"))
+
+    def test_secret_mail_unconfigured_says_so(self):
+        from pathfinder import tui_secret
+        with self.assertRaisesRegex(LookupError, "turn the mail sense on first"):
+            keychain.target(self.home, "mail")
+        rc, store, _, err = self._cli("mail")
+        self.assertEqual(rc, 2)
+        self.assertIn("turn the mail sense on first", err)
+        store.assert_not_called()
+        self.assertEqual(tui_secret.entry("mail", self.home, mock.Mock())[0], None)
+        self.assertIn("turn the mail sense on first", tui_secret.entry("mail", self.home, mock.Mock())[1])
+        self.assertFalse(keychain.missing(self.home, "mail"))  # nothing to ask for, no Keychain call
+
+    def test_mcp_server_named_mail_is_not_shadowed(self):
+        self._mail()
+        self.assertEqual(keychain.target(self.home, "mail", "TOKEN"), ("pathfinder-mcp-mail", "TOKEN"))
+        rc, store, _, _ = self._cli("mail", "TOKEN")
+        self.assertEqual(rc, 0)
+        store.assert_called_once_with("pathfinder-mcp-mail", "TOKEN", "v4lue")
 
 
 class TokenPatternTest(unittest.TestCase):

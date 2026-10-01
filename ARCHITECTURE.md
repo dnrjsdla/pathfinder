@@ -58,9 +58,9 @@ daemon.Daemon ── one lane (queue + worker) per session; lane items: say | re
 | `<home>/daemon.log` | the daemon's stderr under launchd | launchd | nothing |
 | `<home>/hooks/pathfinder.zsh` and one guarded line in `~/.zshrc` | the shell sense's `preexec`/`precmd` hook (`docs/senses.md`), sourced only if the file exists | `init`, after a yes; `~/.zshrc` is backed up to `~/.zshrc.pathfinder-<ts>` and appended, never rewritten | the shell sense hears nothing |
 | `~/.claude/settings.json` (`hooks.Stop`, `hooks.Notification`) | the Claude Code sense's two hook entries | `init` through `config.merge_json_file` (D60): backup, atomic write, read-back; idempotent by the `pathfinder signal claude_code` marker | Claude Code's own concern |
-| macOS Keychain `pathfinder-mcp-<id>` / `pathfinder-mail` | every secret (an MCP server's token, the IMAP password) | the user, by hand (`security add-generic-password`) | the server stays listed as `disabled: secret missing: <NAME>`; the mail sense errors |
-| macOS Keychain `pathfinder-pasted` / `pasted-<seq>[-i]` | a token-shaped string (`keychain.TOKEN_RE`) the owner typed (an event with `trust: user`), named by that event's ledger seq; the event keeps `[secret:pasted-<seq>]` in its place (D53, D66). In any other event the string is written `[redacted]`, with no Keychain call | `ledger.append()` through `keychain.vault`, never over an item already holding the name (another home's); deleted 24 hours after it was made, at the next paste or daemon start | the handle stays in the ledger and the value is gone - it is entered again with `/secret` |
-| `<home>/pasted.json` (0600) | `{"pasted": {handle: creation time}}` - never a value; each sweep also drops a handle whose item is gone | `keychain.vault` under the ledger's lock, and `keychain.sweep` at daemon start | read as empty: no number is handed out twice (a seq never recurs), but an item it listed is no longer swept - it stays in the Keychain, unknown |
+| macOS Keychain `pathfinder-mcp-<id>` / `pathfinder-mail` | every secret (an MCP server's token, the IMAP password) | the owner, masked: `/secret <id> NAME` or `/secret mail` in the screen and the answer to the daemon's `secret.ask` (both sent to the daemon, stored by `installer.secret`), or `pathfinder secret ...` in a shell (`keychain.target` resolves every one); the daemon asks a screen as it attaches while the mail sense is on and its item is missing | the server stays listed as `disabled: secret missing: <NAME>`; the mail sense errors |
+| macOS Keychain `pathfinder-pasted` / `pasted-<seq>[-i]` | a token-shaped string (`keychain.TOKEN_RE`) the owner typed (an event with `trust: user`), named by that event's ledger seq; the event keeps `[secret:pasted-<seq>]` in its place (D53, D66), and the session's screen and `say` get a `pasted` line naming the handle and how to bind it. In any other event the string is written `[redacted]`, with no Keychain call | `ledger.append()` through `keychain.vault`, never over an item already holding the name (another home's); deleted 24 hours after it was made, at the next paste or daemon start; `keychain.bind` (`secret <id> NAME --from pasted-<seq>`, in a shell or the screen) moves it to `pathfinder-mcp-<id>`/NAME and deletes it - an expired or unknown handle says `expired - enter it again with /secret` | the handle stays in the ledger and the value is gone - it is entered again with `/secret` |
+| `<home>/pasted.json` (0600) | `{"pasted": {handle: creation time}}` - never a value; each sweep also drops a handle whose item is gone | `keychain.vault` under the ledger's lock, `keychain.sweep` at daemon start, and `keychain.bind` dropping the handle it moved | read as empty: no number is handed out twice (a seq never recurs), but an item it listed is no longer swept - it stays in the Keychain, unknown |
 
 `<home>` is `$PATHFINDER_HOME` or `~/.pathfinder` (mode 0700).
 
@@ -246,10 +246,17 @@ words and leaves no dangling `user` message (D30).
   `attach` sense's `context` signal, when that sense is on), `say {text}`, `interrupt`,
   `approve {id}`, `deny {id}` (a job's own approval routes to `jobs.Manager.resume` instead of a
   session lane - see §9), `signal {sense, fields}` (a push door — the sense must be loaded and
-  push-capable, i.e. export `build(fields)`; `jobs` never is), `presence {idle_s}`,
-  `react {vote, id?}`, `job.stop {id}`, `job.steer {id, text}`. Out: `attached`, `turn.start`,
+  push-capable, i.e. export `build(fields)`; `jobs` never is; checked and built in `signals.pushed`, D67), `presence {idle_s}`,
+  `react {vote, id?}`, `job.stop {id}`, `job.steer {id, text}`, `secret {server_id, name, value}` (D53: a screen's masked value, after an ask
+  or a `/secret`, handed to `installer.secret` - fields checked first, stored on a worker thread
+  through `keychain.take`, never recorded, then an install waiting on that id proposed again in the
+  background, cancelled at a stop; `server_id: "mail"` with no name is the mail password; an error
+  goes to the sender alone). Out: `attached`, `turn.start`,
   `delta`, `tool {name, ok}`, `gate {id, tool, args}`, `turn.end {kind}`, `notice {id, text, why}`,
-  `job.start {id, goal}`, `job.gate {id, approval, tool, args}`, `job.end {id, state}`, `error`. A malformed or unknown line, an unknown
+  `job.start {id, goal}`, `job.gate {id, approval, tool, args}`, `job.end {id, state}`, `secret.ask {server_id, name, server}` (to every attached screen when D40's
+  check stops on a missing secret: the first name, then the next at the re-proposal; the screen
+  takes it masked and lists the live pasted handles for `--from`), `secret.stored {server_id, name, server}` (to every screen, so the others leave the entry),
+  `pasted {handles}` (the owner's own line was vaulted), `error`. A malformed or unknown line, an unknown
   or already decided approval id, an interrupt with no running turn: an `error` line, the
   connection stays open.
 - A session is a queue plus one worker (`_Lane`, a deque-backed queue — plain `asyncio.Queue` has
@@ -744,7 +751,7 @@ python3 -m pathfinder config set grants '{"write_file": "allow"}'
 python3 -m pathfinder config set senses '{"schedule": {}, "shell": {}, "calendar": {}, "reminders": {}}'
 python3 -m pathfinder signal shell '{"cmd": "make test", "exit": 1, "seconds": 3, "cwd": "/tmp"}'
 python3 -m pathfinder config set senses '{"mail": {"host": "imap.example.com", "user": "you@example.com"}}'
-security add-generic-password -s pathfinder-mail -a you@example.com -w   # once, before turning mail on
+pathfinder secret mail                            # once, after turning mail on (or /secret mail in the screen)
 python3 -m pathfinder react up                    # thumbs-up the latest delivery
 python3 -m pathfinder rules                       # print the path of RULES.md
 python3 -m pathfinder reindex                     # refuses while a daemon is serving

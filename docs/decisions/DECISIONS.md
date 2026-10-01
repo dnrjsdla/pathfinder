@@ -549,3 +549,17 @@ so a token there becomes `[redacted]` with no Keychain call: one tool result cou
 285 token-shaped strings, which was about 285 `security` calls under the ledger's lock and 95
 items left for 24 hours. The cost accepted: a token in third-party text cannot be read back - it
 never should reach the model anyway.
+
+## 2026-10-02 — The daemon's push door (owner's choice)
+
+**D67. The socket's `signal` branch moves to `signals.py`; the daemon keeps one delegating line**
+(decided 2026-10-02). `signals.pushed(senses, msg, push, reply)` checks that the sense is loaded
+and push-capable, that `fields` fits the 4 KB limit and that the sense's `build` accepts it, then
+either pushes the Signal or answers one `error` line; `PUSH_FIELDS_LIMIT` moves with it.
+`daemon.py` reached its 780 ceiling for the third time in partition 8: U3 and U4 moved code out
+before, and U16's review fixes brought it back to 780, which f0a1b13 met only by folding a
+docstring into a comment - undone here. The branch is the signal path's own responsibility: what
+a pushed signal must satisfy is the senses' rule, not the socket's. The move takes 14 lines out
+of the daemon; `signals.py` and `rules.py` stay inside their shared 585. Moving the `react` branch
+to `loop.py` was rejected: it does not belong there, and it would free 6 lines. Raising the
+ceiling was rejected: it ignores the pressure D34's per-module line exists to apply.

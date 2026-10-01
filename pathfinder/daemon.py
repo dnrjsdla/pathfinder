@@ -31,7 +31,6 @@ SOCKET = "pathfinder.sock"
 PROMPT = Path(__file__).parent / "prompts" / "system.txt"
 LINE_LIMIT = 1 << 20  # one NDJSON line; asyncio's 64 KiB default is too small for a pasted file
 SIGNAL_TURN_BUDGET = 4  # D20: a signal turn is a few tool calls plus a sentence, not a conversation
-PUSH_FIELDS_LIMIT = 4096  # a pushed signal's `fields` text goes verbatim into the envelope
 
 
 def default_step_factory(cfg, control, tools_for_origin):
@@ -164,7 +163,16 @@ class Daemon:
             args = installer_mod.brief(event["args"]) if fields["tool"] == "install_server" else event["args"]
             line = {"type": "gate", "id": fields["id"], "tool": fields["tool"], "args": args}
             self.dispatch(lambda: self._send_to_session(fields.get("session"), line))
+        if type == "user" and (pasted := keychain.handles(event)):  # D53: the owner sees where the token went
+            self._send_to_session(fields.get("session"), {"type": "pasted", "handles": pasted})
+        if type == "install_failed" and fields.get("names"):  # D40 stopped on a missing secret: the screens ask
+            self._ask_secret(fields["names"][0], fields.get("server_id", ""), fields["name"])
         return event
+
+    def _ask_secret(self, name, server_id="", server="", writer=None) -> None:
+        """D53: the harness asks every screen (or the one attaching) for a missing secret, typed masked."""
+        for w in [writer] if writer else [w for s in self.sessions.values() for w in s.conns if not w.is_closing()]:
+            _write(w, {"type": "secret.ask", "server_id": server_id, "name": name, "server": server})
 
     # -- socket ------------------------------------------------------------------------
     async def start(self):
@@ -222,7 +230,7 @@ class Daemon:
         self.jobs_mgr.dispatch = lambda fn: None  # drop a job's late calls, not race a closing state
         self.memory_mgr.dispatch = lambda fn: None
         self.mcp.dispatch = lambda fn: None
-        self.installer.dispatch = lambda fn: None
+        self.installer.close()  # no late record; a re-proposal in flight is cancelled, not awaited
         self.dispatch = lambda fn: None
         if self.mcp.loaded is not None:
             await self.mcp.loaded
@@ -359,21 +367,14 @@ class Daemon:
                     _write(writer, {"type": "memory.run", "result": result})
                 elif kind in ("install", "uninstall"):
                     _write(writer, await self.installer.handle(msg))
-                elif kind == "signal":
-                    sense_name, fields = msg.get("sense"), msg.get("fields")
-                    sense = self.senses.get(sense_name)
-                    if sense is None or not sense.push_capable or not isinstance(fields, dict):
-                        _write(writer, {"type": "error", "message": f"unknown or non-push sense: {sense_name!r}"})
-                        continue
-                    if len(json.dumps(fields, ensure_ascii=False)) > PUSH_FIELDS_LIMIT:
-                        _write(writer, {"type": "error", "message": "fields too large (4 KB limit)"})
-                        continue
-                    try:
-                        signal = sense.module.build(fields)
-                    except Exception as e:  # the only untrusted local input - never take the daemon down
-                        _write(writer, {"type": "error", "message": f"bad fields for {sense_name}: {e}"})
-                        continue
-                    self.push_signal(signal)
+                elif kind == "secret":  # D53: stored, never recorded
+                    reply = await self.installer.secret(msg, session.id if session else "")
+                    if reply["type"] == "secret.stored":  # every screen hears it, so one that did not answer leaves its entry
+                        self._send_all(reply)
+                    else:  # an error is the sender's alone
+                        _write(writer, reply)
+                elif kind == "signal":  # the push door, checked and built in `signals.pushed` (D67)
+                    signals.pushed(self.senses, msg, self.push_signal, lambda reply: _write(writer, reply))
                 elif kind == "presence":
                     idle_s = msg.get("idle_s")
                     if (not isinstance(idle_s, (int, float)) or isinstance(idle_s, bool)
@@ -430,6 +431,8 @@ class Daemon:
             s.last_cwd = cwd
         _write(writer, {"type": "attached", "session": sid, "resumed": bool(known),
                         "turns": known["turns"] if known else 0})
+        if "mail" in self.senses and keychain.missing(self.home, "mail"):  # U26: no screen is attached at a start
+            self._ask_secret("mail", writer=writer)
         return s
 
     def send(self, s, msg):

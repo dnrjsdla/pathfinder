@@ -177,6 +177,9 @@ class Installer:
         self.attach = attach
         self.dispatch = dispatch
         self._lock = asyncio.Lock()  # S1: install/uninstall never interleave (id clash, config races)
+        self._again = None  # the background re-proposal after a stored secret (D53)
+        self._asked = {}  # server id -> registry name, for each install stopped on a missing secret
+        self._trialing = None  # the stdio trial's session, so close() can end its process
 
     def record(self, type, **fields):
         self.dispatch(lambda: self._record(type, **fields))
@@ -259,7 +262,7 @@ class Installer:
         sid = self._server_id(candidate["name"])
         resolved_env, missing, needs = _resolve(_keychain_env(pkg), sid, keychain.secret)
         if missing:
-            verification["names"] = missing
+            verification["names"], verification["server_id"] = missing, sid  # the asking stores under this id
             one = missing[0] if len(missing) == 1 else ""
             return fail("secrets", f"needs {', '.join(missing)} - store {'it' if one else 'each'} with /secret {sid} "
                         f"{one or 'NAME'} in the screen, or pathfinder secret {sid} {one or 'NAME'}, then ask "
@@ -319,7 +322,7 @@ class Installer:
                       if sandboxed else [runtime_bin, *args]
                 env = exec_mod.child_env({"npm_config_cache": f"{tmp}/npm-cache",
                                           "UV_CACHE_DIR": f"{tmp}/uv-cache", **resolved_env})
-                session = ServerSession(sid, StdioTransport(argv, env=env), timeout=timeout)
+                session = self._trialing = ServerSession(sid, StdioTransport(argv, env=env), timeout=timeout)
                 try:
                     session.discover()
                     raw = session.list_tools()
@@ -344,8 +347,10 @@ class Installer:
     def propose(self, candidate: dict, origin: str, session: str = "") -> str:
         if candidate.get("outcome") == "install_failed":
             vf = candidate["verification"]
-            self.record("install_failed", id="", name=candidate["name"],
-                        step=vf.get("failed_step", ""), reason=vf.get("reason", ""))
+            self.record("install_failed", id="", name=candidate["name"], names=vf.get("names", []),  # D53 asks for them
+                        server_id=vf.get("server_id", ""), step=vf.get("failed_step", ""), reason=vf.get("reason", ""))
+            if vf.get("names"):  # an answer to the ask, or a `/secret` for this id, proposes it again
+                self._asked[vf["server_id"]] = candidate["name"]
             signal = Signal(sense="catalog", kind="install_failed",
                 key=f"install_failed:{candidate['name']}:{int(time.time())}",
                 summary=f"Could not install {candidate['name']}: {vf.get('reason', '')}",
@@ -404,6 +409,34 @@ class Installer:
         if install:
             return {"type": "install", "id": result["id"], "line": result["line"]}
         return {"type": "uninstall", "id": result["id"]}
+
+    async def secret(self, msg: dict, session: str = "") -> dict:
+        """D53's main path: a screen's masked value, asked for or typed after `/secret`. It goes to the
+        Keychain on a worker thread and nowhere else - no event holds it - and an install stopped on
+        this id's missing secret is proposed again in the background, so its gate line (or the ask for
+        the next missing name) follows. `mail` with no name is the mail password (U26)."""
+        if not (isinstance(msg.get("server_id"), str) and isinstance(msg.get("value"), str)
+                and isinstance(msg.get("name"), (str, type(None)))):
+            return {"type": "error", "message": "secret needs a \"server_id\" and a \"value\" (and a \"name\" unless mail)"}
+        try:
+            service, account = keychain.target(self.home, msg["server_id"], msg.get("name"))
+            await asyncio.to_thread(keychain.take, self.home, service, account, msg["value"])
+        except Exception as e:  # keychain's messages never carry the value
+            return {"type": "error", "message": f"{type(e).__name__}: {e}"[:300]}
+        server = self._asked.pop(msg["server_id"], None)
+        if server:  # held, so the task is not collected before it runs, and close() can cancel it
+            self._again = asyncio.ensure_future(asyncio.to_thread(self.propose_by_name, server, "user", session))
+        return {"type": "secret.stored", "server_id": msg["server_id"], "name": msg.get("name"), "server": server or ""}
+
+    def close(self) -> None:
+        """At a stop: no late record, and a re-proposal in flight is cancelled rather than awaited - its
+        trial is sandboxed, and the ask comes again at the next check. A stdio trial's process is ended
+        too, so the exit does not wait out its timeout."""
+        self.dispatch = lambda fn: None
+        if self._again is not None:
+            self._again.cancel()
+        if self._trialing is not None:
+            self._trialing.close()
 
     # -- install / rollback --------------------------------------------------------------
     async def decide(self, approval_id: str, decision: str) -> None:

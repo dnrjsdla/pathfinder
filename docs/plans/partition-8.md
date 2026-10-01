@@ -29,15 +29,23 @@ A secret reaches the Keychain without passing through the chat. There are two pa
 
 **The main path: the assistant asks through the harness** (U16).
 - **Trigger.** D40's check stops on a missing required secret. `Daemon.record` sees
-  `install_failed {step: "secrets"}` and sends every attached screen
-  `secret.ask {server_id, name, server}`.
+  `install_failed` carrying `names` (and the check's own `server_id`) and sends every attached
+  screen `secret.ask {server_id, name, server}` for the first name. *As built:* the trigger is
+  `names`, set only by the secrets stop; the id is the check's, never computed again.
 - **The prompt.** The screen switches to the masked input `/secret` uses: "NOTION_TOKEN for
   easy-notion (hidden; stored in the Keychain, never shown to the assistant)".
 - **Enter** sends `secret {server_id, name, value}` over the 0600 socket. The daemon then:
-  - stores the value with `keychain.store` on a worker thread;
+  - stores the value on a worker thread - *as built,* through `keychain.take`, so a value of
+    `--from pasted-<seq>` binds that pasted item instead (the prompt lists the live handles);
   - writes no ledger event that holds the value;
-  - answers `secret.stored`;
-  - runs `installer.propose_by_name(server)` again, and the proposal's gate line follows.
+  - answers `secret.stored` - *as built,* to every attached screen, so a screen that did not
+    answer leaves its entry; an error goes to the sender alone;
+  - runs `installer.propose_by_name(server)` again, and the proposal's gate line follows -
+    *as built,* in the background, cancelled (not awaited) when the daemon stops.
+- *As built,* the handler is `installer.secret` (the U3 pattern; `daemon.py` was 779/780). It
+  refuses a missing or mistyped field before anything is stored, and also takes
+  `{server_id: "mail", value}` with no name, the mail password (U26). A screen with an entry
+  already open drops a new ask with a line, and the line being typed waits aside and comes back.
 - **The value never reaches the ledger or the model.** `pathfinder say` has no screen, so it
   gets the `/secret` line instead.
 - **Cost:** daemon +~9 (the `record` hook, the `secret` handler), `tui.py` +~12, `installer.py`
@@ -269,14 +277,14 @@ Counts are `splitlines()` on `partition-8` at 939c831; "with U2" is the review w
 
 | Module | Now | Ceiling | After this plan |
 |---|---|---|---|
-| `daemon.py` | **779** | 780 | ~771 (U3 −21, U4 −10, U6 +7, U7a +6, U16 +9, U27 +1) |
+| `daemon.py` | **779** | 780 | ~771 (U3 −21, U4 −10, U6 +7, U7a +6, U16 +9, U27 +1); 780 after U16's review, 767 after D67 (−14, a docstring back +1) |
 | `state.py` | 681 | 780 (added) | ~688 (U6 +6, U14a +1) |
 | `memory.py` | 710 | 780 | ~711 (U23) |
 | `loop.py` | 197 | 520 (added) | ~244 (U7a) |
 | `broker.py` + `policy.py` | 84 + 57 | 455 (added) | ~116 + 57 (U6 +26, U31 +6) |
 | `ledger.py` | 122 | 520 (added) | ~142 (U24 +8, U15a +12) |
 | `tools.py` | 212; 225 after U21 | 390 (added) | ~230 (U21 moved `oneline` here; U31 +5) |
-| `signals.py` + `rules.py` | 201 + 220 | 585 (added) | ~205 + 220 (U21) |
+| `signals.py` + `rules.py` | 201 + 220 | 585 (added) | ~205 + 220 (U21); 227 + 222 after D67's `pushed` (+20) |
 | `jobs.py` | 267 | 350 | ~283 (U4 +15, U23 +1) |
 | `exec.py`, `deliver.py` | 217, 86 | 390, 325 (added) | unchanged |
 | `mirror.py` | 188; 191 with U2 | **200** (D56) | 191 |
@@ -288,7 +296,7 @@ Counts are `splitlines()` on `partition-8` at 939c831; "with U2" is the review w
 | `senses/_eventkit.py` | 210 | none today; 250 (U17) | 210 |
 | `mcp/tools.py` | 116 | `mcp/` 1,858 | ~119 (U22) |
 | `tui.py` | 314 | 400 | ~357 |
-| `tui_secret.py` | new; 71 (D64 moved the masked input out of `tui.py`, 392 -> 367) | 150 (new, D64) | ~71 |
+| `tui_secret.py` | new; 71 (D64 moved the masked input out of `tui.py`, 392 -> 367) | 150 (new, D64) | 136 (U15b, U16, U26, and U16's two reviews) |
 | `init.py` | **297** | 300 | 297 |
 | `skills.py` | new | 120 (new, D61) | ~80 (U27) |
 | `keychain.py`, `config.py`, `__main__.py` | 14, 169, 455 (463 with U2) | none | ~82, ~179, ~490 |
@@ -351,6 +359,13 @@ owns the protocol, the way `PROPOSALS` already routes approvals to their owners.
 
 Nothing else moves. The lane, the signal turns and the rest of `handle()` depend on daemon state,
 and splitting them would add a seam only to buy lines.
+
+**Move 3 (D67, 2026-10-02): the `signal` branch to `signals.pushed(senses, msg, push, reply)`.**
+- U16 and its review brought the daemon back to 780. The push door's checks (a loaded,
+  push-capable sense, the 4 KB `fields` limit, the sense's `build`) are the signal path's own and
+  depend on no daemon state but the senses it is handed.
+- In the daemon it becomes `elif kind == "signal":` and one call; `PUSH_FIELDS_LIMIT` moves too.
+- **−14 in the daemon (767 with `_ask_secret`'s docstring back); `signals.py` +20.**
 
 ## The second look and the adopted prompt (D51)
 
@@ -774,6 +789,10 @@ below:
 - The same checks. The next line is read masked: the input line shows `*`, and the screen draws
   its own input line in cbreak mode.
 - Enter stores the value in the screen's own process. Ctrl-C cancels. Nothing goes on the socket.
+  *As built (U16):* the screen's `/secret` sends `secret {server_id, name, value}` to the daemon
+  over the 0600 socket so a pending install is proposed again (`/secret mail` sends
+  `{server_id: "mail", value}`, and `--from pasted-<seq>` goes the same way); the CLI still stores
+  locally; the value reaches no other screen, the ledger or the model.
 - The confirmation says an already-installed server picks the value up at the next
   `service restart`.
 - D53's `secret.ask` (U16) reuses this masked mode. Its Enter sends the value to the daemon
@@ -1075,6 +1094,21 @@ line says how to get past it.**
   - `test_sanitize_is_the_one_rule`
 
 **Known limits** (listed, not units):
+- **A secret whose value starts with `--from ` cannot be stored through a masked input** (U16):
+  `keychain.take` reads it as a handle to bind. `pathfinder secret <id> NAME` from a shell
+  stores any value.
+- **One Keychain read per attach while the mail sense is on** (U26), `say` clients included:
+  the ask on attach reads whether the item is there, found or not.
+- **The installer's record of installs waiting on a secret can go stale** (U16): `_asked` maps a
+  server id to the install its secrets stop is waiting on, and only a stored answer for that id
+  removes it. An uninstall, or a later proposal of the same server that stops elsewhere or passes,
+  leaves it, so a later `/secret <id> NAME` proposes that server once more (a check then refuses an
+  installed one). Popping it in `uninstall` and `propose` would take `installer.py` past 700.
+- **`close()` ends only the latest stdio trial** (U16): `_trialing` holds the last trial's session,
+  so with two trials running at once the earlier one's process is left to its own timeout.
+- **A stop during a remote server's re-proposal waits for its trial** (U16): `close()` cancels the
+  re-proposal and ends a stdio trial's process, but an HTTP trial has no process to end, so the
+  interpreter's join waits for its request to time out (at most 60 s).
 - **A steer is recorded when it arrives, not when the model takes it.** A steer typed while the
   second look runs (or between the last chunk and the turn's end) has its `user` event before
   the draft's `assistant` in the ledger and in history, and a steer that gets its own turn is
@@ -1165,6 +1199,14 @@ line says how to get past it.**
   skill's step still names `/secret mail` for the case where no screen is attached. The value
   never passes through the chat, the ledger or the model. A model-callable ask for any procedure
   stays later work ("disagree" 11). Cost: `daemon.py` +~4, after U3 and U4 have made room.
+  - **As built (U26):** the daemon asks when a screen attaches and the item is missing. At a start
+    no screen is attached yet (the socket is bound inside `start()`), so an ask sent then reaches
+    no one; `attach` asks the attaching screen instead, while the mail sense is on and
+    `keychain.missing` finds no item - one Keychain read per attach while the sense is on. The
+    answer is `/secret mail`'s masked entry. *As built (U16):* the screen's `/secret` sends
+    `secret {server_id, name, value}` to the daemon over the 0600 socket so a pending install is
+    proposed again; the CLI still stores locally; the value reaches no other screen, the ledger or
+    the model.
 
 **What the owner does by hand: 7 steps, 3 of them on Google's pages.**
 1. The check above (`myaccount.google.com/apppasswords`).
@@ -1571,11 +1613,11 @@ parallel. **Deploy gate: U15a, U21, U31 and U33.**
 | U14a | **done, merged** | Born private | `ledger.py`, `state.py` | +1 | U12, U24 | `test_partition_and_lock_born_0600_dir_0700` |
 | U14b | **done, merged** | Existing files private | `config.py` (`make_private`), `__main__.py` (daemon branch), `init.py` (literals) | +11 | U10 | `test_make_private_drops_group_other_keeps_owner_x_skips_symlinks_and_workspace` |
 | U15a | **done, merged** | D53's backstop: the vault at the ledger door (**deploy gate**); D66: handles are `pasted-<seq>[-i]`, only the owner's text is vaulted | `ledger.py`, `keychain.py` (`TOKEN_RE`, vault, mask, sweep, index), `scripts/scan_personal.py`, `daemon.py` (gate and steer lines from the recorded event), `jobs.py` (the same; a job's own masked copies) | +127 (`keychain.py` +114 to 172, `ledger.py` +7 to 140, scanner +3, `daemon.py` +2 to 768, `jobs.py` +1) | U14a, U10 | `test_paste_vaulted_and_handle_returned`, `test_handle_is_the_event_seq`, `test_a_token_in_a_tool_result_is_redacted_without_the_keychain`, `test_pasted_token_reaches_the_record_as_a_handle` |
-| U15b | not started | Binding a handle | `__main__.py` (`secret --from`), `tui.py` (`/secret --from`; the masked prompt lists live handles) | +7 | U15a, U11, U14b | `test_bind_moves_and_deletes_the_pasted_item` |
-| U16 | not started | D53's main path: the harness asks | `daemon.py` (`record` hook, `secret` handler), `tui.py` (`secret.ask`), `installer.py` (event fields) | daemon +9, tui +12, installer +1 | U15b | `test_secret_value_never_reaches_ledger_or_state` |
+| U15b | done, in review | Binding a handle; the `pasted {handles}` line tells the owner the handle a pasted token got | `keychain.py` (`bind`), `__main__.py` (`secret --from`), `tui_secret.py` (`/secret --from`), `daemon.py` (`record`: `pasted`), `tui.py`/`__main__.py` (render it) | keychain +20, tui_secret +9, `__main__` +5, daemon +2, tui +2 | U15a, U11, U14b | `test_bind_moves_and_deletes_the_pasted_item` |
+| U16 | done, in review | D53's main path: the harness asks (trigger on `names`; stored through `keychain.take`; `secret.stored` to every screen; the handler `installer.secret` also takes `mail`) | `daemon.py` (`record` hook, `_ask_secret`, `secret` branch), `tui.py`/`tui_secret.py` (`secret.ask`), `installer.py` (`secret`, `close`, event fields), `keychain.py` (`take`, `live`), `ledger.py` (`locked`) | daemon +9, tui +18, tui_secret +25, installer +25, keychain +20, ledger +12 | U15b | `test_secret_value_never_reaches_ledger_or_state` |
 | U25 | **done, merged** | Gmail: `search_mail`, the filter, `HOME`, the watermark, the IMAP move | `senses/_imap.py` (new), `senses/mail.py` | +65 / −30 | U21 | `test_query_goes_as_a_literal_utf8`, `test_first_poll_takes_the_watermark_silently` |
 | U31 | **done, merged** | Every tool result passes `tools.clean` (D62); `oneline` is `clean` plus flattening; the mail body filter becomes `clean` | `tools.py`, `broker.py`, `senses/mail.py` | tools +5, broker +6, mail −1 | U25, U6 | `test_tool_result_loses_bidi_zero_width_ansi_and_controls`, `test_tool_result_keeps_newlines_tabs_and_spacing`, `test_error_text_passes_the_filter`, `test_ledger_keeps_the_raw_result`, `test_oneline_is_clean_then_flatten` |
-| U26 | not started | The mail password intake; the daemon asks at start when the item is missing | `keychain.py` (`target`), `tui.py`, `__main__.py`, `daemon.py` | +12, daemon +4 | U16, U15b | `test_secret_mail_resolves_service_and_user`, `test_missing_mail_password_is_asked_at_start` |
+| U26 | done, in review | The mail password intake; the daemon asks when a screen attaches and the item is missing | `keychain.py` (`target`), `tui.py`, `__main__.py`, `daemon.py` | +12, daemon +4 | U16, U15b | `test_secret_mail_resolves_service_and_user`, `test_missing_mail_password_is_asked_at_start` |
 | U32 | **done, merged** | D63: only the owner's activity keeps a session alive; notice text passes `clean`; the approval line's way out | `state.py`, `daemon.py`, `jobs.py`, `broker.py` | +6 | U7a, U31 | `test_say_after_a_job_gate_in_an_aged_session_lands_in_the_new_session` |
 | U33 | **done, merged** | The remaining raw exits: the agenda, sense summaries, MCP parameter schemas, gate lines, `sanitize` (**deploy gate**) | `senses/*.py`, `mcp/tools.py`, `mcp/protocol.py`, `tui.py` | +10 | U31, U7b | `test_agenda_lines_pass_the_filter` |
 | U34 | **done, merged** | An installed server's entry records which variables are optional and which have a default; start agrees with the check | `installer.py`, `catalog.py`, `mcp/servers.py` | ~+7 | U10 | `test_required_with_a_default_does_not_stop_and_gets_the_default` |

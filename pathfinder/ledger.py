@@ -4,6 +4,7 @@ file name (two modules disagreeing on "the day" once lost 24 days of history).
 append() is also safe across processes: an flock on events/.lock serializes
 the daemon and any CLI process (e.g. `pathfinder config set`) that append
 while the daemon is running."""
+import contextlib
 import fcntl
 import json
 import os
@@ -42,6 +43,17 @@ def _clean(value):
     if isinstance(value, dict):
         return {_clean(k): _clean(v) for k, v in value.items()}
     return [_clean(v) for v in value] if isinstance(value, (list, tuple)) else value
+
+
+@contextlib.contextmanager
+def locked(root):
+    """append()'s cross-process lock, `events/.lock`, for a writer beside it: `keychain.bind`
+    rewrites the pasted index that `vault` writes under this lock (D53)."""
+    path = Path(root) / "events"
+    path.mkdir(mode=0o700, parents=True, exist_ok=True)
+    with os.fdopen(os.open(path / ".lock", os.O_RDWR | os.O_CREAT, 0o600), "r+") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)  # released when the file closes
+        yield
 
 
 class Ledger:

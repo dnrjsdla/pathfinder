@@ -7,7 +7,7 @@ from pathlib import Path
 from pathfinder import config
 from pathfinder.mcp import protocol as pr
 from pathfinder.mcp import transport as tr
-from pathfinder.mcp.servers import Servers, load
+from pathfinder.mcp.servers import Servers, _resolve, load
 
 
 class FakeTransport(tr.Transport):
@@ -67,6 +67,40 @@ class LoadTest(unittest.TestCase):
         [missing] = load(cfg, lookup=_lookup({}))
         self.assertTrue(missing.disabled.startswith("secret missing"))
         self.assertIn("TOKEN", missing.disabled)
+
+    def test_entry_grammar_table(self):
+        """U34: `keychain:` required, `keychain?:` optional, `=<default>` used only when the item is
+        missing; the account ends at the first `=`; anything else is a literal."""
+        found = _lookup({("pathfinder-mcp-s", "A"): "sa"})
+        for value, resolved, missing, unset in [
+            ("keychain:A", {"K": "sa"}, [], []),
+            ("keychain:B", {}, ["K"], []),
+            ("keychain:A=d", {"K": "sa"}, [], []),           # the item wins over the default
+            ("keychain:B=d", {"K": "d"}, [], []),
+            ("keychain:B=", {"K": ""}, [], []),              # an empty default is a default
+            ("keychain:B=x=y:z", {"K": "x=y:z"}, [], []),
+            ("keychain?:A", {"K": "sa"}, [], []),
+            ("keychain?:B", {}, [], ["K"]),
+            ("keychain?:B=d", {"K": "d"}, [], []),
+            ("https://x.invalid/a=b", {"K": "https://x.invalid/a=b"}, [], []),
+            ("keychain", {"K": "keychain"}, [], []),
+        ]:
+            with self.subTest(value=value):
+                self.assertEqual(_resolve({"K": value}, "s", found), (resolved, missing, unset))
+
+    def test_old_entry_grammar_is_required_without_default(self):
+        """An entry written before U34 (`keychain:NAME` only) still means required, no default."""
+        cfg = {"mcp_servers": {"gh": {"transport": "stdio", "command": ["x"], "env": {"T": "keychain:bot"}}}}
+        self.assertEqual(load(cfg, lookup=_lookup({}))[0].disabled, "secret missing: T")
+        [found] = load(cfg, lookup=_lookup({("pathfinder-mcp-gh", "bot"): "s"}))
+        self.assertEqual((found.disabled, found.env), ("", {"T": "s"}))
+
+    def test_missing_optional_secret_starts_without_it(self):
+        cfg = {"mcp_servers": {"gh": {"transport": "stdio", "command": ["x"],
+                                      "env": {"TOKEN": "keychain?:TOKEN", "LEVEL": "info"}}}}
+        [found] = load(cfg, lookup=_lookup({}))
+        self.assertEqual(found.disabled, "")
+        self.assertEqual(found.env, {"LEVEL": "info"})  # not set at all - not an empty string
 
 
 class ServersTest(unittest.TestCase):

@@ -102,10 +102,10 @@ def _fetch_model_ids(url):
 
 def _install_shell_hook(home_path):
     hooks_dir = home_path / "hooks"
-    hooks_dir.mkdir(parents=True, exist_ok=True)
+    hooks_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
     zsh_path = hooks_dir / "pathfinder.zsh"
     zsh_path.write_text(_ZSHRC_SNIPPET, encoding="utf-8")
-    os.chmod(zsh_path, 0o644)
+    os.chmod(zsh_path, 0o600)
 
     zshrc = Path(os.environ["HOME"]) / ".zshrc"
     guard = f'[ -f "{zsh_path}" ] && source "{zsh_path}"\n'

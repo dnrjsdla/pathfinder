@@ -11,8 +11,9 @@ import threading
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
-from pathfinder import tui
+from pathfinder import tui, tui_secret
 
 
 class FakeDaemon:
@@ -237,6 +238,116 @@ class TuiCase(unittest.TestCase):
         self.assertTrue(_wait_for(lambda: any(
             m == {"type": "react", "vote": "down"} for m in self.daemon.received)))
 
+    def test_slash_secret_masks_and_never_touches_the_socket(self):
+        """U11: the value is read masked and stored in the screen's own process - only `*` on the
+        screen, nothing on the socket, so no client attached to the daemon can receive it."""
+        value = "s3cr3t-" + "v4lue"
+        with mock.patch("pathfinder.keychain.store") as store:
+            self.type_("/secret rv11test TOKEN\r")
+            self.assertTrue(_wait_for(lambda: "TOKEN for rv11test (hidden;" in self.out_text()))
+            self.type_(value)
+            self.assertTrue(_wait_for(lambda: self.out_text().endswith(tui_secret.SECRET_PROMPT + "*" * len(value))))
+            self.type_("\r")
+            self.assertTrue(_wait_for(lambda: "TOKEN stored for rv11test" in self.out_text()))
+            self.type_("/secret Bad_Id TOKEN\r")
+            self.assertTrue(_wait_for(lambda: "/secret ID NAME takes a server id" in self.out_text()))
+            store.assert_called_once_with("pathfinder-mcp-rv11test", "TOKEN", value)
+        self.assertNotIn(value, self.out_text())
+        self.assertNotIn(value, json.dumps(self.daemon.received))
+        self.assertEqual({m["type"] for m in self.daemon.received} - {"attach", "presence"}, set())
+
+    def test_ctrl_c_cancels_secret_entry(self):
+        with mock.patch("pathfinder.keychain.store") as store:
+            self.type_("/secret rv11test TOKEN\r")
+            self.assertTrue(_wait_for(lambda: "(hidden;" in self.out_text()))
+            self.type_("half")
+            self.assertTrue(_wait_for(lambda: self.out_text().endswith(tui_secret.SECRET_PROMPT + "****")))
+            self.type_("\x03")
+            self.assertTrue(_wait_for(lambda: "nothing stored" in self.out_text()))
+            self.assertIn("\x1b[?2004l", self.out_text())  # bracketed paste off on cancel
+            self.type_("hello\r")  # still attached, and back to plain input
+            self.assertTrue(_wait_for(lambda: any(m.get("text") == "hello" for m in self.daemon.received)))
+            store.assert_not_called()
+        self.assertTrue(self._main.is_alive())
+        self.assertNotIn("half", self.out_text() + json.dumps(self.daemon.received))
+
+    def _paste_runs_past_the_secret(self, *writes, gap=0.01):
+        with mock.patch("pathfinder.keychain.store") as store:
+            self.type_("/secret rv11test TOKEN\r")
+            self.assertTrue(_wait_for(lambda: "(hidden;" in self.out_text()))
+            for w in writes:
+                self.type_(w)
+                time.sleep(gap)
+            self.assertTrue(_wait_for(lambda: "a secret is one line" in self.out_text()))
+            self.type_("hello\r")  # back to plain input, nothing of the paste left in the buffer
+            self.assertTrue(_wait_for(lambda: any(m.get("type") == "say" for m in self.daemon.received)))
+            store.assert_not_called()
+        self.assertEqual([m for m in self.daemon.received if m["type"] == "say"], [{"type": "say", "text": "hello"}])
+        for part in ("PART1-tok", "PART2-after", "PART3"):
+            self.assertNotIn(part, self.out_text() + json.dumps(self.daemon.received))
+
+    def test_paste_past_the_secret_line_stores_and_sends_nothing(self):
+        """Review blocker: a secret is one line; whatever follows its Enter voids it, unseen."""
+        self._paste_runs_past_the_secret("PART1-tok\rPART2-after\rPART3")
+
+    def test_paste_past_the_secret_line_over_two_reads_stores_and_sends_nothing(self):
+        self._paste_runs_past_the_secret("PART1-tok\r", "PART2-after\rPART3")
+
+    def test_bracketed_multi_line_paste_over_slow_reads_stores_and_sends_nothing(self):
+        """Reads 200 ms apart, past the drain window: the paste marks, not timing, bound the paste."""
+        self._paste_runs_past_the_secret("\x1b[200~PART1-tok\r", "PART2-after\r", "PART3\x1b[201~", gap=0.2)
+
+    def test_bracketed_one_line_paste_is_the_value_and_the_mode_is_turned_off(self):
+        with mock.patch("pathfinder.keychain.store") as store:
+            self.type_("/secret rv11test TOKEN\r")
+            self.assertTrue(_wait_for(lambda: "(hidden;" in self.out_text()))
+            self.assertIn("\x1b[?2004h", self.out_text())
+            for part in ("\x1b[20", "0~tok-" + "value\x1b[2", "01~"):  # both marks straddle reads
+                self.type_(part)
+                time.sleep(0.05)
+            self.assertTrue(_wait_for(lambda: self.out_text().endswith(tui_secret.SECRET_PROMPT + "*" * 9)))
+            self.type_("\r")
+            self.assertTrue(_wait_for(lambda: "TOKEN stored for rv11test" in self.out_text()))
+            store.assert_called_once_with("pathfinder-mcp-rv11test", "TOKEN", "tok-value")
+        out = self.out_text()
+        self.assertLess(out.index("\x1b[?2004h"), out.index("\x1b[?2004l"))  # off once stored, screen still up
+        self.assertTrue(self._main.is_alive())
+
+    def test_bracketed_paste_with_a_trailing_newline_is_still_one_line(self):
+        """A value copied with its line end (a triple-click) is the value; text after a newline is not."""
+        with mock.patch("pathfinder.keychain.store") as store:
+            for n, end in enumerate(("\n", "\r\n"), 1):
+                self.type_("/secret rv11test TOKEN\r")
+                self.assertTrue(_wait_for(lambda: self.out_text().endswith(tui_secret.SECRET_PROMPT)))
+                self.type_("\x1b[200~tok-" + "value" + end + "\x1b[201~")
+                self.assertTrue(_wait_for(lambda: self.out_text().endswith(tui_secret.SECRET_PROMPT + "*" * 9)))
+                self.type_("\r")
+                self.assertTrue(_wait_for(lambda: store.call_count == n))
+            self.assertNotIn("a secret is one line", self.out_text())
+            self.type_("/secret rv11test TOKEN\r")
+            self.assertTrue(_wait_for(lambda: self.out_text().endswith(tui_secret.SECRET_PROMPT)))
+            self.type_("\x1b[200~a\nb\x1b[201~")
+            self.assertTrue(_wait_for(lambda: "a secret is one line" in self.out_text()))
+        self.assertEqual(store.call_args_list, [mock.call("pathfinder-mcp-rv11test", "TOKEN", "tok-value")] * 2)
+
+    def test_screen_closing_while_masked_turns_bracketed_paste_off(self):
+        self.type_("/secret rv11test TOKEN\r")
+        self.assertTrue(_wait_for(lambda: "(hidden;" in self.out_text()))
+        self.type_("\x04")
+        self._main.join(timeout=2)
+        self.assertTrue(_wait_for(lambda: self.out_text().endswith("\x1b[?2004l")))
+
+    def test_masked_input_drops_escape_sequences_whole(self):
+        """CSI and SS3 keys (F1 is ESC O P) leave no byte in the value; letters stay."""
+        with mock.patch("pathfinder.keychain.store") as store:
+            self.type_("/secret rv11test TOKEN\r")
+            self.assertTrue(_wait_for(lambda: "(hidden;" in self.out_text()))
+            self.type_("\x1b[200~BPASTE\x1b[201~\x1b[A\x1b[D\x1b[1;5C\x1bOP")
+            self.assertTrue(_wait_for(lambda: self.out_text().endswith(tui_secret.SECRET_PROMPT + "******")))
+            self.type_("\r")
+            self.assertTrue(_wait_for(lambda: store.called))
+            store.assert_called_once_with("pathfinder-mcp-rv11test", "TOKEN", "BPASTE")
+
     def test_ctrl_c_interrupts_a_running_stream_then_quits(self):
         self.daemon.send({"type": "turn.start", "turn": 1})
         time.sleep(0.1)
@@ -343,6 +454,17 @@ class TuiCase(unittest.TestCase):
             self.assertFalse(set(line) & set("\u200b\u202e\x9b\x1b"), repr(line))
             self.assertIn(shown, line)
             self.assertIn("send\\u200b", line)
+
+    def test_gate_args_clipped(self):
+        """5d: past 300 shown characters the args end in a tail. The count is taken after escaping,
+        and the cut never splits an escape: here a `\\u200b` straddles the 300th character."""
+        args = {"q": "a" * 290 + "\u200b" * 10}  # `{"q": "` and 290 letters: 297 shown, then 6-long units
+        for msg in ({"type": "gate", "id": "g1", "tool": "search", "args": args},
+                    {"type": "job.gate", "id": "j1", "approval": "a1", "tool": "search", "args": args}):
+            self.assertIn(' search {"q": "' + "a" * 290 + "...(clipped; /approvals) - /approve", tui.render(msg))
+        exact = tui.render({"type": "gate", "id": "g1", "tool": "search", "args": {"q": "a" * 291}})
+        self.assertIn('"a' + "a" * 290 + '"} - /approve', exact)  # exactly 300 shown: kept whole
+
 
 if __name__ == "__main__":
     unittest.main()

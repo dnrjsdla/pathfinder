@@ -3,9 +3,10 @@
 **Where this stands (2026-09-30).**
 - **Code:** branch `partition-8` (worktree `.claude/worktrees/partition-8`). Merged, each after
   review: U0, U1, U2, U5 (U5b), U9, U13, and on 2026-09-30 U21, U22, U24, U3, U4, U23, U30, U6,
-  U12, U25, U31, U7a, U7b, U8. `daemon.py` 762/780, `loop.py` 293/520, `installer.py` 655/700.
-- **Next:** U32 (D63) and U33 (the remaining raw exits), then U10, U11, U14a, U14b, U15a, U15b,
-  U16, U26, U27-U29, U17, U18.
+  U12, U25, U31, U7a, U7b, U8, U32, U33, U10, U14a, U11, U14b, D64, U34. `daemon.py` 766/780, `tui.py`
+  367/400 + `tui_secret.py` 71/150, `installer.py` 664/700, `loop.py` 295/520.
+- **Next:** U15a (in review; deploy gate), U34 (D65), U15b, U16, U26, U27-U29,
+  U17, U18. `tui.py` has room for U15b, U16 and U26 after D64.
 
 The unit table at the end is where the next session starts. Every row carries its state, its
 files, its size, what it waits for, and its tests.
@@ -272,6 +273,7 @@ Counts are `splitlines()` on `partition-8` at 939c831; "with U2" is the review w
 | `senses/_eventkit.py` | 210 | none today; 250 (U17) | 210 |
 | `mcp/tools.py` | 116 | `mcp/` 1,858 | ~119 (U22) |
 | `tui.py` | 314 | 400 | ~357 |
+| `tui_secret.py` | new; 71 (D64 moved the masked input out of `tui.py`, 392 -> 367) | 150 (new, D64) | ~71 |
 | `init.py` | **297** | 300 | 297 |
 | `skills.py` | new | 120 (new, D61) | ~80 (U27) |
 | `keychain.py`, `config.py`, `__main__.py` | 14, 169, 455 (463 with U2) | none | ~82, ~179, ~490 |
@@ -771,11 +773,13 @@ below:
 - `pathfinder secret <id> NAME`: Ctrl-C or EOF at the prompt stores nothing and exits 1.
 - Measured on the real Keychain with throwaway items: a crafted value, service or account cannot
   write a second item or run a second command; the value never shows in `ps`.
-- **Open, the owner's choice (U34):** an installed server's entry records only
-  `{NAME: "keychain:NAME"}`, so start cannot tell a required variable from an optional one or
-  know a registry `default`. Today a required variable with a default stops the check and asks
-  for it as a secret, and a missing optional secret disables the whole server at start although
-  the check trialled without it.
+- **Decided (D65, U34):** an installed server's entry recorded only `{NAME: "keychain:NAME"}`,
+  so start could not tell a required variable from an optional one or know a registry `default`:
+  a required variable with a default stopped the check and was asked for as a secret, and a
+  missing optional secret disabled the whole server at start although the check trialled without
+  it. The value grammar now says both: `keychain:NAME` required, `keychain?:NAME` optional,
+  `=<default>` for a non-secret variable, read by one resolver (`mcp/servers._resolve`) for the
+  check and the start. Entries written before it are not migrated; a reinstall writes the grammar.
 
 ## A private home
 
@@ -845,7 +849,7 @@ call errors.
 - **5b.** Job lines reach a moved screen, through move 2. **U4, not started.**
 - **5c.** One EventKit store, built and reset under a lock. **Done (U13).**
 - **5d.** `tui.render` clips `gate` and `job.gate` args at 300 characters with an
-  `...(clipped; /approvals)` tail. **U11, not started.**
+  `...(clipped; /approvals)` tail. **Done (U11).**
 - **5e.** A forced pass that succeeds clears the retry wait. **Done (U9).**
 - **5f.** `keychain.secret` misreads a non-ASCII value. **U10, not started.**
   - `find-generic-password -w` prints it as bare hex (a throwaway `비밀abc` came back as
@@ -1546,10 +1550,10 @@ parallel. **Deploy gate: U15a, U21, U31 and U33.**
 | U7b | **done, merged** | The `retract` line | `tui.py` (`render`), `__main__.py` (`_stream`) | +4 | U7a | `test_retract_rendered` |
 | U8 | **done, merged** | The adopted prompt | `prompts/system.txt` | — | before U18 | `test_second_look_matches_the_bench` (in U17) |
 | U10 | **done, merged** | Intake, D40, 5f | `keychain.py` (`store`, fixed `secret`), `installer.py` (`check` step 4), `__main__.py` (`secret`) | +36 | U3, U7b | `test_store_escapes_backslash_then_quote`, `test_missing_required_secret_stops_before_the_trial` |
-| U11 | not started | `/secret`, 5d | `tui.py` | +22 | U7b, U10 | `test_slash_secret_masks_and_never_touches_the_socket` |
+| U11 | **done, merged** | `/secret`, 5d (bracketed paste, a 50 ms drain) | `tui.py` | +22 | U7b, U10 | `test_slash_secret_masks_and_never_touches_the_socket` |
 | U12 | **done, merged** | 5a | `state.py`, `deliver.py`, `daemon.py` line 573 | ~0 | U6 | `test_presence_is_the_newest_row_across_sessions` |
 | U14a | **done, merged** | Born private | `ledger.py`, `state.py` | +1 | U12, U24 | `test_partition_and_lock_born_0600_dir_0700` |
-| U14b | not started | Existing files private | `config.py` (`make_private`), `__main__.py` (daemon branch), `init.py` (literals) | +11 | U10 | `test_make_private_drops_group_other_keeps_owner_x_skips_symlinks_and_workspace` |
+| U14b | **done, merged** | Existing files private | `config.py` (`make_private`), `__main__.py` (daemon branch), `init.py` (literals) | +11 | U10 | `test_make_private_drops_group_other_keeps_owner_x_skips_symlinks_and_workspace` |
 | U15a | not started | D53's backstop: the vault at the ledger door (**deploy gate**) | `ledger.py`, `keychain.py` (`TOKEN_RE`, vault, sweep, index), `scripts/scan_personal.py` | +45 | U14a, U10 | `test_paste_vaulted_and_handle_returned`, `test_pasted_token_reaches_the_record_as_a_handle` |
 | U15b | not started | Binding a handle | `__main__.py` (`secret --from`), `tui.py` (`/secret --from`; the masked prompt lists live handles) | +7 | U15a, U11, U14b | `test_bind_moves_and_deletes_the_pasted_item` |
 | U16 | not started | D53's main path: the harness asks | `daemon.py` (`record` hook, `secret` handler), `tui.py` (`secret.ask`), `installer.py` (event fields) | daemon +9, tui +12, installer +1 | U15b | `test_secret_value_never_reaches_ledger_or_state` |
@@ -1558,7 +1562,7 @@ parallel. **Deploy gate: U15a, U21, U31 and U33.**
 | U26 | not started | The mail password intake; the daemon asks at start when the item is missing | `keychain.py` (`target`), `tui.py`, `__main__.py`, `daemon.py` | +12, daemon +4 | U16, U15b | `test_secret_mail_resolves_service_and_user`, `test_missing_mail_password_is_asked_at_start` |
 | U32 | **done, merged** | D63: only the owner's activity keeps a session alive; notice text passes `clean`; the approval line's way out | `state.py`, `daemon.py`, `jobs.py`, `broker.py` | +6 | U7a, U31 | `test_say_after_a_job_gate_in_an_aged_session_lands_in_the_new_session` |
 | U33 | **done, merged** | The remaining raw exits: the agenda, sense summaries, MCP parameter schemas, gate lines, `sanitize` (**deploy gate**) | `senses/*.py`, `mcp/tools.py`, `mcp/protocol.py`, `tui.py` | +10 | U31, U7b | `test_agenda_lines_pass_the_filter` |
-| U34 | waits for the owner's choice of format | An installed server's entry records which variables are optional and which have a default; start agrees with the check | `installer.py`, `catalog.py`, `mcp/servers.py` | ~+7 | U10 | `test_required_with_a_default_does_not_stop_and_gets_the_default` |
+| U34 | **done, merged** | An installed server's entry records which variables are optional and which have a default; start agrees with the check | `installer.py`, `catalog.py`, `mcp/servers.py` | ~+7 | U10 | `test_required_with_a_default_does_not_stop_and_gets_the_default` |
 | U27 | not started | Skills (D58, D61): the seed copy, the index, `read_skill` | `skills.py` (new), `pyproject.toml`, `daemon.py` (`skills.bind`) | ~80, +1, daemon +1 | — | `test_seed_is_copied_when_missing_and_never_overwrites`, `test_index_lists_every_skill_sorted_and_uncut` |
 | U28 | not started | Skills: the write path (a proposal from a user turn, always approved) | `memory.py` (`vault_path`), `prompts/system.txt` | +4 | U27, U8 | `test_skills_target_user_only_and_always_approved` |
 | U29 | not started | The first seed | `pathfinder/skills/connect-gmail.md` | ~35 | U27, U25, U26 | `test_connect_gmail_is_shipped_and_parses` |

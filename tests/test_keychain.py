@@ -121,18 +121,18 @@ class SecretCliTest(unittest.TestCase):
 
     def test_cli_secret_uses_getpass_and_store(self):
         with mock.patch("pathfinder.__main__.keychain.store") as store:
-            self.assertEqual(self._main("easy-notion", "NOTION_TOKEN"), 0)
-            store.assert_called_once_with("pathfinder-mcp-easy-notion", "NOTION_TOKEN", "v4lue")
-            self.assertIn("NOTION_TOKEN", self.ask.call_args[0][0])
+            self.assertEqual(self._main("rv11test", "TOKEN"), 0)
+            store.assert_called_once_with("pathfinder-mcp-rv11test", "TOKEN", "v4lue")
+            self.assertIn("TOKEN", self.ask.call_args[0][0])
             store.reset_mock()
-            self.assertEqual(self._main("Bad_Id", "NOTION_TOKEN"), 2)
-            self.assertEqual(self._main("easy-notion", "NOT-A-NAME"), 2)
+            self.assertEqual(self._main("Bad_Id", "TOKEN"), 2)
+            self.assertEqual(self._main("rv11test", "NOT-A-NAME"), 2)
             store.assert_not_called()
 
     def test_cli_secret_ctrl_c_eof_and_empty_store_nothing(self):
         with mock.patch("pathfinder.keychain.subprocess.run") as run:
             for answer in (KeyboardInterrupt(), EOFError(), "", "   "):
-                self.assertEqual(self._main("easy-notion", "NOTION_TOKEN", answer=answer), 1)
+                self.assertEqual(self._main("rv11test", "TOKEN", answer=answer), 1)
                 self.assertNotIn("Traceback", self.err.getvalue())
             run.assert_not_called()
 

@@ -287,7 +287,7 @@ def search_cmd(home, text):
 def secret_cmd(id, name):
     """`pathfinder secret ID NAME`: the value read hidden and put straight into the Keychain -
     no socket, no daemon, no ledger."""
-    if not config._MCP_SERVER_ID.match(id) or not (name.isidentifier() and name.isascii()):
+    if not keychain.valid_target(id, name):
         print("pathfinder: secret ID NAME takes a server id and an env variable name", file=sys.stderr)
         return 2
     try:
@@ -413,6 +413,7 @@ def main(argv=None):
     if len(args) == 2 and args[0] == "service" and args[1] in ("start", "stop", "restart", "status"):
         return init_mod.service(home, args[1])
     if args == ["daemon"]:
+        config.make_private(home)  # every upgrade, and launchd's daemon.log
         try:
             asyncio.run(Daemon(home).serve())
         except KeyboardInterrupt:

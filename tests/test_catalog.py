@@ -37,7 +37,10 @@ FIXTURE_NPM_ITEM = {
             "runtimeArguments": [{"value": "-y", "type": "positional"}],
             "environmentVariables": [
                 {"name": "API_KEY", "description": "a key", "isRequired": True, "isSecret": True},
-                {"name": "OPTIONAL_FLAG", "description": "optional"},
+                {"name": "OPTIONAL_FLAG", "description": "optional", "default": "off\u200b"},
+                {"name": "BAD=NAME", "isRequired": True},  # not an identifier: dropped (D65)
+                {"name": 7, "isRequired": True}, {"name": None},  # a malformed item does not abort the poll
+                {"name": "토큰", "isRequired": True},  # not ASCII: `/secret` could not store it
             ],
         }],
         "remotes": [{"type": "streamable-http", "url": "https://example.com/mcp"}],
@@ -182,8 +185,8 @@ class CandidateTest(unittest.TestCase):
         self.assertEqual(pkg["runtime"], "npx")
         self.assertEqual(pkg["args"], ["-y", f"{pkg['identifier']}@{pkg['version']}"])
         self.assertEqual(pkg["env"], [
-            {"name": "API_KEY", "secret": True, "required": True},
-            {"name": "OPTIONAL_FLAG", "secret": False, "required": False},
+            {"name": "API_KEY", "secret": True, "required": True, "default": None},
+            {"name": "OPTIONAL_FLAG", "secret": False, "required": False, "default": "off"},  # registry text, `oneline`
         ])
         self.assertEqual(pkg["remotes"], FIXTURE_NPM_ITEM["server"]["remotes"])
         self.assertEqual(cand["verification"], {

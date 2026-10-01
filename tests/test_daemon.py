@@ -1900,9 +1900,10 @@ class PastedTokenScreenTest(DaemonHarness):
 
     def setUp(self):
         super().setUp()
-        self.items = {}
+        self.items, self.deleted = {}, []
         for name, fake in (("store", lambda s, a, v: self.items.__setitem__(a, v)),
-                           ("delete", lambda s, a: True), ("secret", lambda s, a: None)):
+                           ("delete", lambda s, a: self.deleted.append(a) or True),
+                           ("secret", lambda s, a: None), ("_gone", lambda a: True)):
             patch = mock.patch(f"pathfinder.keychain.{name}", side_effect=fake)
             patch.start()
             self.addCleanup(patch.stop)
@@ -1937,6 +1938,21 @@ class PastedTokenScreenTest(DaemonHarness):
         self.addCleanup(state.close)
         for gate in gates:
             self.assertEqual(state.approval(gate["id"])["args"], gate["args"])
+
+    def test_daemon_start_sweeps_expired_pastes(self):
+        """D53: a daemon start sweeps once; opening a ledger does not (a CLI command, the memory
+        pass's read-only ledger)."""
+        index = self.home / "pasted.json"
+        index.write_text(json.dumps({"pasted": {"pasted-1": time.time() - 25 * 3600}}))
+        Ledger(self.home)
+        self.assertEqual(self.deleted, [])
+
+        async def scenario(daemon):
+            return None
+
+        self.run_with(fake_model("ok"), scenario)
+        self.assertEqual(self.deleted, ["pasted-1"])
+        self.assertEqual(json.loads(index.read_text()), {"pasted": {}})
 
     def test_steer_is_kept_as_recorded(self):
         """A steer said after the model's last chunk is re-sent as the next turn's `trailing` text

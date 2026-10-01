@@ -332,7 +332,7 @@ class PastedTokenTest(unittest.TestCase):
 
     def _security(self, argv, input=None, **kw):
         """A fake `security` over `self.items`, for the real secret/store/delete/_gone."""
-        self.calls += 1
+        self.calls.append(argv[1])
         if argv[1] == "-i":  # add-generic-password -U -s "..." -a "..." -w "..."
             cmd = shlex.split(input)
             self.items[(cmd[cmd.index("-s") + 1], cmd[cmd.index("-a") + 1])] = cmd[cmd.index("-w") + 1]
@@ -385,13 +385,15 @@ class PastedTokenTest(unittest.TestCase):
         now = time.time()
         self._back_date({"pasted-1": now - 25 * 3600, "pasted-2": now - 3600})
         self.items = {("pathfinder-pasted", "pasted-1"): "a", ("pathfinder-pasted", "pasted-2"): "b"}
-        Ledger(self.home)  # a daemon start sweeps
+        Ledger(self.home)  # opening a ledger sweeps nothing: only a daemon start and a paste do
+        self.assertEqual(len(self.items), 2)
+        keychain_mod.sweep(self.home / "pasted.json", time.time())  # what a daemon start runs
         self.assertEqual(list(self.items), [("pathfinder-pasted", "pasted-2")])
         self.assertEqual(self._index(), {"pasted": {"pasted-2": now - 3600}})
 
         self._back_date({"pasted-2": now - 25 * 3600})
         self.locked = True  # the entry stays for the next sweep
-        Ledger(self.home)
+        keychain_mod.sweep(self.home / "pasted.json", time.time())
         self.assertEqual(list(self._index()["pasted"]), ["pasted-2"])
         self.locked = False
         seq = self._say(self.TOKEN)["seq"]  # a new paste sweeps too
@@ -402,11 +404,11 @@ class PastedTokenTest(unittest.TestCase):
         now = time.time()
         self._back_date({"pasted-1": now - 3600, "pasted-2": now - 3600})
         self.items = {("pathfinder-pasted", "pasted-2"): "b"}
-        Ledger(self.home)
+        keychain_mod.sweep(self.home / "pasted.json", now)
         self.assertEqual(list(self._index()["pasted"]), ["pasted-2"])
         self._back_date({"pasted-1": now - 3600})
         self.items, self.locked = {}, True  # a locked keychain cannot say it is gone: kept
-        Ledger(self.home)
+        keychain_mod.sweep(self.home / "pasted.json", now)
         self.assertEqual(list(self._index()["pasted"]), ["pasted-1"])
 
     def test_an_unusable_index_never_stops_an_append(self):
@@ -471,12 +473,41 @@ class PastedTokenTest(unittest.TestCase):
 
     def test_a_token_in_the_owners_text_gets_a_handle(self):
         mock.patch.stopall()
-        self.calls = 0
+        self.calls = []
         with mock.patch("pathfinder.keychain.subprocess.run", side_effect=self._security):
             event = self._say(f"key {self.TOKEN}")
         self.assertEqual(event["text"], f"key [secret:pasted-{event['seq']}]")
         self.assertEqual(self.items, {("pathfinder-pasted", f"pasted-{event['seq']}"): self.TOKEN})
-        self.assertGreater(self.calls, 0)
+        self.assertIn("-i", self.calls)
+
+    def test_an_existing_item_is_never_replaced(self):
+        """Every home shares the service, and a seq is unique only in its own ledger: a trial home
+        or a reset `events/` reaches `pasted-1` again, and another home's live item is there."""
+        mock.patch.stopall()
+        self.calls, self.items = [], {("pathfinder-pasted", "pasted-1"): "another home's value"}
+        with mock.patch("pathfinder.keychain.subprocess.run", side_effect=self._security):
+            event = self._say(self.TOKEN)
+        self.assertEqual((event["seq"], event["text"]), (1, "[redacted]"))
+        self.assertEqual(self.items, {("pathfinder-pasted", "pasted-1"): "another home's value"})
+        self.assertNotIn("-i", self.calls)
+        self.assertNotIn("delete-generic-password", self.calls)
+
+    def test_a_locked_keychain_drops_no_handle(self):
+        """Only exit 44 says an item is gone: a locked keychain (exit 51) keeps every handle, and
+        the paste is redacted without an add or a delete."""
+        mock.patch.stopall()
+        self._back_date({"pasted-9": time.time() - 3600})
+        before = self._index()["pasted"]
+        calls = []
+
+        def locked(argv, input=None, **kw):
+            calls.append(argv[1])
+            return mock.Mock(returncode=51, stdout="", stderr="")
+        with mock.patch("pathfinder.keychain.subprocess.run", side_effect=locked):
+            self.assertEqual(self._say(self.TOKEN)["text"], "[redacted]")
+        self.assertEqual(self._index(), {"last": 2, "pasted": before})  # not even rewritten
+        self.assertNotIn("delete-generic-password", calls)
+        self.assertNotIn("-i", calls)
 
     def test_pasted_token_reaches_the_record_as_a_handle(self):
         """The owner's paste becomes a handle in history; a call that passes the handle on is

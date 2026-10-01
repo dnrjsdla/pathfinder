@@ -537,8 +537,11 @@ and only text the owner typed is vaulted; any other text is redacted at the door
 event `pasted-<seq>-2`, `-3`, and `pasted.json` keeps only `{"pasted": {handle: created}}`. The
 counter it kept before did not survive a lost or malformed index: it restarted, so an old handle
 in the ledger could come to name a new value. A seq never recurs, so U15b's "expired - enter it
-again" can trust that a number means one value. A sweep also drops a handle whose item is gone;
-an item whose handle a lost index listed stays in the Keychain, unknown - the accepted limit.
+again" can trust that a number means one value. The service is shared by every home and a seq
+is unique only within its own ledger, so an item that already holds the name (a trial home's,
+or one left from before a reset) is never replaced: that token is written `[redacted]`. A sweep,
+at daemon start and on a paste, also drops a handle whose item is gone; an item whose handle a
+lost index listed stays in the Keychain, unknown - the accepted limit.
 The vault runs only for an event with `trust: user` - the owner's chat text and steers, and a
 reminder or a schedule entry, whose senses declare `user`. Every other event (a tool's call and
 result, a third party's signal, a job's and the model's words, memory) passes `keychain.mask`,

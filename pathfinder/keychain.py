@@ -156,6 +156,9 @@ def vault(event, index: Path):
         if held is None:
             held = sweep(index, time.time())
         account = f"pasted-{event['seq']}" + (f"-{len(handles) + 1}" if handles else "")
+        if not _gone(account):  # every home shares the service: an item already there is never replaced
+            handles[m[0]] = "[redacted]"
+            return handles[m[0]]
         try:
             store(PASTED, account, m[0])
             held[account] = time.time()

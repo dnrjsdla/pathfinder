@@ -16,7 +16,7 @@ import time
 import uuid
 from pathlib import Path
 
-from . import clock, config, jobs, loop, memory, rules as rules_mod, signals, tools
+from . import clock, config, jobs, keychain, loop, memory, rules as rules_mod, signals, tools
 from .broker import Broker, Gate, chat_approval
 from .deliver import Notice, Outbox
 from .ledger import Ledger
@@ -188,6 +188,7 @@ class Daemon:
             if _answers(path):
                 raise RuntimeError(f"a daemon is already serving {path}")
             path.unlink()  # left behind by a crash
+        keychain.sweep(self.ledger.pasted, time.time())  # D53: pasted items older than 24 hours go, once a start
         old = os.umask(0o177)  # the socket is born 0600: no window where another user can connect
         try:
             self.server = await asyncio.start_unix_server(self.handle, path=str(path), limit=LINE_LIMIT)

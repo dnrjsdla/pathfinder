@@ -52,10 +52,7 @@ class Ledger:
         self._lock_path = self.dir / ".lock"
         self._lock_path.touch(mode=0o600, exist_ok=True)
         self.last_seq, self._known_tail = self._recover_last_seq()
-        self._index = Path(root) / "pasted.json"  # D53: pasted tokens' handles and times
-        with self._lock_path.open("r+") as lockf:  # every daemon start sweeps expired pastes
-            fcntl.flock(lockf, fcntl.LOCK_EX)
-            keychain.sweep(self._index, time.time())
+        self.pasted = Path(root) / "pasted.json"  # D53: pasted tokens' handles and times; the daemon sweeps it
 
     def _files(self):
         return sorted(self.dir.glob("*.jsonl"))  # YYYY-MM-DD names sort chronologically
@@ -111,7 +108,7 @@ class Ledger:
                 # D53/D66: a token-shaped string the owner typed enters the Keychain here, and the
                 # event, written and returned, carries only its handle - so state, history and the
                 # record do too; in any other text it is redacted, with no Keychain call
-                event = keychain.vault(event, self._index) if trust == "user" else keychain.mask(event)
+                event = keychain.vault(event, self.pasted) if trust == "user" else keychain.mask(event)
                 path = self.dir / f"{partition(ts)}.jsonl"
                 line = json.dumps(event) + "\n"
                 # A crash mid-write leaves a fragment without a newline. Appending straight

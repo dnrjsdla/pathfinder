@@ -315,7 +315,7 @@ class JobControlTest(JobsHarness):
         """D53: the job keeps a masked goal and masked steers for its model and its notice; in the
         ledger the owner's steer gets a handle and the goal, the model's words, is redacted (D66)."""
         token = "ntn_" + "g" * 40  # built by concatenation, so the scanner never flags this file
-        for name, fake in (("store", None), ("delete", None), ("secret", lambda s, a: None)):
+        for name, fake in (("store", None), ("delete", None), ("secret", lambda s, a: None), ("_gone", lambda a: True)):
             patch = mock.patch(f"pathfinder.keychain.{name}", side_effect=fake)
             patch.start()
             self.addCleanup(patch.stop)

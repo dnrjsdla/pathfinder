@@ -53,7 +53,7 @@ changes nothing that is already in place.
 | `~/.zshrc` (one guarded line) and `~/.pathfinder/hooks/pathfinder.zsh` | the shell sense, only if you said yes |
 | `~/.claude/settings.json` (two hook entries) | the Claude Code sense, only if you said yes |
 | `~/.claude.json` (`mcpServers`) | tools you approved, so Claude Code sees them too |
-| macOS Keychain | every secret (an MCP server's token, a mail password); never in a file |
+| macOS Keychain | every secret (an MCP server's token, a mail password), entered with `/secret`; never in a file |
 
 `ARCHITECTURE.md` (and `ARCHITECTURE.ko.md`) describe every module; `docs/decisions/DECISIONS.md`
 is the list of decisions with the condition that would reverse each.
@@ -64,21 +64,42 @@ is the list of decisions with the condition that would reverse each.
 to paste later. `config set senses` replaces the whole value, so keep what is already on:
 
 ```bash
-security add-generic-password -s pathfinder-mail -a you@example.com -w      # the IMAP password
 pathfinder config set senses '{"attach": {}, "catalog": {}, "schedule": {}, "reminders": {}, "shell": {}, "claude_code": {}, "calendar": {}, "mail": {"host": "imap.example.com", "user": "you@example.com"}}'
+pathfinder secret mail                   # the IMAP password, typed hidden into the Keychain (or /secret mail in the screen)
 ```
 
+While mail is on and its password is missing, the screen asks for it when it attaches.
 macOS asks for Calendar access the first time the calendar sense runs.
 
 ## Installing a tool
 
 ```bash
-pathfinder search "postgres"             # from the MCP registry, license and integrity checked
+pathfinder search "postgres"             # the local copy of the MCP registry, kept by the catalog sense
 pathfinder install <registry name>       # proposes; the row shows the checks and the tools it found
 pathfinder approve ID                    # installs into config.json and ~/.claude.json; pathfinder uninstall <id> reverses it
 ```
 
 Or just say "install it" when the daemon proposes one for the project you have open.
+
+A server that needs a token stops before its trial, and the screen asks for the token, masked.
+To store one yourself: `/secret <id> NAME` in the screen, or `pathfinder secret <id> NAME` in a
+shell, then ask for the install again. The value never goes through the chat. A token pasted
+into the chat by mistake is stored in the Keychain as `pasted-<n>`, and the screen says how to
+bind it (`/secret <id> NAME --from pasted-<n>`).
+
+## Upgrading
+
+After upgrading to this version, rebuild the derived state once, with the daemon stopped, so
+past turns get the record of the tool calls (the `messages.ref` column):
+
+```bash
+pathfinder service stop
+pathfinder reindex
+pathfinder service start
+```
+
+`pathfinder service restart` (or a stop and a start) closes the screen's connection: start
+`pathfinder tui` again to reattach.
 
 ## Model providers
 

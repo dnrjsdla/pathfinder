@@ -1363,6 +1363,8 @@ designed here.
 
 ## ARCHITECTURE.md / ARCHITECTURE.ko.md, README pair (doc debt)
 
+**Done 2026-10-02 (p8-docs2).**
+
 **The openings** (English "Built so far: partition 5", Korean 구획 5) become partition 8, one
 paragraph covering 1-8.
 

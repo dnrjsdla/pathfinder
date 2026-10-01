@@ -311,7 +311,8 @@ footer p{max-width:50em}
     <tr><th>불변조건</th><th>새 구조에서</th><th>확인 방법</th></tr>
     <tr><td>상주 프롬프트는 세션 중 안 바뀐다</td><td><span class="tag keep">유지</span></td><td><code>test_resident_frozen</code></td></tr>
     <tr><td>남의 텍스트는 데이터지 지시가 아니다 · 검색 결과는 사용자 글 앞에</td><td><span class="tag keep">유지</span> + 장부의 <code>source_trust</code></td><td><code>bench/injection</code> 0/20</td></tr>
-    <tr><td>말한 것만 기억한다 · 재부착은 봉투를 되살리지 않는다</td><td><span class="tag keep">유지</span></td><td><code>test_restore_said_only</code></td></tr>
+    <tr><td>이력에는 두 가지만 실린다 — 사용자와 비서가 한 말(origin 이 user 인 user, final 인 assistant), 그리고 비서가 사용자 턴에서 부른 툴 호출마다 이름 · 인자 · 상태(성공 · 실패 · 거부 · 승인 대기). 툴 결과 본문 · 신호 봉투 · 두 번째 확인이 철회한 초안은 절대 실리지 않는다. 호출 기록은 장부에 적힌 그 호출의 사건(tool_call · tool_result · approval_pending · approval)에서만 만들어지고 모델이 자기에 대해 쓴 말에서는 절대 만들어지지 않는다 — 일어나지 않은 호출은 기록에 나타날 수 없다. 인자는 120자로 잘리고 다른 모든 글과 같은 비밀 손잡이 문을 지난 모습으로만 실린다</td><td><span class="tag new">개정 (D52)</span></td><td><code>test_history_is_said_and_called_only</code> · <code>test_no_tool_record_without_tool_call_events</code></td></tr>
+    <tr><td>화면에 흘린 글은 어떤 결말이든(답 · 예산 소진 · 중단 · 게이트 · 스트림 도중 모델 오류 · 철회) 전부 장부에 남는다. 이력에서 빠지는 흘린 글은 두 번째 확인이 철회한 초안 하나뿐이며, 그것도 장부에 철회 표시와 이유를 달고 남고 지워지거나 고쳐지지 않는다</td><td><span class="tag new">새로 (D51)</span></td><td><code>test_every_streamed_delta_is_in_the_ledger</code> · <code>test_withdrawn_draft_marked_with_reason_and_out_of_history</code></td></tr>
     <tr><td>남의 글에서 USER 사실로 가는 길이 없다</td><td><span class="tag keep">유지</span> — <code>gate</code> 의 origin 필터</td><td><code>test_user_facts_need_user_origin</code></td></tr>
     <tr><td>셸은 가둘 수 없으면 실행하지 않는다</td><td><span class="tag keep">유지</span></td><td><code>test_shell</code></td></tr>
     <tr><td>되돌릴 수 있는 것만 자동 실행</td><td><span class="tag keep">유지</span></td><td><code>test_policy</code></td></tr>

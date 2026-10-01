@@ -93,10 +93,12 @@ pathfinder config set senses '{"mail": {"host": "imap.example.com", "user": "you
 `calendar`/`reminders` need `pyobjc-framework-EventKit` installed and Calendar/Reminders access
 granted to the terminal running the daemon (System Settings > Privacy & Security); without it
 they log one `error` event and stay quiet from then on (`pathfinder/senses/_eventkit.py`).
-`mail`'s password is never in config - store it once with:
+`mail`'s password is never in config. Once the sense is on, store it once, typed hidden:
 
 ```bash
-security add-generic-password -s pathfinder-mail -a you@example.com -w
+pathfinder secret mail          # or /secret mail in the screen
 ```
 
-(`-s` must match `keychain_service`, default `pathfinder-mail`; `-a` must match `user`.)
+It goes to the Keychain under the sense's `keychain_service` (default `pathfinder-mail`) and
+`user`. While the sense is on and the password is missing, the daemon asks the screen for it
+when the screen attaches.

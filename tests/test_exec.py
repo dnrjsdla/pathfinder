@@ -50,16 +50,29 @@ class ExecTest(unittest.TestCase):
     @unittest.skipUnless(pexec.available(), "needs sandbox-exec")
     def test_exec_interrupt_kills_sandboxed_process_tree(self):
         """The sandboxed tree is sandbox-exec -> bash -> children: the group kill must reach
-        a backgrounded grandchild too, and communicate() must return promptly."""
-        control = TurnControl()
-        threading.Thread(target=lambda: (time.sleep(0.2), control.interrupt.set())).start()
+        a backgrounded grandchild too, and communicate() must return promptly. The grandchild
+        runs under a name of its own so a concurrent suite's `sleep` cannot match."""
+        import subprocess
+        import uuid
+        tag = f"pf-test-{uuid.uuid4().hex}"
+        alive = lambda: subprocess.run(["pgrep", "-f", f"^{tag} 31"], capture_output=True).returncode == 0
+        control, seen = TurnControl(), []
+
+        def interrupt_once_running():
+            for _ in range(20):
+                if alive():
+                    break
+                time.sleep(0.05)
+            seen.append(alive())
+            control.interrupt.set()
+        threading.Thread(target=interrupt_once_running).start()
         start = time.monotonic()
-        result = pexec.run_command("sleep 31 & sleep 30", control=control, timeout=10)
+        result = pexec.run_command(f"(exec -a {tag} sleep 31) & sleep 30", control=control, timeout=10)
         self.assertLess(time.monotonic() - start, 1.5)
         self.assertTrue(result.get("killed"))
+        self.assertEqual(seen, [True])  # the grandchild ran, so its absence below means something
         time.sleep(0.2)
-        import subprocess
-        self.assertEqual(subprocess.run(["pgrep", "-f", "sleep 31"], capture_output=True).returncode, 1)
+        self.assertFalse(alive())
 
     def test_exec_timeout(self):
         start = time.monotonic()

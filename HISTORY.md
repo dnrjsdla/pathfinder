@@ -1299,3 +1299,65 @@ the 215,000 the contract estimated. A control (T2) timed out once (http 0) and w
 The first sync took 462 s (m9), 517 s (U0) and 1,076 s (U1's review, under load) for about
 37,200 rows, 54 MB; a search in the copy takes 1-6 ms. The duration depends on the registry and
 the machine, so no single figure is a fact to design against.
+
+## 2026-10-06 — Partition 8's live checks: thirteen of sixteen pass, two wait for the owner's hand
+
+Run in temp homes (`/tmp/pf8a`..`/tmp/pf8d`) against `partition-8` at `89cea92` with the owner's
+model, by four reviewer agents over about 60 model turns; the owner's daemon was not touched. The
+contract's list is `docs/plans/partition-8.md`, "It runs".
+
+| check | result | what was seen |
+|---|---|---|
+| (1) first sync | pass | `say` answered in 1.2 s with 300 rows in the copy; `search_tools` during the sync carried "the registry copy is still syncing (300 so far, since 00:10)"; complete after **1,114 s: 39,676 rows, 57.8 MB**, 0600. A kill at 6,400 rows resumed from the stored cursor (`registry.db` `meta.cursor`), `started_at` unchanged. No child left after SIGTERM. |
+| (2) search | pass | the five m9 queries answered in 9-87 ms with real names, ten each; `propose_install` proposed (one candidate's remote was a real 404, refused correctly); a row deleted from the copy still proposed through the exact-name lookup. |
+| (3) later syncs | pass / not checked | the next start ran one incremental page in 5.9 s. The network pull was not done live (it would cut the owner's daemon): `test_mirror` covers the failure note and the restart (27 tests). A real registry timeout happened anyway at 339 s: the next search said "the last registry sync failed at 00:16: The read operation timed out" and restarted the sync. |
+| (4) intake | pass | the screen showed `*` only; a second `listen` client saw no value; events, `state.db`, WAL and the daemon log held 0 copies; the Keychain returned it; the shell form read the value from stdin when no tty. Throwaway items deleted. |
+| (6) pasted token | pass | the `user` event, `state.db` and the next turn's history hold `[secret:pasted-6]`; the Keychain holds the value; `--from pasted-6` bound it and emptied the index; a handle back-dated 25 h was swept at the next start. |
+| (7) private home | pass | a 0755/0644 home came out 0700/0600 everywhere; `find -perm +077` printed nothing. |
+| (8) split pass | pass | facts said in passing: the pass read the slice, searched, wrote one wiki page (`applied 1`) and left a session summary. The model had already filed the other two facts in their own turns (one USER.md proposal, one wiki page). |
+| (9) small defects | pass, 5a partial | 5d: the screen clipped a 400-character gate line at 300 with `...(clipped; /approvals)`, `approvals` printed it whole. 5b: a job from an ended session printed its gate and end lines on the moved screen. 5a: a notice arriving while the owner typed was held; with `session_resume_s` forced to 15 s the held notice went out as a banner to its old session instead of the screen (`deliver.py`; with the 2 h default this needs a hold longer than the resume window). |
+| (10) second look | pass, 10c not checked | greetings record `check: passed`; the added wait at the client is **0.55-0.63 s** (ledger timestamps say nothing: the final `assistant` is recorded after the verifier). In the pty: draft, the withdrawal line, the re-run; the ledger holds `assistant {final: false, withdrawn}`, `history()` only the re-run. 10c has no setting to force a prose verifier: `test_loop.test_bad_json_or_llm_error_or_cancel_leaves_the_draft` covers it. |
+| (11) record | pass | "did you call run_command just now?" answered yes with the arguments from the record line; no result text in history; denied shows `denied`, gated shows `(approval <id>) waiting for approval` (the id was added after the first run - below). |
+| (12) approval in chat | pass | "승인", "I'll approve", "yes" each got the harness line with no model request; the approval stayed pending; "yes, and also tell me the time" went to the model. A phrase repeated after the harness line reaches the model, as the line itself says ("say it again") - the first run read that as a defect; it is D52/D63's design. |
+| (13) exit measurement | pass | the section above. |
+| (14) docs | pass | both ARCHITECTURE files open with partition 8 and keep current line counts in §13; both READMEs name `/secret`. |
+| (16) skills | pass after a fix | seed copied 0600; an owner edit survived a restart; "Connect my Gmail" called `read_skill` and walked the steps without asking for a password; the memory pass cannot write `skills/` (unit test). **(16d) failed first**: "save this as a skill" was refused for a missing frontmatter, and the model saved a wiki page instead and said the skill was saved. After the fix below it wrote the frontmatter unprompted, the proposal queued (with `grants` allowing `edit_memory` too), `approvals` printed every line, approval made a 0600 file that `read_skill` lists. |
+| (5) Notion, (15) Gmail | waiting | the owner's token and app password. |
+
+### Fixed from these runs (`89cea92`)
+
+- `edit_memory`'s `target` description carries a skill's shape (`---`, `name`, `description`,
+  `---`, the body), and `skills.check` names it when `name` is missing. Before, the model had
+  no way to know and fell back to `wiki/`, which applies at once.
+- The record's gate row carries the approval id: `write_file {...} (approval 580cded0ec59)
+  waiting for approval`, then `denied`. The model had copied the harness's `/approve <id>` line
+  with an invented id.
+
+### Open, for the owner's decision
+
+- **The second look does not see the record (D51 vs D52).** It gets the previous answer, the
+  user line and "No tool was called in this turn." A correct answer taken from the record -
+  "the pending call is write_file, id 580cded0ec59", "yes, I called run_command" - is flagged
+  `unsupported_state` and withdrawn; the re-run then answers worse ("I cannot see pending IDs").
+  The verifier input is pinned to bench m10 by `test_second_look_matches_the_bench`, so
+  changing it is a measured-prompt change. Seen three times in these runs.
+- **A call refused at the broker's door leaves no trace and silences the second look.** An
+  unknown tool name, a coercion error or a policy deny returns before `emit("tool_call")`, so
+  the ledger and the record never see it, while `loop` counts the step as a tool call and skips
+  the check. Likely behind one (10b) turn that answered about reminders with no tool event.
+- **A failed first sync waits for the next search or the 24 h poll.** Contract-conforming, but a
+  registry timeout is transient; the copy would have stayed at 700 rows for a day without a
+  search. `failed_at` also stays set while a resumed sync is filling, so `search_tools` says
+  "failed" instead of "syncing".
+- Low: `say`'s stream prints gate arguments unclipped (the screen and `listen` clip); the install
+  line says "license unknown unknown"; a held notice to an ended session goes out as a banner.
+
+### Model behaviour, not forced by the harness
+
+- Files standing instructions and facts itself with `edit_memory` in the turn (so the pass finds
+  little left; m9' measured the pass alone).
+- Given a pasted token, saved the handle to `wiki/Secrets.md` - the value never leaked, but the
+  page keeps a handle that stops working once bound or swept.
+- Told "still syncing (300 so far)", answered "no weather tools in the registry", dropping the
+  qualifier.
+- Writes a skill's frontmatter unprompted once the tool description shows the shape.

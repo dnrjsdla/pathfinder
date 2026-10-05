@@ -6,9 +6,10 @@
   U12, U25, U31, U7a, U7b, U8, U32, U33, U10, U14a, U11, U14b, D64, U34, U15a (D66), and on
   2026-10-02 U15b, U16, U26, D67, and on 2026-10-05 U28. `daemon.py` 771/780, `installer.py` **699/700**, `tui.py`
   387/400 + `tui_secret.py` 136/150, `signals.py` + `rules.py` 449/585, `loop.py` 295/520.
-- **Live checks:** (7)(11)(12)(16) passed after the 2026-10-06 fixes (record id, harness-answered line, skill frontmatter shape); (8) partial.
-- **Next:** the live checks (1)-(16), then the merge into `build` and the deploy (Q8). U18's
-  exit runs passed on 2026-10-05 (HISTORY). U27, U29 and U17 merged on 2026-10-02 (709 tests). The deploy gate is met;
+- **Next:** the owner's decisions on the open items in HISTORY (2026-10-06: the second look and the
+  record, door-refused calls, the failed-sync retry), then the merge into `build` and the deploy (Q8).
+  Live checks (1)-(4), (6)-(14), (16) passed on 2026-10-06 ((3)'s network pull by unit test, (10c)
+  by unit test); (5) Notion and (15) Gmail wait for the owner's token and app password.
   nothing is deployed yet. A unit that adds to `installer.py` (699/700) needs room first.
 
 The unit table at the end is where the next session starts. Every row carries its state, its

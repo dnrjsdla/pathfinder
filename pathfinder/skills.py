@@ -47,6 +47,9 @@ def check(stem: str, text: str) -> tuple:
     """(description, body) of a skill's text, or ValueError saying why it is not a skill."""
     meta, body = _parse_frontmatter(text)
     description = meta.get("description")
+    if meta.get("name") is None:
+        raise ValueError("a skill starts with a frontmatter block: ---, name: <name> (equal to the file's stem), "
+                         "description: <one line>, ---, then the body")
     if meta.get("name") != stem or not NAME_RE.fullmatch(stem):
         raise ValueError("its name must equal the file's stem (lowercase, digits, hyphens)")
     if not isinstance(description, str) or not 0 < len(description) <= DESCRIPTION_MAX:

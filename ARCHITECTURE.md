@@ -142,7 +142,7 @@ withdrew. The record is projected only from the ledger's own events about the ca
 `approval` - never from anything the model wrote, so a call that never ran, a call policy
 refused, or a call the model only claims cannot appear in it. `apply` writes a `messages` row
 with role `calls` and the call's id in its `ref` column (`approval:<id>` for a gate); the
-`tool_result` appends ` ok` or ` failed`, an approve deletes the waiting row (the resumed call
+`tool_result` appends ` ok` or ` failed`, a gate's row names its approval id (` (approval <id>) waiting for approval`, so the model never has to invent one), an approve deletes the waiting row (the resumed call
 writes its own) and a deny turns it ` denied`. Arguments are compact JSON cut to 120 characters
 (`CALL_ARGS_CLIP`), as the ledger door wrote them, so a pasted token shows only as its handle.
 `history()` folds consecutive `calls` rows into one `system` message (`RECORD_HEADER`: names and
@@ -156,7 +156,7 @@ decision; `pending()` and `approval(id)` read it.
 `open_approvals(session, max_age_s)` is what a chat approval (§7) checks: the session's pending
 approvals, plus a job's pending gate from any session while it is younger than `max_age_s`
 (`session_resume_s`), each only if newer than the session's last `user` message - a gate the
-owner has talked past is not open. `catch_up(ledger)` runs at daemon start;
+owner has talked past is not open (a `user` line the harness answered, marked `harness` in the ledger and `ref = 'chat_approval'` in the row, is not talking past). `catch_up(ledger)` runs at daemon start;
 `rebuild(ledger)` drops and replays — approvals come back with everything else.
 
 Partition 3 adds `signals(key, ts, sense, kind)` (the 24 h dedupe: `seen(key, since)`),
@@ -660,7 +660,7 @@ partition 3) and now `wiki/*.md` - no `vault/` directory: "inside the vault" is 
 the assistant reads before doing that task instead of inventing one; it is an instruction, so it
 is trusted where a wiki page is data, and its only mark is its location. Every skill is
 `<home>/skills/<name>.md`: frontmatter `name` (lowercase, digits, hyphens, equal to the file's
-stem) and `description` (one line, at most 160 characters, when to use it), parsed by
+stem) and `description` (one line, at most 160 characters, when to use it; the `edit_memory` `target` description carries this frontmatter shape, so the model writes it), parsed by
 `rules._parse_frontmatter`, then a markdown body. **The seed copy**: `skills.bind(home)`, called
 once in `Daemon.__init__` beside `memory.bind`, writes every shipped `pathfinder/skills/*.md` (package
 data) whose home file is missing, as `rules.load` writes `RULES.md`; an existing file is never

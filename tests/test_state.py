@@ -173,10 +173,11 @@ class StateTest(unittest.TestCase):
         self._gate("p1", "c", {"n": 3})
         self._record("approval", session="s2", turn="t1", origin="user", id="p1", decision="denied")
         self._gate("p2", "d", {"n": 4})
-        self.assertEqual(self._lines(), [['a {"n":1} ok', 'b {"n":2} failed', 'c {"n":3} denied',
-                                          'd {"n":4} waiting for approval']])
+        self.assertEqual(self._lines(), [['a {"n":1} ok', 'b {"n":2} failed', 'c {"n":3} (approval p1) denied',
+                                          'd {"n":4} (approval p2) waiting for approval']])
         self._record("approval", session="s2", turn="t1", origin="user", id="p2", decision="approved")
-        self.assertEqual(self._lines(), [['a {"n":1} ok', 'b {"n":2} failed', 'c {"n":3} denied']])
+        self.assertEqual(self._lines(), [['a {"n":1} ok', 'b {"n":2} failed',
+                                          'c {"n":3} (approval p1) denied']])
         self._call("m-p2", "d", {"n": 4})  # the resumed turn's own call
         self.assertEqual(self._lines()[0][-1], 'd {"n":4} ok')
         rebuilt = State(self.home / "rebuilt.db")
@@ -199,7 +200,7 @@ class StateTest(unittest.TestCase):
         self._gate("p1", "send_mail", {})
         self._gate("p2", "delete_file", {})
         self._decide("p1", "denied")  # not the newest gate
-        self.assertEqual(self._lines(), [["send_mail {} denied", "delete_file {} waiting for approval"]])
+        self.assertEqual(self._lines(), [["send_mail {} (approval p1) denied", "delete_file {} (approval p2) waiting for approval"]])
         self._same_after_rebuild()
 
     def test_approve_one_gate_then_deny_the_other(self):
@@ -210,7 +211,7 @@ class StateTest(unittest.TestCase):
         self._decide("p1", "approved")
         self._call("m-p1", "send_mail", {})
         self._decide("p2", "denied")
-        self.assertEqual(self._lines(), [["delete_file {} denied", "send_mail {} ok"]])
+        self.assertEqual(self._lines(), [["delete_file {} (approval p2) denied", "send_mail {} ok"]])
         self._same_after_rebuild()
 
     def test_an_approval_without_a_row_changes_nothing(self):
@@ -221,7 +222,7 @@ class StateTest(unittest.TestCase):
         self._gate("p2", "delete_file", {})
         self._decide("old", "denied")
         self._decide("old", "approved")
-        self.assertEqual(self._lines(), [["delete_file {} waiting for approval"]])
+        self.assertEqual(self._lines(), [["delete_file {} (approval p2) waiting for approval"]])
 
     def test_a_denied_proposal_does_not_mark_a_gates_row(self):
         self._record("session_start", session="s2")
@@ -230,7 +231,7 @@ class StateTest(unittest.TestCase):
         self._record("approval_pending", session="s2", origin="user", id="q1", call_id="q1", tool="edit_memory",
                      args={}, messages=[])
         self._decide("q1", "denied")
-        self.assertEqual(self._lines(), [["send_mail {} waiting for approval"]])
+        self.assertEqual(self._lines(), [["send_mail {} (approval p1) waiting for approval"]])
 
     def test_open_approvals(self):
         """D52: pending rows of this session newer than its last user message."""
@@ -249,6 +250,14 @@ class StateTest(unittest.TestCase):
         self.assertEqual([p["id"] for p in self.state.open_approvals("s2", 7200)], ["gate", "job"])
         # no user line yet; a job's gate counts from any session (D63)
         self.assertEqual([p["id"] for p in self.state.open_approvals("s3", 7200)], ["other", "job"])
+        self._record("user", session="s2", turn="t2", origin="user", trust="user", text="something else")
+        self.assertEqual(self.state.open_approvals("s2", 7200), [])
+
+    def test_a_harness_answered_user_line_does_not_close_the_gate(self):
+        self._record("session_start", session="s2")
+        self._gate("gate", "send_mail", {})
+        self._record("user", session="s2", turn="t1", origin="user", trust="user", text="yes", harness=True)
+        self.assertEqual([p["id"] for p in self.state.open_approvals("s2", 7200)], ["gate"])
         self._record("user", session="s2", turn="t2", origin="user", trust="user", text="something else")
         self.assertEqual(self.state.open_approvals("s2", 7200), [])
 

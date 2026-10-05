@@ -153,7 +153,8 @@ class State:
         # signal envelope), an assistant event needs final=true (not tool chatter mid-turn);
         # calls come only from the ledger's own tool_call/tool_result/approval_pending/approval
         if event["type"] == "user" and event.get("origin") == "user" and not event.get("job"):  # a job steer is not chat
-            self._insert_message(seq, session, "user", event.get("text", ""), event["ts"])
+            self._insert_message(seq, session, "user", event.get("text", ""), event["ts"],
+                                 "chat_approval" if event.get("harness") else None)  # answered by the harness
         if event["type"] == "assistant" and event.get("final"):
             self._insert_message(seq, session, "assistant", event.get("text", ""), event["ts"])
         # D52: what was called, from the ledger's own events - name and clipped args, never a result
@@ -165,7 +166,7 @@ class State:
             ref = event["id"] if event["type"] == "tool_call" else "approval:" + event["id"]
             self.db.execute(
                 "INSERT OR IGNORE INTO messages (seq, session, role, content, ts, ref) VALUES (?, ?, 'calls', ?, ?, ?)",
-                (seq, session, line + (WAITING if gate else ""), event["ts"], ref))
+                (seq, session, line + (f" (approval {event['id']})" + WAITING if gate else ""), event["ts"], ref))
         if event["type"] == "approval":  # only the row of this approval's own gate; none (an older gate) -> nothing
             if event["decision"] == "approved":  # the resumed turn's tool_call writes the real row
                 self.db.execute("DELETE FROM messages WHERE ref = ?", ("approval:" + event["id"],))
@@ -296,10 +297,10 @@ class State:
             self.db.execute("UPDATE sessions SET last_ts = ? WHERE id = ?", (event["ts"], session))
         self.db.execute("UPDATE meta SET value = ? WHERE key = 'cursor'", (str(seq),))
 
-    def _insert_message(self, seq, session, role, content, ts):
+    def _insert_message(self, seq, session, role, content, ts, ref=None):
         self.db.execute(
-            "INSERT OR IGNORE INTO messages (seq, session, role, content, ts) VALUES (?, ?, ?, ?, ?)",
-            (seq, session, role, content, ts),
+            "INSERT OR IGNORE INTO messages (seq, session, role, content, ts, ref) VALUES (?, ?, ?, ?, ?, ?)",
+            (seq, session, role, content, ts, ref),
         )
 
     def catch_up(self, ledger) -> int:
@@ -417,8 +418,8 @@ class State:
         """D52: `session`'s pending approvals newer than its last user message - a gate the owner
         has talked past is not open. A job's gate counts from any session (D63) while it is younger
         than `max_age_s` (`session_resume_s`): a forgotten one must not swallow a new session's reply."""
-        last = self.db.execute("SELECT MAX(ts) FROM messages WHERE session = ? AND role = 'user'",
-                               (session,)).fetchone()[0]
+        last = self.db.execute("SELECT MAX(ts) FROM messages WHERE session = ? AND role = 'user' "
+                               "AND (ref IS NULL OR ref != 'chat_approval')", (session,)).fetchone()[0]
         return [p for p in self.pending()
                 if (p["session"] == session or p["job"] and time.time() - p["ts"] <= max_age_s)
                 and (last is None or p["ts"] > last)]

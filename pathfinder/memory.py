@@ -198,7 +198,8 @@ TOOLS = {
             "user's approval - say so, do not say they are written."),
         params={
             "target": {"type": "string", "description": "wiki/<Title>.md, USER.md, RULES.md or skills/<name>.md "
-                       "(a procedure the user asked to keep; always needs their approval)"},
+                       "(a procedure the user asked to keep; always needs their approval); its text starts with a "
+                       "frontmatter block: ---\nname: <name>\ndescription: <one line, when to use it>\n---\nthen the steps"},
             "op": {"type": "string", "description": "add, replace or remove"},
             "old": {"type": "string", "description": "the one existing line to replace or remove"},
             "new": {"type": "string", "description": "the line(s) to add or to replace old with"},

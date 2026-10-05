@@ -503,7 +503,7 @@ class Daemon:
         reply = text is not None and chat_approval(  # D52: before this user line is recorded
             self.state, s.id, text, config.load(self.home)["session_resume_s"])
         if text is not None:
-            self.record("user", session=s.id, turn=turn, origin="user", trust="user", text=text)
+            self.record("user", session=s.id, turn=turn, origin="user", trust="user", text=text, **({"harness": True} if reply else {}))
         self.record("turn_start", session=s.id, turn=turn, origin="user")
         if reply:  # the harness answers, no model request; the approval stays pending
             self.send(s, {"type": "turn.start", "turn": turn})

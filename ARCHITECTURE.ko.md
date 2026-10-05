@@ -125,7 +125,7 @@ false, withdrawn: {flags, why}}` 로 철회 표시와 이유를 달고 적힌다
 **불변조건 1: 이력은 한 말과 부른 것이다 - 그 밖에는 없다**(D52). 이력, 곧 턴을 짓는 메시지는
 정확히 두 가지만 싣는다: 사용자와 비서가 한 말 - origin 이 `user` 인 `user` 사건(steer 포함,
 작업에 보낸 steer 제외)과 `final` 인 `assistant` 사건 - 그리고 비서가 사용자 턴에서 부른 툴
-호출마다 툴 이름 · 인자 · 네 상태 중 하나: ` ok`, ` failed`, ` denied`, ` waiting for approval`.
+호출마다 툴 이름 · 인자 · 네 상태 중 하나: ` ok`, ` failed`, ` denied`, ` waiting for approval`(게이트 줄은 승인 id 를 ` (approval <id>)` 로 밝힌다 - 모델이 id 를 지어내지 않도록).
 툴 결과 본문 · 신호 봉투 · 두 번째 확인이 철회한 초안은 절대 싣지 않는다. 기록은 그 호출에 관한
 장부 자신의 사건 - `tool_call`, `tool_result`, `approval_pending`(메시지를 싣는 브로커 게이트),
 `approval` - 에서만 투영되고 모델이 쓴 어떤 말에서도 만들어지지 않는다 - 그래서 돌지 않은 호출,
@@ -142,7 +142,7 @@ asked")로 접어 그 턴의 답 앞에 둔다. 예전 `state.db` 는 열릴 때
 decision)`: `approval_pending` 이 넣고 `approval` 이 결정을 적는다. `pending()` · `approval(id)` 로
 읽는다. `open_approvals(session, max_age_s)` 는 채팅 승인(§7)이 보는 것이다: 그 세션의 승인
 대기, 그리고 `max_age_s`(`session_resume_s`)보다 젊은 동안의 어느 세션의 작업 게이트 - 둘 다 그
-세션의 마지막 `user` 메시지보다 새로울 때만; 주인이 지나쳐 말한 게이트는 열려 있지 않다. `catch_up(ledger)` 는 데몬이 뜰 때, `rebuild(ledger)` 는 표를 버리고 다시 흘린다 —
+세션의 마지막 `user` 메시지보다 새로울 때만; 주인이 지나쳐 말한 게이트는 열려 있지 않다(하네스가 답한 `user` 줄은 장부에 `harness`, 행에 `ref = 'chat_approval'` 로 표시되어 지나쳐 말한 것이 아니다). `catch_up(ledger)` 는 데몬이 뜰 때, `rebuild(ledger)` 는 표를 버리고 다시 흘린다 —
 승인 대기도 함께 돌아온다.
 
 구획 3 이 더한 것: `signals(key, ts, sense, kind)`(24시간 중복 제거: `seen(key, since)`),
@@ -624,7 +624,7 @@ Daemon.run_signal_turn ── 신호마다 rules.decide 를 먼저(절대 안 �
 **스킬 (`pathfinder/skills.py`, D58, D61).** 스킬은 주인이 승인한 절차로, 비서가 그 일을 하기 전에
 읽어서 절차를 지어내지 않게 한다; 지시이므로 데이터인 wiki 페이지와 달리 신뢰받고, 그 표시는 위치뿐이다.
 모든 스킬은 `<홈>/skills/<name>.md` 다: frontmatter `name`(소문자 · 숫자 · 하이픈, 파일 이름의 stem 과
-같음)과 `description`(한 줄, 160자 이하, 언제 쓰는지)을 `rules._parse_frontmatter` 로 읽고, 그 뒤가
+같음)과 `description`(한 줄, 160자 이하, 언제 쓰는지; `edit_memory` 의 `target` 설명이 이 frontmatter 모양을 실어 모델이 그대로 쓴다)을 `rules._parse_frontmatter` 로 읽고, 그 뒤가
 마크다운 본문이다. **시드 복사**: `Daemon.__init__` 에서 `memory.bind` 옆에서 한 번 불리는
 `skills.bind(home)` 이, 홈에 파일이 없는 출하본 `pathfinder/skills/*.md`(패키지 데이터)를 `rules.load` 가
 `RULES.md` 를 쓰듯 써 둔다; 있는 파일은 절대 건드리지 않으므로, 고친 스킬은 주인의 것으로 남고 출하본의

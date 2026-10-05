@@ -100,9 +100,12 @@ def redact(text):
     return SECRET.sub("[redacted]", text or "")
 
 
-def read_ledger(home):
+def read_ledger(home, through="2026-09-29"):
+    """Partitions up to `through` (the UTC date m9 read to); the live ledger keeps growing."""
     events = []
     for path in sorted(glob.glob(str(home / "events" / "*.jsonl"))):
+        if Path(path).stem > through:
+            continue
         for raw in open(path, encoding="utf-8"):
             try:
                 events.append(json.loads(raw))

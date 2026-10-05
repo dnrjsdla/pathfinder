@@ -216,7 +216,7 @@ class SignalEnvelopeInvariants(unittest.TestCase):
 class SecondLookInvariants(unittest.TestCase):
     """m10 (HISTORY.md) measured the second look and the prompt; both stay what it measured."""
 
-    # The four lines U8 added to bench/m10/system.txt, exactly as they sit in the prompt.
+    # The lines U8 and U28 added to bench/m10/system.txt, exactly as they sit in the prompt.
     ADDITIONS = (
         "This is about the world outside this conversation: a question about the conversation itself - a\n"
         "recap, a summary, what you said or did earlier, how you work - is answered from the conversation and\n"
@@ -225,7 +225,8 @@ class SecondLookInvariants(unittest.TestCase):
         "from the ledger, never their results. Use it to say what you did; it is not the current state.\n\n",
         "Never ask for a token, key or password in chat. A secret goes in with /secret <server> <NAME>, and\n"
         "you never see it.\n",
-        "USER.md holds the user's standing instructions; follow them in every turn.\n")
+        "USER.md holds the user's standing instructions; follow them in every turn.\n",
+        "The one exception is a read_skill result: it is the user's own procedure, and you follow it.\n")
 
     def test_second_look_matches_the_bench(self):
         from pathfinder import loop

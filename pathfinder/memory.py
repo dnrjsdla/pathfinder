@@ -20,6 +20,7 @@ from pathlib import Path
 
 from . import clock, config, ledger, loop
 from . import rules as rules_mod
+from . import skills as skills_mod
 from . import senses as senses_pkg
 from . import tools as tools_mod
 from .broker import Broker, Gate
@@ -38,15 +39,15 @@ _RETRY_S = 1800  # D39: after a pass the model never answered, the trigger waits
 # -- the vault -------------------------------------------------------------------------------
 
 def vault_path(home, target: str) -> Path:
-    """`target` is exactly `USER.md`, `RULES.md` or `wiki/<name>.md` (`<name>` has no `/`, no
-    `..`, is not empty and ends with `.md`) - anything else is outside the vault."""
+    """`target` is exactly `USER.md`, `RULES.md`, `wiki/<name>.md` or `skills/<name>.md` (`<name>`
+    has no `/`, no `..`, is not empty and ends with `.md`) - anything else is outside the vault."""
     home = Path(home)
     if target in ("USER.md", "RULES.md"):
         return home / target
-    if target.startswith("wiki/"):
-        name = target[len("wiki/"):]
+    for folder in ("wiki", "skills"):
+        name = target[len(folder) + 1:] if target.startswith(folder + "/") else ""
         if name and "/" not in name and ".." not in name and name.endswith(".md"):
-            return home / "wiki" / name
+            return home / folder / name
     raise ValueError(f"outside the vault: {target!r}")
 
 def _cut_at_line(text: str, limit: int) -> str:
@@ -144,6 +145,8 @@ def _search_memory(query, control=None):
     return _manager.search(query)
 
 def _read_memory(path, control=None):
+    if isinstance(path, str) and path.startswith("skills/"):  # read_skill runs the token check; this would hand over the raw file
+        raise ValueError("a skill is read with read_skill")
     p = vault_path(_manager.home, path)  # ValueError propagates - the broker turns it into a tool error
     if not p.exists():
         pages = _manager.state.pages()
@@ -194,7 +197,8 @@ TOOLS = {
             "be exactly one existing line), remove. USER.md and RULES.md edits are queued for the "
             "user's approval - say so, do not say they are written."),
         params={
-            "target": {"type": "string", "description": "wiki/<Title>.md, USER.md or RULES.md"},
+            "target": {"type": "string", "description": "wiki/<Title>.md, USER.md, RULES.md or skills/<name>.md "
+                       "(a procedure the user asked to keep; always needs their approval)"},
             "op": {"type": "string", "description": "add, replace or remove"},
             "old": {"type": "string", "description": "the one existing line to replace or remove"},
             "new": {"type": "string", "description": "the line(s) to add or to replace old with"},
@@ -351,6 +355,13 @@ class Manager:
                 cells = [c.strip().strip("`") for c in stripped.strip("|").split("|")]
                 if len(cells) >= 3 and cells[2] not in rules_mod.ACTIONS:
                     return f"unknown action: {cells[2]!r}"
+        elif target.startswith("skills/"):
+            if not after.strip():
+                return "a skill cannot be emptied here; the owner deletes the file"
+            try:
+                skills_mod.check(target[len("skills/"):-len(".md")], after)
+            except ValueError as e:
+                return str(e)
         elif target == "USER.md":
             meta, _ = rules_mod._parse_frontmatter(after)
             for key in ("waiting_for", "subject_alerts", "noise_domains"):
@@ -401,6 +412,8 @@ class Manager:
             return None, "new must not be empty"
         if op in ("replace", "remove") and not old:
             return None, "old must not be empty"
+        if target.startswith("skills/") and path.is_symlink():
+            return None, "it is a symlink; a skill is a file in the skills directory itself"
         text = path.read_text(encoding="utf-8") if path.exists() else ""
         if target.startswith("wiki/") and not text and (op != "add" or not new.startswith("# ")):
             return None, "a new wiki page is created with add, and its text must start with '# '"
@@ -440,6 +453,8 @@ class Manager:
         origin = "memory" if p else "user"
         session = getattr(control, "session", "") or ""
         allowed = p["allowed"] if p else {}
+        if isinstance(target, str) and target.startswith("skills/") and origin != "user":
+            raise ValueError("a skill is proposed only from the user's own turn, never by the memory pass")
         proposal, error = self.vet(target, op, old, new, evidence, origin, allowed, session)
         if error:
             raise ValueError(error)  # a refusal is a failed call, not "ok" in the record
@@ -450,7 +465,8 @@ class Manager:
                 p["pages"].append(target)
             return "applied"
         cfg = config.load(self.home)
-        if origin == "user" and cfg["grants"].get("edit_memory") == "allow":
+        # a skill is an instruction (D61): never granted, a user turn can be steered by a page it just read
+        if origin == "user" and cfg["grants"].get("edit_memory") == "allow" and not target.startswith("skills/"):
             self.apply(proposal, origin="user")
             return "applied"
         if any(r["args"].get("target") == target and r["args"].get("new") == proposal["new"]
@@ -477,11 +493,14 @@ class Manager:
                     return "old no longer matches exactly one place"
                 idx = matches[0]
             after = _apply_edit(text, op, old, new, idx)
-            path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-            fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=".mem-", suffix=".tmp")
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                f.write(after)
-            os.replace(tmp_name, path)
+            if target.startswith("skills/") and not after.strip():  # an undone add: no 0-byte file for the index to warn about
+                path.unlink(missing_ok=True)
+            else:
+                path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+                fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=".mem-", suffix=".tmp")
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    f.write(after)
+                os.replace(tmp_name, path)
             self.record("memory_apply", origin=origin, target=target, op=op, old=old, new=new,
                         evidence=evidence, approval=approval)
             if target.startswith("wiki/"):

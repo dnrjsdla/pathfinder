@@ -95,6 +95,11 @@ def approvals(home):
         for row in state.pending():
             if row["tool"] == "edit_memory":
                 a = row["args"]
+                if a["target"].startswith("skills/"):  # an instruction: the owner reads all of it before /approve
+                    print(visible(f"{row['id']}  edit_memory  {a['target']} {a['op']}: {json.dumps(_clip60(a['old']), ensure_ascii=False)} -> new text:"))
+                    for line in a["new"].split("\n"):
+                        print("    " + visible(line))
+                    continue
                 old, new = (json.dumps(_clip60(a[k]), ensure_ascii=False) for k in ("old", "new"))  # as the args rows
                 print(visible(f"{row['id']}  edit_memory  {a['target']} {a['op']}: {old} -> {new}"))
                 continue

@@ -1,6 +1,8 @@
 """`memory.Manager` end to end against fake step factories - no daemon, no socket, no network.
 Same harness shape as `test_jobs.py`: `record`/`push` are the test's own, backed by a real
 Ledger+State on a temp home."""
+import contextlib
+import io
 import tempfile
 import threading
 import time
@@ -8,7 +10,8 @@ import types
 import unittest
 from pathlib import Path
 
-from pathfinder import clock, config, memory
+from pathfinder import __main__ as cli
+from pathfinder import clock, config, memory, skills
 from pathfinder import rules as rules_mod
 from pathfinder import tools as tools_mod
 from pathfinder.ledger import Ledger
@@ -256,6 +259,71 @@ class ApplyTest(MemoryHarness):
         p["allowed"][last["seq"]] = last
         result2 = mgr.edit("USER.md", "add", "", "- likes tea", [last["seq"]], control2)
         self.assertTrue(result2.startswith("queued"))
+
+    SKILL = "---\nname: foo\ndescription: Weekly report steps\n---\nCollect the notes.\nSend them.\n"
+
+    def _skill_control(self):
+        self.record("session_start", session="s1")
+        self.record("user", session="s1", turn="t1", origin="user", trust="user", text="keep this procedure")
+        control = TurnControl()
+        control.session = "s1"
+        return control
+
+    def test_skill_edit_from_user_turn_always_waits_for_approval(self):
+        config.set(self.home, "grants", {"edit_memory": "allow"})
+        mgr = self.manager()
+        result = mgr.edit("skills/foo.md", "add", "", self.SKILL, [], self._skill_control())
+        self.assertTrue(result.startswith("queued for your approval as "))
+        path = self.home / "skills" / "foo.md"
+        self.assertFalse(path.exists())
+        pending = self.state.pending()
+        self.assertEqual([r["tool"] for r in pending], ["edit_memory"])
+        mgr.decide(pending[0]["id"], "approved")
+        self.assertEqual(path.read_text(encoding="utf-8"), self.SKILL.rstrip("\n"))
+        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+        self.assertIn("- foo: Weekly report steps", skills.index(self.home))
+
+    def test_skill_edit_from_pass_signal_or_job_is_refused(self):
+        mgr = self.manager()
+        p = {"since": 0, "upto": 5, "lines": [], "allowed": {}, "read": 0, "applied": 0, "proposed": 0,
+             "pages": [], "session": "s1"}
+        control = TurnControl()
+        control.memory_pass, control.session = p, "s1"
+        with self.assertRaises(ValueError):
+            mgr.edit("skills/foo.md", "add", "", self.SKILL, [], control)
+        self.assertFalse((self.home / "skills").exists())
+        self.assertEqual(self.state.pending(), [])
+        for origin in ("signal", "job"):
+            self.assertNotIn("edit_memory", tools_mod.for_origin(origin))
+
+    def test_third_party_text_cannot_become_a_skill(self):
+        mgr = self.manager()
+        token = "ghp_" + "A" * 36
+        for text in ("no frontmatter", self.SKILL.replace("name: foo", "name: bar"),
+                     self.SKILL + f"use {token}\n"):
+            proposal, error = mgr.vet("skills/foo.md", "add", "", text, [], "user", {}, "s1")
+            self.assertIsNone(proposal)
+            self.assertTrue(error)
+            with self.assertRaises(ValueError):
+                mgr.edit("skills/foo.md", "add", "", text, [], self._skill_control())
+        self.assertEqual(self.state.pending(), [])
+        for bad in ("skills/a/b.md", "skills/../x.md", "skills/x.txt"):
+            with self.assertRaises(ValueError):
+                memory.vault_path(self.home, bad)
+
+    def test_approvals_prints_a_skill_proposal_whole(self):
+        lines = ["---", "name: foo", "description: Weekly report steps", "---", "Send\u200b them."]
+        self.record("approval_pending", session="s1", origin="user", id="a1", call_id="a1", tool="edit_memory",
+                    args={"target": "skills/foo.md", "op": "add", "old": "", "new": "\n".join(lines),
+                          "evidence": []}, messages=[])
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            cli.approvals(self.home)
+        printed = out.getvalue().split("\n")
+        for line in lines[:4]:
+            self.assertIn("    " + line, printed)
+        self.assertIn("    Send\\u200b them.", printed)
+        self.assertNotIn("\u200b", out.getvalue())
 
     def test_rules_apply_calls_on_rules_changed(self):
         mgr = self.manager()

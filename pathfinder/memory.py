@@ -20,6 +20,7 @@ from pathlib import Path
 
 from . import clock, config, ledger, loop
 from . import rules as rules_mod
+from . import skills as skills_mod
 from . import senses as senses_pkg
 from . import tools as tools_mod
 from .broker import Broker, Gate
@@ -38,15 +39,15 @@ _RETRY_S = 1800  # D39: after a pass the model never answered, the trigger waits
 # -- the vault -------------------------------------------------------------------------------
 
 def vault_path(home, target: str) -> Path:
-    """`target` is exactly `USER.md`, `RULES.md` or `wiki/<name>.md` (`<name>` has no `/`, no
-    `..`, is not empty and ends with `.md`) - anything else is outside the vault."""
+    """`target` is exactly `USER.md`, `RULES.md`, `wiki/<name>.md` or `skills/<name>.md` (`<name>`
+    has no `/`, no `..`, is not empty and ends with `.md`) - anything else is outside the vault."""
     home = Path(home)
     if target in ("USER.md", "RULES.md"):
         return home / target
-    if target.startswith("wiki/"):
-        name = target[len("wiki/"):]
+    for folder in ("wiki", "skills"):
+        name = target[len(folder) + 1:] if target.startswith(folder + "/") else ""
         if name and "/" not in name and ".." not in name and name.endswith(".md"):
-            return home / "wiki" / name
+            return home / folder / name
     raise ValueError(f"outside the vault: {target!r}")
 
 def _cut_at_line(text: str, limit: int) -> str:
@@ -194,7 +195,8 @@ TOOLS = {
             "be exactly one existing line), remove. USER.md and RULES.md edits are queued for the "
             "user's approval - say so, do not say they are written."),
         params={
-            "target": {"type": "string", "description": "wiki/<Title>.md, USER.md or RULES.md"},
+            "target": {"type": "string", "description": "wiki/<Title>.md, USER.md, RULES.md or skills/<name>.md "
+                       "(a procedure the user asked to keep; always needs their approval)"},
             "op": {"type": "string", "description": "add, replace or remove"},
             "old": {"type": "string", "description": "the one existing line to replace or remove"},
             "new": {"type": "string", "description": "the line(s) to add or to replace old with"},
@@ -351,6 +353,11 @@ class Manager:
                 cells = [c.strip().strip("`") for c in stripped.strip("|").split("|")]
                 if len(cells) >= 3 and cells[2] not in rules_mod.ACTIONS:
                     return f"unknown action: {cells[2]!r}"
+        elif target.startswith("skills/"):
+            try:
+                skills_mod.check(target[len("skills/"):-len(".md")], after)
+            except ValueError as e:
+                return str(e)
         elif target == "USER.md":
             meta, _ = rules_mod._parse_frontmatter(after)
             for key in ("waiting_for", "subject_alerts", "noise_domains"):
@@ -443,6 +450,8 @@ class Manager:
         proposal, error = self.vet(target, op, old, new, evidence, origin, allowed, session)
         if error:
             raise ValueError(error)  # a refusal is a failed call, not "ok" in the record
+        if target.startswith("skills/") and origin != "user":
+            raise ValueError("a skill is proposed only from the user's own turn, never by the memory pass")
         if target.startswith("wiki/"):
             self.apply(proposal, origin=origin)
             if p is not None:
@@ -450,7 +459,8 @@ class Manager:
                 p["pages"].append(target)
             return "applied"
         cfg = config.load(self.home)
-        if origin == "user" and cfg["grants"].get("edit_memory") == "allow":
+        # a skill is an instruction (D61): never granted, a user turn can be steered by a page it just read
+        if origin == "user" and cfg["grants"].get("edit_memory") == "allow" and not target.startswith("skills/"):
             self.apply(proposal, origin="user")
             return "applied"
         if any(r["args"].get("target") == target and r["args"].get("new") == proposal["new"]

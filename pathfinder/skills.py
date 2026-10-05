@@ -43,20 +43,24 @@ def bind(home) -> None:
             f.write(seed.read_text(encoding="utf-8"))
 
 
-def _load(path: Path) -> tuple:
-    """(description, body) of one skill file, or ValueError saying why it is not a skill."""
-    if path.is_symlink():
-        raise ValueError("it is a symlink; a skill is a file in the skills directory itself")
-    text = path.read_text(encoding="utf-8")
+def check(stem: str, text: str) -> tuple:
+    """(description, body) of a skill's text, or ValueError saying why it is not a skill."""
     meta, body = _parse_frontmatter(text)
     description = meta.get("description")
-    if meta.get("name") != path.stem or not NAME_RE.fullmatch(path.stem):
+    if meta.get("name") != stem or not NAME_RE.fullmatch(stem):
         raise ValueError("its name must equal the file's stem (lowercase, digits, hyphens)")
     if not isinstance(description, str) or not 0 < len(description) <= DESCRIPTION_MAX:
         raise ValueError(f"its description must be one line of 1-{DESCRIPTION_MAX} characters")
     if keychain.TOKEN_RE.search(text):
         raise ValueError("it holds a token-shaped string; a skill names the intake (/secret), never a value")
     return description, body
+
+
+def _load(path: Path) -> tuple:
+    """(description, body) of one skill file, or ValueError saying why it is not a skill."""
+    if path.is_symlink():
+        raise ValueError("it is a symlink; a skill is a file in the skills directory itself")
+    return check(path.stem, path.read_text(encoding="utf-8"))
 
 
 def index(home) -> str:

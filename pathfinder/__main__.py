@@ -96,11 +96,14 @@ def approvals(home):
             if row["tool"] == "edit_memory":
                 a = row["args"]
                 if a["target"].startswith("skills/"):  # an instruction: the owner reads all of it before /approve
-                    print(visible(f"{row['id']}  edit_memory  {a['target']} {a['op']}: {json.dumps(_clip60(a['old']), ensure_ascii=False)} -> new text:"))
-                    for line in a["new"].split("\n"):
-                        print("    " + visible(line))
+                    print(visible(f"{row['id']}  edit_memory  {a['target']} {a['op']}:"))
+                    for label in ("old", "new"):
+                        if a.get(label):
+                            print(f"  {label} text:")
+                            for line in a[label].split("\n"):
+                                print("    " + visible(line))
                     continue
-                old, new = (json.dumps(_clip60(a[k]), ensure_ascii=False) for k in ("old", "new"))  # as the args rows
+                old, new = (json.dumps(_clip60(a.get(k, "")), ensure_ascii=False) for k in ("old", "new"))  # as the args rows
                 print(visible(f"{row['id']}  edit_memory  {a['target']} {a['op']}: {old} -> {new}"))
                 continue
             if row["tool"] == "accept_pins":

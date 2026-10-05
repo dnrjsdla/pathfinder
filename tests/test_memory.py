@@ -325,6 +325,47 @@ class ApplyTest(MemoryHarness):
         self.assertIn("    Send\\u200b them.", printed)
         self.assertNotIn("\u200b", out.getvalue())
 
+    def test_approvals_shows_removed_skill_lines_and_survives_a_gate_row(self):
+        for id, args in (("r1", {"target": "skills/foo.md", "op": "replace", "old": "Send them.\nThen rest.",
+                                 "new": "Mail them."}),
+                         ("g1", {"target": "USER.md", "op": "add", "new": "- likes tea"})):
+            self.record("approval_pending", session="s1", origin="user", id=id, call_id=id, tool="edit_memory",
+                        args=args, messages=[])
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            cli.approvals(self.home)
+        printed = out.getvalue().split("\n")
+        for line in ("  old text:", "    Send them.", "    Then rest.", "  new text:", "    Mail them."):
+            self.assertIn(line, printed)
+        self.assertIn("likes tea", out.getvalue())
+
+    def test_skill_edge_cases(self):
+        mgr = self.manager()
+        control = self._skill_control()
+        (self.home / "skills").mkdir()
+        outside = self.home / "outside.md"
+        outside.write_text(self.SKILL.replace("foo", "y"), encoding="utf-8")
+        (self.home / "skills" / "y.md").symlink_to(outside)
+        with self.assertRaisesRegex(ValueError, "symlink"):
+            mgr.edit("skills/y.md", "add", "", "more", [], control)
+        mgr.apply({"target": "skills/foo.md", "op": "add", "old": "", "new": self.SKILL.rstrip("\n"), "evidence": []})
+        mgr.undo(1)
+        self.assertFalse((self.home / "skills" / "foo.md").exists())
+        with self.assertLogs("pathfinder.skills", level="WARNING") as logs:
+            skills._log.warning("sentinel")
+            skills.index(self.home)
+        self.assertEqual(len(logs.records), 2)  # the sentinel and the symlinked y.md, nothing for foo
+        mgr.apply({"target": "skills/foo.md", "op": "add", "old": "", "new": self.SKILL.rstrip("\n"), "evidence": []})
+        with self.assertRaisesRegex(ValueError, "cannot be emptied"):
+            mgr.edit("skills/foo.md", "remove", self.SKILL.rstrip("\n"), "", [], control)
+        p = {"since": 0, "upto": 1, "lines": [], "allowed": {}, "read": 0, "applied": 0, "proposed": 0,
+             "pages": [], "session": "s1"}
+        passed = TurnControl()
+        passed.memory_pass, passed.session = p, "s1"
+        for ctl in (control, passed):
+            with self.assertRaisesRegex(ValueError, "read_skill"):
+                memory._read_memory("skills/foo.md", ctl)
+
     def test_rules_apply_calls_on_rules_changed(self):
         mgr = self.manager()
         called = []

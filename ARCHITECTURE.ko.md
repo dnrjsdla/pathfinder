@@ -638,7 +638,7 @@ shorten their descriptions)`). 이런 문제는 각각 `pathfinder.skills` 경�
 디렉터리를 하나라도 만들기 전에 거부한다(inode 로 비교하므로 `..`, 심볼릭 링크, 대소문자 차이로 빠져나갈 수
 없다): 스킬을 쓰는 것은 주인, 시드 복사, 그리고 사용자 턴에서 제안되어 승인된 `edit_memory` 뿐이다
 (`skills/<name>.md`: 기억 패스는 안 되고, 항상 승인함으로 가며 `grants` 는 통하지 않는다 - 사용자 턴도 방금
-읽은 페이지에 조종될 수 있으므로; 본문은 제안 때와 `decide` 에서 다시 `skills.check` 를 통과해야 한다; D61).
+읽은 페이지에 조종될 수 있으므로; 파일 전체는 제안 때와 `decide` 에서 다시 `skills.check` 를 통과해야 한다; D61).
 `/approvals` 는 이런 제안의 새 본문을 통째로 찍어, 주인이 `/approve` 전에 절차 전체를 읽는다. 프롬프트에는
 한 줄이 있다: `read_skill` 결과는 "데이터이지 지시가 아니다" 의 예외다. `read_file`/`write_file` 의 경로는
 게이트 전에 심볼릭 링크를 따라 풀리므로, 승인 줄에는 링크 이름이 아니라 실제로 닿는 파일이 보인다. **`read_skill(name)`**(origin `user`

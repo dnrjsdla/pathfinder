@@ -6,8 +6,8 @@
   U12, U25, U31, U7a, U7b, U8, U32, U33, U10, U14a, U11, U14b, D64, U34, U15a (D66), and on
   2026-10-02 U15b, U16, U26, D67, and on 2026-10-05 U28. `daemon.py` 771/780, `installer.py` **699/700**, `tui.py`
   387/400 + `tui_secret.py` 136/150, `signals.py` + `rules.py` 449/585, `loop.py` 295/520.
-- **Next:** U18 (exit runs; the owner's credit go-ahead), the live
-  checks, the docs. U27, U29 and U17 merged on 2026-10-02 (709 tests). The deploy gate is met;
+- **Next:** the live checks (1)-(16), then the merge into `build` and the deploy (Q8). U18's
+  exit runs passed on 2026-10-05 (HISTORY). U27, U29 and U17 merged on 2026-10-02 (709 tests). The deploy gate is met;
   nothing is deployed yet. A unit that adds to `installer.py` (699/700) needs room first.
 
 The unit table at the end is where the next session starts. Every row carries its state, its
@@ -1634,5 +1634,5 @@ parallel. **Deploy gate: U15a, U21, U31 and U33.**
 | U28 | done | Skills: the write path (a proposal from a user turn, always approved; `/approvals` prints it whole, Q6=a) | `memory.py` (`vault_path`, `_edit`, `_check_file`; 710 -> 720/780), `skills.py` (`check`; 113 -> 117/120), `__main__.py` (`approvals`), `prompts/system.txt` (+1 line) | +10 | U27, U8 | `test_memory.test_skill_edit_from_user_turn_always_waits_for_approval`, `test_skill_edit_from_pass_signal_or_job_is_refused`, `test_third_party_text_cannot_become_a_skill`, `test_approvals_prints_a_skill_proposal_whole` |
 | U29 | **done, merged** | The first seed | `pathfinder/skills/connect-gmail.md` | 33 (new) | U27, U25, U26 | `test_skills.test_connect_gmail_is_shipped_and_parses` |
 | U17 | **done, merged** | Ceilings and invariant tests: one table for the ten core rows (state 780, loop 520, ledger 520, tools 390, exec 390, deliver 325, broker+policy 455, signals+rules 585), `mirror.py` 200, `llm/` 600 and `mcp/` 1,858 (§6's allocations); `senses/_*.py` 250; the ledger's types pinned; `config.json` written only by `config.set` inside `config.py`; the second look's constants, `verifier_input` and the prompt held to m10. The invariant-text tests all existed (U5, U7a, U15a). `test_exec`'s interrupt test no longer matches another suite's `sleep` | `tests/test_invariants.py`, `tests/test_exec.py` | +~90 | last | `test_module_ceilings`, `test_core_under_5500_lines`, `test_sense_files_under_150_lines`, `test_no_new_ledger_type`, `test_config_json_written_only_by_config_set`, `test_second_look_matches_the_bench` |
-| U18 | not started | Exit runs: m9 on the split pass (~40k tokens), m10 on the adopted prompt with the record and the second look (~215k tokens), each with the lead's go-ahead | `bench/m9_memory_write.py`, `bench/m10_unsupported.py` | — | U5, U7a, U8, U9 | — |
+| U18 | **done** (2026-10-05) | Exit runs: m9' on the split pass (42,700 tokens: an edit on every slice in both runs, all USER.md proposals), m10' on the shipped prompt with the record and the second look (217,044 tokens: 24/27 fixed, 0/10 controls pushed or flagged, 0/6 normal broken) - HISTORY, `docs/measurements/m9-exit-2026-10-05.json`, `m10-exit-2026-10-05.json` | `bench/m10_unsupported.py` (reads the ledger through 2026-09-29; scores each variant over its own traces) | bench +6 | U5, U7a, U8, U9 | — |
 | Lead | — | Live (1)-(16); both doc pairs, `docs/senses.md`; HISTORY; the reviewer (opus, read-only); the scan; the commit on `build`; deploy only past the gate | — | — | all | — |

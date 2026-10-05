@@ -1234,3 +1234,68 @@ and five of the fifteen controls were not run, to stay inside the budget.
   approve" typed in chat is taken for an approval (one).
 - The rewrite is written against these cases; its two needless tool calls were on a recap and
   a self-review question.
+
+## 2026-10-05 — The two exit runs of partition 8: m9' on the split pass, m10' on the adopted prompt
+
+Both measured against the m9 and m10 entrances above, with the owner's go-ahead for the credits
+(Q7). Numbers in `docs/measurements/m9-exit-2026-10-05.json` and
+`docs/measurements/m10-exit-2026-10-05.json`; traces, which hold ledger text, stayed outside the
+repo. The model is the one in the owner's config, the same as at the entrance.
+
+### m9' — does the split pass write anything down? (D47, U9; criterion (8))
+
+`bench/m9_memory_write.py --variant current` replays the pass's write call alone (the summary
+is its own request since D47 and is not replayed; the bench's `no_summary` variant has nothing
+left to cut). Two slices, two runs each; about 42,700 tokens.
+
+| slice | run 1 | run 2 |
+|---|---|---|
+| #3195..#3641 (79 readable lines, 22 the owner's) | `read_ledger`, `edit_memory` → USER.md add | the same |
+| #4883..#5087 (21 lines, 5 the owner's) | `read_ledger`, `search_memory`, `edit_memory` → USER.md add | the same |
+
+- m9's replay made 0 edits on both slices with the one-prompt pass; the split pass makes one on
+  every slice in every run, and every edit is a USER.md proposal - the shape a standing
+  instruction takes. The bench keeps targets and ops only, never text, so what the proposal said
+  is not on record; live check (8) reads a real proposal.
+- Four runs, 3-4 steps each, no retry, no outage.
+
+### m10' — the 27 answers against the shipped prompt with the second look (D48, D51, D52; criterion (13))
+
+`bench/m10_unsupported.py --variants baseline`: `prompts/system.txt` as shipped after U8 and U28
+(the adopted rewrite plus the four lines U17 locks and U28's `read_skill` line), the tool record
+in the replayed history (D52, U5), and the second look riding on every answer that called no
+tool. One run per case, graded by hand by one reader with m10's classes; 217,044 tokens, within
+the 215,000 the contract estimated. A control (T2) timed out once (http 0) and was rerun.
+
+| variant | fixed of 27 | controls pushed into a tool, of 10 | controls flagged | normal tool turns broken, of 6 | extra calls |
+|---|---|---|---|---|---|
+| m10: shipped prompt then | 11 | 0 | 0 | 0 of 3 | 0 |
+| m10: rewrite + second look | 22 | 2 | 0 | 0 of 3 | +21 |
+| **m10': shipped prompt now** | **20** | **0** | 0 | 0 of 6 | 0 |
+| **m10': with the second look** | **24** | **0** | **0** | **0 of 6** | +26 |
+
+- Criterion (13) is met: 24 of 27 fixed (pass: 22), no control pushed into a tool (m10's
+  rewrite pushed two; T103 and T136 now answer in prose), no control flagged, none of the six
+  normal turns broken.
+- **The record works where no prompt did.** T112 (the model denied a `search_tools` call it had
+  made, because history carried no tool calls) now names the two searches it ran, from the
+  record line in history. m10 graded every variant of this case unsupported.
+- **The record is also copied once.** T44's draft began with the record header verbatim
+  ("Tools you called here ...") before its own text: the record rides as an assistant message,
+  and the model imitated it. The second look flagged the draft and the rerun called the tools.
+  One answer in 40; watch for it live.
+- **Three stay unfixed, the same family as m10's five.** T68 takes "approve" typed in chat as
+  an approval - D52 part 2 answers that in the harness, which the bench does not replay; the
+  answer now sends the token to `/secret` instead of asking for it in chat. T75 and T76 inherit
+  the session's own history saying MCP runs in another app; T75's second look flagged it, but
+  the rerun kept the picture without calling a tool. The history's wrong picture is older than
+  the prompt; only a session that never said it escapes it.
+- The second look flagged 7 of the 11 no-tool positives' drafts and no control (m10: 11 of 15,
+  one control). Four of the seven reruns called a tool; the other three answered in prose, one
+  still wrong.
+
+### The registry copy, measured three times (D46, U1)
+
+The first sync took 462 s (m9), 517 s (U0) and 1,076 s (U1's review, under load) for about
+37,200 rows, 54 MB; a search in the copy takes 1-6 ms. The duration depends on the registry and
+the machine, so no single figure is a fact to design against.

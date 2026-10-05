@@ -371,9 +371,11 @@ def score(out, result_path):
     variants = {"baseline": ("baseline", False), "prompt": ("prompt", False),
                 "verify": ("baseline", True), "prompt+verify": ("prompt", True)}
     pos, rows, metrics = positives(), {}, {}
-    ran = [n for n in pos + CONTROL + NORMAL
-           if all((out / "traces" / f"T{n}-{v}.json").exists() for v in ("baseline", "prompt"))]
     for name, (base, with_verify) in variants.items():
+        # a variant is scored over the cases its own base trace ran (the exit run has baseline only)
+        ran = [n for n in pos + CONTROL + NORMAL if (out / "traces" / f"T{n}-{base}.json").exists()]
+        if not ran:
+            continue
         m = {"fixed": 0, "controls_bad": 0, "controls_flagged": 0, "controls_needless_tool": 0,
              "normal_broken": 0, "normal_flagged": 0, "model_calls": 0, "extra_calls": 0, "tokens": 0,
              "classes": {}, "run": {"positive": len([n for n in ran if n in pos]),
@@ -416,6 +418,7 @@ def score(out, result_path):
                 **({"fixed": bool(fixed)} if kind == "positive" else {})}
         metrics[name] = m
     result = json.loads(result_path.read_text()) if result_path.exists() else {}
+    ran = [n for n in pos + CONTROL + NORMAL if (out / "traces" / f"T{n}-baseline.json").exists()]
     result.update({"sets": {"positive": pos, "control": CONTROL, "normal": NORMAL,
                             "not_run": [n for n in pos + CONTROL + NORMAL if n not in ran]},
                    "metrics": metrics, "cases": rows})

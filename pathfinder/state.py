@@ -165,7 +165,7 @@ class State:
             ref = event["id"] if event["type"] == "tool_call" else "approval:" + event["id"]
             self.db.execute(
                 "INSERT OR IGNORE INTO messages (seq, session, role, content, ts, ref) VALUES (?, ?, 'calls', ?, ?, ?)",
-                (seq, session, line + (WAITING if gate else ""), event["ts"], ref))
+                (seq, session, line + (f" (approval {event['id']})" + WAITING if gate else ""), event["ts"], ref))
         if event["type"] == "approval":  # only the row of this approval's own gate; none (an older gate) -> nothing
             if event["decision"] == "approved":  # the resumed turn's tool_call writes the real row
                 self.db.execute("DELETE FROM messages WHERE ref = ?", ("approval:" + event["id"],))

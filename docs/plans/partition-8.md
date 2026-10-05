@@ -6,6 +6,7 @@
   U12, U25, U31, U7a, U7b, U8, U32, U33, U10, U14a, U11, U14b, D64, U34, U15a (D66), and on
   2026-10-02 U15b, U16, U26, D67, and on 2026-10-05 U28. `daemon.py` 771/780, `installer.py` **699/700**, `tui.py`
   387/400 + `tui_secret.py` 136/150, `signals.py` + `rules.py` 449/585, `loop.py` 295/520.
+- **Live checks:** (7)(11)(12)(16) passed after the 2026-10-06 fixes (record id, harness-answered line, skill frontmatter shape); (8) partial.
 - **Next:** the live checks (1)-(16), then the merge into `build` and the deploy (Q8). U18's
   exit runs passed on 2026-10-05 (HISTORY). U27, U29 and U17 merged on 2026-10-02 (709 tests). The deploy gate is met;
   nothing is deployed yet. A unit that adds to `installer.py` (699/700) needs room first.
@@ -161,11 +162,11 @@ the token only produces a handle with a key to guard.
 - (11) **The record (D52).** After a turn that called `search_tools`, "did you call search_tools
   just now?" is answered yes, from the record line in history (m10's T112). No tool result text
   appears in the history. A call the owner denied shows as denied, and a gated one as waiting
-  for approval.
+  for approval. *As built (2026-10-06):* a gate's row carries its real id, ` (approval <id>) waiting for approval`, after the model made one up.
 - (12) **Approval typed in chat (D52).** With an install proposal open, typing "승인", "I'll
   approve" or "yes" gets the harness's `/approve <id>` line. The ledger shows the `user` line and
   the harness's `assistant` line, and no model request (no usage on that `turn_end`). The approval
-  is still pending. "yes, and also add X" goes to the model.
+  is still pending. "yes, and also add X" goes to the model. *As built (2026-10-06):* a phrase repeated after the harness line reaches the model, as the line says - the live check read this as a defect; it is D52/D63's design.
 - (13) **The exit measurement.** `bench/m10_unsupported.py` re-runs on the adopted prompt, with
   the second look and with the record in the replayed history (U18). Pass: at least 22 of 27
   fixed, 0 of 10 controls pushed into a tool (T103 and T136 were m10's two), 0 normal turns
@@ -187,7 +188,7 @@ the token only produces a handle with a key to guard.
   - "Connect my Gmail" makes the model call `read_skill` and walk the steps.
   - An `edit_memory` aimed at `skills/` from a signal, job or memory origin is refused.
   - From a user turn the same edit goes to the approval box, even with `grants` allowing
-    `edit_memory`.
+    `edit_memory`. *As built (2026-10-06):* the `edit_memory` `target` description carries the frontmatter shape, and a skill without frontmatter is refused with that shape, so a skill request no longer falls back to a wiki page.
 
 Decisions this partition rests on:
 - D8: the exact-name fallback, the resumable sync, and D53's masked prompt.

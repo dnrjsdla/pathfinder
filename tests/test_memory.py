@@ -307,6 +307,11 @@ class ApplyTest(MemoryHarness):
             with self.assertRaises(ValueError):
                 mgr.edit("skills/foo.md", "add", "", text, [], self._skill_control())
         self.assertEqual(self.state.pending(), [])
+        with self.assertRaisesRegex(ValueError, "frontmatter"):
+            mgr.edit("skills/x.md", "add", "", "1. step", [], self._skill_control())
+        target = memory.TOOLS["edit_memory"].params["target"]["description"]
+        self.assertIn("name:", target)
+        self.assertIn("description:", target)
         for bad in ("skills/a/b.md", "skills/../x.md", "skills/x.txt"):
             with self.assertRaises(ValueError):
                 memory.vault_path(self.home, bad)

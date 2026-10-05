@@ -166,7 +166,7 @@ the token only produces a handle with a key to guard.
 - (12) **Approval typed in chat (D52).** With an install proposal open, typing "승인", "I'll
   approve" or "yes" gets the harness's `/approve <id>` line. The ledger shows the `user` line and
   the harness's `assistant` line, and no model request (no usage on that `turn_end`). The approval
-  is still pending. "yes, and also add X" goes to the model. *As built (2026-10-06):* a user line the harness answered no longer counts as talking past, so a second approval phrase gets the harness line too.
+  is still pending. "yes, and also add X" goes to the model. *As built (2026-10-06):* a phrase repeated after the harness line reaches the model, as the line says - the live check read this as a defect; it is D52/D63's design.
 - (13) **The exit measurement.** `bench/m10_unsupported.py` re-runs on the adopted prompt, with
   the second look and with the record in the replayed history (U18). Pass: at least 22 of 27
   fixed, 0 of 10 controls pushed into a tool (T103 and T136 were m10's two), 0 normal turns

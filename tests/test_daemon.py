@@ -2277,22 +2277,6 @@ class ChatApprovalTest(DaemonHarness):
         self.assertIn("/approve new ", answered[1]["text"])
         self.assertNotIn("old", answered[1]["text"])
 
-    def test_a_second_approval_phrase_is_caught_too(self):
-        factory = fake_model("ok")
-
-        async def scenario(daemon):
-            c, sid = await self._attach()
-            self._gate(daemon, sid, "a1")
-            first = await self._say(c, "승인")
-            second = await self._say(c, "yes")
-            c.close()
-            return first, second, daemon.state.approval("a1")["decision"]
-
-        first, second, decision = self.run_with(factory, scenario)
-        for seen in (first, second):
-            self.assertIn("/approve a1 ", seen[1]["text"])
-        self.assertEqual((factory.seen, decision), ([], None))
-
     def test_longer_message_still_reaches_the_model(self):
         factory = fake_model("ok")
 
@@ -2479,7 +2463,7 @@ class SessionLifetimeTest(DaemonHarness):
     def test_say_after_a_job_gate_in_an_aged_session_lands_in_the_new_session(self):
         """D63 (live 2026-09-30): a job's gate made a session D41 had ended the newest again, and the
         owner's next message went into it with its old history. The phrase typed after the gate gets
-        the harness line in the screen's session; said again, it gets it again."""
+        the harness line in the screen's session; said again, it reaches the model there."""
         def job_factory(cfg, control, tools):
             def step(messages):
                 if not any(m.get("role") == "tool" for m in messages):
@@ -2514,8 +2498,9 @@ class SessionLifetimeTest(DaemonHarness):
         self.assertTrue(still_aged)  # the job's start, gate, approval and end moved nothing
         self.assertIn(f"/approve {gate['approval']} ", said[0])
         self.assertTrue(said[0].endswith(" - if you meant something else, say it again · 다른 뜻이었다면 다시 말해 주세요"))
-        self.assertEqual(said[1], said[0])  # a harness-answered line does not close the gate
-        self.assertEqual(seen, [])  # neither phrase made a model request
+        self.assertEqual(said[1], "ok ")
+        self.assertEqual(len(seen), 1)  # only the phrase said again made a request
+        self.assertNotIn("old question", json.dumps(seen[0], ensure_ascii=False))
         self.assertEqual([e["session"] for e in self.events() if e["type"] == "user" and e["text"] == "응"],
                          [screen, screen])
 

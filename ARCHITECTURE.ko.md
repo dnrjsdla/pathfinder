@@ -142,7 +142,7 @@ asked")로 접어 그 턴의 답 앞에 둔다. 예전 `state.db` 는 열릴 때
 decision)`: `approval_pending` 이 넣고 `approval` 이 결정을 적는다. `pending()` · `approval(id)` 로
 읽는다. `open_approvals(session, max_age_s)` 는 채팅 승인(§7)이 보는 것이다: 그 세션의 승인
 대기, 그리고 `max_age_s`(`session_resume_s`)보다 젊은 동안의 어느 세션의 작업 게이트 - 둘 다 그
-세션의 마지막 `user` 메시지보다 새로울 때만; 주인이 지나쳐 말한 게이트는 열려 있지 않다(하네스가 답한 `user` 줄은 장부에 `harness`, 행에 `ref = 'chat_approval'` 로 표시되어 지나쳐 말한 것이 아니다). `catch_up(ledger)` 는 데몬이 뜰 때, `rebuild(ledger)` 는 표를 버리고 다시 흘린다 —
+세션의 마지막 `user` 메시지보다 새로울 때만; 주인이 지나쳐 말한 게이트는 열려 있지 않다. `catch_up(ledger)` 는 데몬이 뜰 때, `rebuild(ledger)` 는 표를 버리고 다시 흘린다 —
 승인 대기도 함께 돌아온다.
 
 구획 3 이 더한 것: `signals(key, ts, sense, kind)`(24시간 중복 제거: `seen(key, since)`),

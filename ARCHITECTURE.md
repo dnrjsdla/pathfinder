@@ -156,7 +156,7 @@ decision; `pending()` and `approval(id)` read it.
 `open_approvals(session, max_age_s)` is what a chat approval (§7) checks: the session's pending
 approvals, plus a job's pending gate from any session while it is younger than `max_age_s`
 (`session_resume_s`), each only if newer than the session's last `user` message - a gate the
-owner has talked past is not open (a `user` line the harness answered, marked `harness` in the ledger and `ref = 'chat_approval'` in the row, is not talking past). `catch_up(ledger)` runs at daemon start;
+owner has talked past is not open. `catch_up(ledger)` runs at daemon start;
 `rebuild(ledger)` drops and replays — approvals come back with everything else.
 
 Partition 3 adds `signals(key, ts, sense, kind)` (the 24 h dedupe: `seen(key, since)`),

@@ -253,14 +253,6 @@ class StateTest(unittest.TestCase):
         self._record("user", session="s2", turn="t2", origin="user", trust="user", text="something else")
         self.assertEqual(self.state.open_approvals("s2", 7200), [])
 
-    def test_a_harness_answered_user_line_does_not_close_the_gate(self):
-        self._record("session_start", session="s2")
-        self._gate("gate", "send_mail", {})
-        self._record("user", session="s2", turn="t1", origin="user", trust="user", text="yes", harness=True)
-        self.assertEqual([p["id"] for p in self.state.open_approvals("s2", 7200)], ["gate"])
-        self._record("user", session="s2", turn="t2", origin="user", trust="user", text="something else")
-        self.assertEqual(self.state.open_approvals("s2", 7200), [])
-
     def test_presence_is_the_newest_row_across_sessions(self):
         """5a: the owner has one pair of hands - a screen moved into a new session typed in the old one."""
         self.assertIsNone(self.state.presence())

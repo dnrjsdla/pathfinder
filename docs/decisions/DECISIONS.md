@@ -578,3 +578,15 @@ exempts and the verifier prompt did not. The cost: the verifier input m10 measur
 prompt gains two sentences, the input up to 1,500 characters); m10' stays as measured and a smoke
 of the affected cases follows. *Reversed if* the smoke or live use shows the record making the
 verifier pass an unsupported answer.
+
+**D69. A call refused at the broker's door is recorded and is not a tool call (amends D51/D52)**
+(decided 2026-10-06). For an unknown tool, a coercion error, a `normalize` error and a policy
+`deny`, `Broker.call` now emits `tool_call` and then `tool_result` with `refused: True` (a policy
+deny also `denied: True`) and returns `refused: True`; the record row ends ` refused` (` denied`
+for policy). `loop.run` counts a step as a tool run only when one of its settled calls was not
+refused, so a turn whose every call was refused is still checked by the second look. Live (10b): a
+turn of two steps, no tool event, no check - `Broker.call` returned before `emit` while the loop
+set `called` for any step with tool_calls, so the answer went out unchecked and the record never
+showed the attempt. The gate path and the user-denied path are unchanged. The cost: four more
+ledger events per refused attempt; the record shows the model's misses. *Reversed if* refused
+rows crowd the record (`CALL_ARGS_CLIP` already bounds each).

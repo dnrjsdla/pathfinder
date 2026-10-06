@@ -6,8 +6,7 @@
   U12, U25, U31, U7a, U7b, U8, U32, U33, U10, U14a, U11, U14b, D64, U34, U15a (D66), and on
   2026-10-02 U15b, U16, U26, D67, and on 2026-10-05 U28. `daemon.py` 771/780, `installer.py` **699/700**, `tui.py`
   387/400 + `tui_secret.py` 136/150, `signals.py` + `rules.py` 449/585, `loop.py` 295/520.
-- **Next:** the owner's decisions on the open items in HISTORY (2026-10-06: the second look and the
-  record, door-refused calls, the failed-sync retry), then the merge into `build` and the deploy (Q8).
+- **Next:** D68 and D69 landed on 2026-10-06; the failed-sync retry (Q5) is still open, then the merge into `build` and the deploy (Q8).
   Live checks (1)-(4), (6)-(14), (16) passed on 2026-10-06 ((3)'s network pull by unit test, (10c)
   by unit test); (5) Notion and (15) Gmail wait for the owner's token and app password.
   nothing is deployed yet. A unit that adds to `installer.py` (699/700) needs room first.

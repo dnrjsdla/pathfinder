@@ -150,6 +150,13 @@ class StateTest(unittest.TestCase):
         self._record("tool_result", session="s2", turn="t1", origin="user", id="c1", name="a", ok=True, result="r")
         self.assertEqual(self._lines(), [["a {} ok", "b {}"]])
 
+    def test_a_call_refused_at_the_door_reads_refused_or_denied(self):
+        self._record("session_start", session="s2")
+        self._record("user", session="s2", turn="t1", origin="user", trust="user", text="go")
+        self._call("c1", "nope", {}, ok=False, refused=True)
+        self._call("c2", "write_file", {}, ok=False, refused=True, denied=True)
+        self.assertEqual(self._lines(), [["nope {} refused", "write_file {} denied"]])
+
     def test_a_signal_or_job_result_does_not_mark_the_owners_row(self):
         self._record("session_start", session="s2")
         self._record("user", session="s2", turn="t1", origin="user", trust="user", text="go")

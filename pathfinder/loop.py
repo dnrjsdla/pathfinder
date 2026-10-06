@@ -108,11 +108,12 @@ def settle(messages, call_tool, control=None):
         if messages[idx].get("role") == "assistant":
             assistant_idx = idx
             break
+    results = []  # what this call appended: the caller tells a refused call (D69) from a tool that ran
     if assistant_idx is None:
-        return
+        return results
     tool_calls = messages[assistant_idx].get("tool_calls") or []
     if not tool_calls:
-        return
+        return results
     answered = {m["tool_call_id"] for m in messages[assistant_idx:] if m.get("role") == "tool"}
     for tc in tool_calls:
         tc_id = tc["id"]
@@ -131,6 +132,8 @@ def settle(messages, call_tool, control=None):
             if control is not None:
                 control.in_tool = False
         messages.append({"role": "tool", "tool_call_id": tc_id, "content": json.dumps(result, ensure_ascii=False)})
+        results.append(result)
+    return results
 
 
 def verifier_input(tools, messages):
@@ -180,7 +183,7 @@ def run(step, messages, *, call_tool, emit, budget=8, control=None, resume=False
     """`second_look`: the tool names offered this turn; when given, a final answer that came with
     no tool result is checked once by `final_step` (D51)."""
     usage, check = None, None
-    called = resume  # a tool ran in this turn: the second look never reads a tool-backed answer
+    called = resume  # a tool ran in this turn (a call refused at the door is not one, D69): no second look
     said = []  # everything streamed this turn reaches the ledger; only a withdrawn draft leaves it
 
     def with_said(e, parts=()):
@@ -272,11 +275,11 @@ def run(step, messages, *, call_tool, emit, budget=8, control=None, resume=False
                     continue
             return Outcome("answer", text="".join(said), steps=i, usage=usage, check=check)
 
-        called = True
         try:
-            settle(messages, call_tool, control)  # a Gate propagates out of here
+            results = settle(messages, call_tool, control)  # a Gate propagates out of here
         except Gate as g:
             raise with_said(g)
+        called = called or any(not r.get("refused") for r in results)
 
     if final_step is not None:
         # D30: the budget is spent and the last reply was still a tool call. One more request

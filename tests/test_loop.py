@@ -253,6 +253,22 @@ class SecondLookTest(unittest.TestCase):
         resumed, _, _ = self._run([[("text", "It is empty.")]], looks, messages=pending, resume=True)
         self.assertEqual((out.check, resumed.check, looks.asks), (None, None, []))
 
+    def test_second_look_runs_when_every_call_was_refused_but_not_after_a_real_one(self):
+        refused = {"ok": False, "refused": True, "error": "no such tool: x"}
+        call = lambda i: {"id": i, "name": "x", "arguments": {}}  # noqa: E731
+        steps = [[("tool_calls", [call("c1")])], [("text", "It is empty.")]]
+        looks = _looks([("text", _verdict())])
+        messages = _turn()
+        out = run(_make_step(steps), messages, call_tool=lambda i, n, a: refused, emit=lambda k, p: None,
+                  final_step=looks, second_look=self.TOOLS)
+        self.assertEqual((out.check, len(looks.asks)), ("passed", 1))
+        mixed = {"c1": refused, "c2": {"ok": True, "result": 1}}
+        steps = [[("tool_calls", [call("c1"), call("c2")])], [("text", "It is empty.")]]
+        looks = _looks()
+        out = run(_make_step(steps), _turn(), call_tool=lambda i, n, a: mixed[i], emit=lambda k, p: None,
+                  final_step=looks, second_look=self.TOOLS)
+        self.assertEqual((out.check, looks.asks), (None, []))
+
     def test_second_look_needs_a_step_left(self):
         looks = _looks()
         out, _, _ = self._run([[("text", "It is empty.")]], looks, budget=1)

@@ -125,11 +125,11 @@ false, withdrawn: {flags, why}}` 로 철회 표시와 이유를 달고 적힌다
 **불변조건 1: 이력은 한 말과 부른 것이다 - 그 밖에는 없다**(D52). 이력, 곧 턴을 짓는 메시지는
 정확히 두 가지만 싣는다: 사용자와 비서가 한 말 - origin 이 `user` 인 `user` 사건(steer 포함,
 작업에 보낸 steer 제외)과 `final` 인 `assistant` 사건 - 그리고 비서가 사용자 턴에서 부른 툴
-호출마다 툴 이름 · 인자 · 네 상태 중 하나: ` ok`, ` failed`, ` denied`, ` waiting for approval`(게이트 줄은 승인 id 를 ` (approval <id>)` 로 밝힌다 - 모델이 id 를 지어내지 않도록).
+호출마다 툴 이름 · 인자 · 다섯 상태 중 하나: ` ok`, ` failed`, ` refused`, ` denied`, ` waiting for approval`(게이트 줄은 승인 id 를 ` (approval <id>)` 로 밝힌다 - 모델이 id 를 지어내지 않도록).
 툴 결과 본문 · 신호 봉투 · 두 번째 확인이 철회한 초안은 절대 싣지 않는다. 기록은 그 호출에 관한
 장부 자신의 사건 - `tool_call`, `tool_result`, `approval_pending`(메시지를 싣는 브로커 게이트),
-`approval` - 에서만 투영되고 모델이 쓴 어떤 말에서도 만들어지지 않는다 - 그래서 돌지 않은 호출,
-정책이 거부한 호출, 모델이 했다고만 말하는 호출은 나타날 수 없다. `apply` 는 role `calls` 인
+`approval` - 에서만 투영되고 모델이 쓴 어떤 말에서도 만들어지지 않는다 - 그래서 모델이 했다고만 말하는 호출은
+나타날 수 없다; 브로커 문에서 돌려보낸 호출(없는 툴 · 잘못된 인자 · 정책)은 ` refused`(정책은 ` denied`)로 나타난다(D69). `apply` 는 role `calls` 인
 `messages` 줄을 쓰고 호출 id 를 `ref` 칸에 둔다(게이트는 `approval:<id>`); `tool_result` 가
 ` ok` 나 ` failed` 를 덧붙이고, 승인은 대기 줄을 지우며(재개된 호출이 제 줄을 쓴다) 거부는
 그것을 ` denied` 로 바꾼다. 인자는 120자로 자른 압축 JSON(`CALL_ARGS_CLIP`)이며 장부 문이 쓴
@@ -275,7 +275,7 @@ dict 를 키 튜플로 바꿔 버린다.
   없는 것을 순서대로 실행한다(각각 `in_tool` 을 세워 둔 채). `resume=True` 면 먼저 settle 한다.
   settle 에서 나온 `Gate` 는 그때까지 흘린 텍스트 `said` 를 싣고 올라간다.
 - **두 번째 확인**(D51). 사용자 턴은 `second_look`(그 턴이 내놓는 툴 이름들)을 넘긴다. 그 턴에
-  툴 호출 없이 나온 최종 답 - 툴이 돈 뒤에는 절대, 재개에서도 절대 아니고, 예산에 스텝이 남았을
+  툴 호출 없이 나온 최종 답 - 툴이 돈 뒤에는 절대(브로커가 문에서 돌려보낸 `refused` 호출은 툴 호출이 아니다, D69), 재개에서도 절대 아니고, 예산에 스텝이 남았을
   때만 - 은 툴 없이 `final_step` 으로 한 번 확인된다: `VERIFIER_PROMPT` 와 `verifier_input`(툴
   이름 · 일정 · 이전 답 · 가장 최근의 툴 호출 기록(D68; 이름 · 인자 · 상태, 결과는 없다) · 사용자의 말 · 초안). 둘은 `FLAG_WORDS` · `RERUN_NOTE` 와 함께 그것을 잰
   `bench/m10_unsupported.py` 와 바이트 단위로 같게 붙들린다(`test_second_look_matches_the_bench`).

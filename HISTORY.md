@@ -1361,3 +1361,31 @@ contract's list is `docs/plans/partition-8.md`, "It runs".
 - Told "still syncing (300 so far)", answered "no weather tools in the registry", dropping the
   qualifier.
 - Writes a skill's frontmatter unprompted once the tool description shows the shape.
+
+## 2026-10-06 — D68 and D69 from the live checks; the smoke of the amended second look
+
+The live checks' two open items the owner decided on 2026-10-06 (DECISIONS D68, D69):
+- **D68.** The second look's input now carries the latest tool-call record block (the tail, 1,500
+  characters), and its prompt counts the record and a recap of the conversation as support.
+  Before, a correct answer taken from the record ("the pending call is write_file, id ...", "yes,
+  I called run_command") was flagged and withdrawn, and the re-run answered worse.
+- **D69.** A call the broker refuses at the door (unknown tool, coercion error, normalize error,
+  policy deny) is emitted as `tool_call` + `tool_result {refused}`; the record row reads
+  ` refused` (or ` denied`), and `loop.run` no longer counts the step as a tool call, so the
+  second look still runs on the answer that follows.
+
+**Smoke (`docs/measurements/m10-d68-smoke-2026-10-06.json`, 21,044 tokens).** The new verifier
+re-judged the 21 m10' drafts that called no tool (11 positives, 10 controls), verdicts only, on
+the drafts m10' had produced (paired, as m10 was designed):
+
+| | old verifier (m10') | new verifier (D68) |
+|---|---|---|
+| same verdict | — | 20 of 21 |
+| controls flagged, of 10 | 0 | **0** |
+| positives flagged, of 11 | 5 | 6 (T114 added: "no built-in weather tool" → `false_incapability`; its m10' re-run would call `run_command`, which keeps it fixed) |
+| record block present in the input | never | 17 of 21 (the four without it are first turns) |
+
+Nothing the old verifier caught is lost and no control is pushed, so m10' (24 of 27 with the
+second look) stands; a full re-run was not spent. The two live defects D68 answers (the pending
+id, "did you call X") are not in m10's cases - the record did not exist when they were collected -
+so live use is their measurement.

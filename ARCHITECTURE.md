@@ -142,7 +142,7 @@ withdrew. The record is projected only from the ledger's own events about the ca
 `approval` - never from anything the model wrote, so a call the model only claims cannot appear in it; a call turned away at the broker's door
 (unknown tool, bad arguments, policy) does, as ` refused` (` denied` for policy, D69). `apply` writes a `messages` row
 with role `calls` and the call's id in its `ref` column (`approval:<id>` for a gate); the
-`tool_result` appends ` ok` or ` failed`, a gate's row names its approval id (` (approval <id>) waiting for approval`, so the model never has to invent one), an approve deletes the waiting row (the resumed call
+`tool_result` appends ` ok`, ` failed`, ` refused` or ` denied`, a gate's row names its approval id (` (approval <id>) waiting for approval`, so the model never has to invent one), an approve deletes the waiting row (the resumed call
 writes its own) and a deny turns it ` denied`. Arguments are compact JSON cut to 120 characters
 (`CALL_ARGS_CLIP`), as the ledger door wrote them, so a pasted token shows only as its handle.
 `history()` folds consecutive `calls` rows into one `system` message (`RECORD_HEADER`: names and

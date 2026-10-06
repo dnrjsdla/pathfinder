@@ -102,6 +102,8 @@ def coerce(spec: ToolSpec, args: dict) -> tuple:
     """(cast args, error string). An undeclared key is dropped, not an error -
     the model gets the same result either way (the key is unusable), but a
     dropped key is silent while a missing required one is not."""
+    if args and not isinstance(args, dict):
+        return {}, f"{spec.name}: arguments must be an object"
     out = {}
     for key, value in (args or {}).items():
         if key not in spec.params:

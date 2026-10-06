@@ -59,7 +59,7 @@ class Broker:
     def call(self, id, name, args) -> dict:
         spec = self.tools.get(name)
         if spec is None:
-            return self._refuse(id, name, args, f"no such tool: {name}")
+            return self._refuse(id, str(name)[:64], args, f"no such tool: {str(name)[:64]}")  # model text: bounded
 
         coerced, error = coerce(spec, args)
         if error:

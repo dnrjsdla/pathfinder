@@ -29,6 +29,10 @@ class CoerceTest(unittest.TestCase):
         self.assertEqual(err, "")
         self.assertNotIn("extra", args)
 
+    def test_coerce_non_object_arguments_are_refused_not_raised(self):
+        spec = ToolSpec(name="t", description="", params={"n": {"type": "integer"}}, required=[], handler=None)
+        self.assertEqual(coerce(spec, [1, 2]), ({}, "t: arguments must be an object"))
+
     def test_coerce_missing_required(self):
         args, err = coerce(SPEC, {})
         self.assertIn("missing required argument 's'", err)

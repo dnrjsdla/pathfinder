@@ -131,7 +131,7 @@ false, withdrawn: {flags, why}}` 로 철회 표시와 이유를 달고 적힌다
 `approval` - 에서만 투영되고 모델이 쓴 어떤 말에서도 만들어지지 않는다 - 그래서 모델이 했다고만 말하는 호출은
 나타날 수 없다; 브로커 문에서 돌려보낸 호출(없는 툴 · 잘못된 인자 · 정책)은 ` refused`(정책은 ` denied`)로 나타난다(D69). `apply` 는 role `calls` 인
 `messages` 줄을 쓰고 호출 id 를 `ref` 칸에 둔다(게이트는 `approval:<id>`); `tool_result` 가
-` ok` 나 ` failed` 를 덧붙이고, 승인은 대기 줄을 지우며(재개된 호출이 제 줄을 쓴다) 거부는
+` ok` · ` failed` · ` refused` · ` denied` 중 하나를 덧붙이고, 승인은 대기 줄을 지우며(재개된 호출이 제 줄을 쓴다) 거부는
 그것을 ` denied` 로 바꾼다. 인자는 120자로 자른 압축 JSON(`CALL_ARGS_CLIP`)이며 장부 문이 쓴
 그대로라, 붙여 넣은 토큰은 핸들로만 보인다. `history()` 는 이어진 `calls` 줄을 `system` 메시지
 하나(`RECORD_HEADER`: 결과가 아니라 이름과 인자; "ok = the tool returned, not that it did what was

@@ -70,6 +70,11 @@ class BrokerTest(unittest.TestCase):
         b, emitted = self._broker(origin="system")
         self._assert_refused(b, emitted, "c4", "write_thing", {}, policy.DENIED_TEXT, denied=True)
 
+    def test_an_unknown_tool_name_is_bounded_in_events_and_error(self):
+        b, emitted = self._broker()
+        result = b.call("c1", "n" * 3000, {})
+        self.assertTrue(all(len(p["name"]) <= 64 for _, p in emitted) and len(result["error"]) < 100)
+
     def test_an_allowed_call_is_not_marked_refused(self):
         b, emitted = self._broker()
         self.assertNotIn("refused", b.call("c1", "read_thing", {}))

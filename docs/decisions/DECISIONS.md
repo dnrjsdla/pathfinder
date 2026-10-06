@@ -577,7 +577,9 @@ answered worse. "What did I just send you? quote it" was flagged too - a recap t
 exempts and the verifier prompt did not. The cost: the verifier input m10 measured changes (the
 prompt gains two sentences, the input up to 1,500 characters); m10' stays as measured and a smoke
 of the affected cases follows. *Reversed if* the smoke or live use shows the record making the
-verifier pass an unsupported answer.
+verifier pass an unsupported answer. The record it sees is every record block of the session, newest rows last, cut to its last 1,500
+characters at a row boundary: each turn has its own block, so the latest one alone loses a gate still
+waiting from an earlier turn.
 
 **D69. A call refused at the broker's door is recorded and is not a tool call (amends D51/D52)**
 (decided 2026-10-06). For an unknown tool, a coercion error, a `normalize` error and a policy
@@ -587,6 +589,8 @@ for policy). `loop.run` counts a step as a tool run only when one of its settled
 refused, so a turn whose every call was refused is still checked by the second look. Live (10b): a
 turn of two steps, no tool event, no check - `Broker.call` returned before `emit` while the loop
 set `called` for any step with tool_calls, so the answer went out unchecked and the record never
-showed the attempt. The gate path and the user-denied path are unchanged. The cost: four more
+showed the attempt. The gate path and the user-denied path are unchanged. The cost: two more
 ledger events per refused attempt; the record shows the model's misses. *Reversed if* refused
 rows crowd the record (`CALL_ARGS_CLIP` already bounds each).
+A policy deny still counts as a tool call for the second look, because the verifier does not see
+this turn's refusals and would flag a truthful "your settings block it" as `false_incapability`.

@@ -1383,7 +1383,7 @@ the drafts m10' had produced (paired, as m10 was designed):
 | same verdict | — | 20 of 21 |
 | controls flagged, of 10 | 0 | **0** |
 | positives flagged, of 11 | 5 | 6 (T114 added: "no built-in weather tool" → `false_incapability`; its m10' re-run would call `run_command`, which keeps it fixed) |
-| record block present in the input | never | 17 of 21 (the four without it are first turns) |
+| record block present in the input | never | 18 of 21 (the three without it had no earlier call in their session) |
 
 Nothing the old verifier caught is lost and no control is pushed, so m10' (24 of 27 with the
 second look) stands; a full re-run was not spent. The two live defects D68 answers (the pending

@@ -1,0 +1,535 @@
+{
+  "model": "gpt-oss:120b-cloud",
+  "base_url": "http://localhost:11434/v1",
+  "n_tasks": 20,
+  "results": [
+    {
+      "id": "A1",
+      "category": "A",
+      "title": "weather city swap",
+      "http_err": null,
+      "calls": [
+        {
+          "name": "get_weather",
+          "args": {
+            "city": "Busan"
+          }
+        },
+        {
+          "name": "get_weather",
+          "args": {
+            "city": "Osaka"
+          }
+        }
+      ],
+      "steer_at": 1,
+      "final_text": "현재 부산은 **맑음**이며, 온도는 24°C입니다.  \n부산이 맑으니 요청하신 대로 **오사카**의 날씨도 확인했습니다.\n\n- **오사카**: 맑음, 온도 24°C\n\n다른 궁금한 점이 있으면 알려 주세요!",
+      "latencies": [
+        1.2202191352844238,
+        0.7049312591552734,
+        0.7805159091949463
+      ],
+      "prompt_tokens": 1231,
+      "completion_tokens": 343,
+      "steps": 3,
+      "excluded": null,
+      "reflected": true,
+      "kept": true
+    },
+    {
+      "id": "A2",
+      "category": "A",
+      "title": "event duration change",
+      "http_err": null,
+      "calls": [
+        {
+          "name": "list_events",
+          "args": {
+            "date": "2026-09-23"
+          }
+        },
+        {
+          "name": "add_event",
+          "args": {
+            "duration_min": 60,
+            "start_iso": "2026-09-23T16:00:00+09:00",
+            "title": "독서"
+          }
+        }
+      ],
+      "steer_at": 1,
+      "final_text": "내일(2024‑년 9월 23일) 오후 4시부터 1시간(60분) 동안 “독서” 일정을 추가했습니다.  \n\n다른 도움이 필요하시면 언제든 알려 주세요!",
+      "latencies": [
+        1.0425000190734863,
+        0.8667001724243164,
+        0.6823859214782715
+      ],
+      "prompt_tokens": 1373,
+      "completion_tokens": 388,
+      "steps": 3,
+      "excluded": null,
+      "reflected": true,
+      "kept": true
+    },
+    {
+      "id": "A3",
+      "category": "A",
+      "title": "event time change",
+      "http_err": null,
+      "calls": [
+        {
+          "name": "list_events",
+          "args": {
+            "date": "2026-09-23"
+          }
+        },
+        {
+          "name": "add_event",
+          "args": {
+            "duration_min": 60,
+            "start_iso": "2026-09-23T17:00:00+09:00",
+            "title": "점심 약속"
+          }
+        }
+      ],
+      "steer_at": 1,
+      "final_text": "내일 (2024‑년 9월 23일) 일정에 **오후 5시부터 1시간** 동안 “점심 약속”을 추가했습니다.  \n\n추가된 일정:\n- **시간:** 17:00 ~ 18:00 (KST)\n- **제목:** 점심 약속  \n\n다른 일정 확인이나 추가로 필요한 것이 있으면 알려 주세요!",
+      "latencies": [
+        0.9536621570587158,
+        1.1729190349578857,
+        0.8562171459197998
+      ],
+      "prompt_tokens": 1364,
+      "completion_tokens": 505,
+      "steps": 3,
+      "excluded": null,
+      "reflected": true,
+      "kept": true
+    },
+    {
+      "id": "A4",
+      "category": "A",
+      "title": "one more event",
+      "http_err": null,
+      "calls": [
+        {
+          "name": "list_events",
+          "args": {
+            "date": "2026-09-23"
+          }
+        },
+        {
+          "name": "add_event",
+          "args": {
+            "duration_min": 60,
+            "start_iso": "2026-09-23T18:00:00+09:00",
+            "title": "저녁 운동"
+          }
+        },
+        {
+          "name": "add_event",
+          "args": {
+            "duration_min": 30,
+            "start_iso": "2026-09-23T20:00:00+09:00",
+            "title": "독서"
+          }
+        }
+      ],
+      "steer_at": 1,
+      "final_text": "내일(2026‑09‑23)의 현재 일정은  \n\n- 10:00 ~ 11:00 Team sync  \n- 14:00 ~ 15:00 Dentist  \n\n그리고 요청하신 대로 다음 일정을 추가했습니다:\n\n- **18:00 ~ 19:00** 저녁 운동 (1시간)  \n- **20:00 ~ 20:30** 독서 (30분)\n\n필요한 것이 더 있으면 알려 주세요!",
+      "latencies": [
+        1.065925121307373,
+        1.0614078044891357,
+        0.6201930046081543,
+        0.7040932178497314
+      ],
+      "prompt_tokens": 2022,
+      "completion_tokens": 560,
+      "steps": 4,
+      "excluded": null,
+      "reflected": true,
+      "kept": true
+    },
+    {
+      "id": "A5",
+      "category": "A",
+      "title": "cancel the event after all",
+      "http_err": null,
+      "calls": [
+        {
+          "name": "list_events",
+          "args": {
+            "date": "2026-09-23"
+          }
+        }
+      ],
+      "steer_at": 1,
+      "final_text": "내일(2026‑09‑23)의 현재 일정은 다음과 같습니다.\n\n- **10:00 ~ 11:00** – Team sync  \n- **14:00 ~ 15:00** – Dentist  \n\n'고객 미팅' 일정 추가는 요청에 따라 진행하지 않았습니다. 필요하시면 언제든 다시 알려 주세요!",
+      "latencies": [
+        1.410168170928955,
+        0.963021993637085
+      ],
+      "prompt_tokens": 803,
+      "completion_tokens": 321,
+      "steps": 2,
+      "excluded": null,
+      "reflected": true,
+      "kept": true
+    },
+    {
+      "id": "A6",
+      "category": "A",
+      "title": "different note",
+      "http_err": null,
+      "calls": [
+        {
+          "name": "search_notes",
+          "args": {
+            "query": "플레이라이트 MCP 설정"
+          }
+        },
+        {
+          "name": "search_notes",
+          "args": {
+            "query": "AI 트렌드"
+          }
+        },
+        {
+          "name": "read_note",
+          "args": {
+            "path": "notes/ai-trend-research.md"
+          }
+        }
+      ],
+      "steer_at": 1,
+      "final_text": "아래는 찾은 **AI 트렌드** 관련 노트 내용입니다:\n\n```\nAI Trend Research notes.\nSources: arxiv, conference talks.\nSummary: transformer scaling continues.\n```\n\n필요한 추가 정보가 있으면 알려 주세요!",
+      "latencies": [
+        0.9853639602661133,
+        0.5687448978424072,
+        0.5576701164245605,
+        0.8895659446716309
+      ],
+      "prompt_tokens": 1855,
+      "completion_tokens": 425,
+      "steps": 4,
+      "excluded": null,
+      "reflected": true,
+      "kept": false
+    },
+    {
+      "id": "A7",
+      "category": "A",
+      "title": "different shell command",
+      "http_err": null,
+      "calls": [
+        {
+          "name": "get_weather",
+          "args": {
+            "city": "Seoul"
+          }
+        },
+        {
+          "name": "run_shell",
+          "args": {
+            "command": "pwd"
+          }
+        }
+      ],
+      "steer_at": 1,
+      "final_text": "현재 서울의 날씨는 **맑음**이며, 기온은 약 24°C입니다.  \n\n요청하신 대로 쉘에서 `pwd` 명령어를 실행한 결과는 아래와 같습니다:\n\n```\n(mock) ran: pwd\n```\n\n다른 도움이 필요하시면 알려 주세요!",
+      "latencies": [
+        0.7272140979766846,
+        0.6271729469299316,
+        0.7356951236724854
+      ],
+      "prompt_tokens": 1247,
+      "completion_tokens": 225,
+      "steps": 3,
+      "excluded": null,
+      "reflected": true,
+      "kept": true
+    },
+    {
+      "id": "A8",
+      "category": "A",
+      "title": "answer in English",
+      "http_err": null,
+      "calls": [
+        {
+          "name": "get_weather",
+          "args": {
+            "city": "Busan"
+          }
+        },
+        {
+          "name": "list_events",
+          "args": {
+            "date": "2026-09-23"
+          }
+        }
+      ],
+      "steer_at": 1,
+      "final_text": "The weather in Busan today is **sunny** with a temperature of **24 °C**.\n\nSince it’s sunny, here’s your schedule for tomorrow (2024‑09‑23):\n\n| Time   | Event        |\n|--------|--------------|\n| 10:00 – 11:00 | Team sync |\n| 14:00 – 15:00 | Dentist   |\n\nLet me know if you’d like to add, modify, or get details for any of these events.",
+      "latencies": [
+        1.1559498310089111,
+        0.8514113426208496,
+        0.9463870525360107
+      ],
+      "prompt_tokens": 1232,
+      "completion_tokens": 298,
+      "steps": 3,
+      "excluded": null,
+      "reflected": true,
+      "kept": true
+    },
+    {
+      "id": "A9",
+      "category": "A",
+      "title": "event duration shrink",
+      "http_err": null,
+      "calls": [
+        {
+          "name": "get_weather",
+          "args": {
+            "city": "London"
+          }
+        },
+        {
+          "name": "add_event",
+          "args": {
+            "duration_min": 20,
+            "start_iso": "2026-09-23T13:00:00+09:00",
+            "title": "전화 회의"
+          }
+        }
+      ],
+      "steer_at": 1,
+      "final_text": "런던은 현재 **맑은(Sunny)** 날씨이며, 온도는 24°C입니다.\n\n요청하신 대로 **2026‑09‑23 (내일) 오후 1시**부터 **20분** 동안 진행되는 **“전화 회의”** 일정을 캘린더에 추가했습니다. 필요하신 다른 일정이나 도움이 있으면 알려 주세요!",
+      "latencies": [
+        0.9928178787231445,
+        1.4191350936889648,
+        0.889909029006958
+      ],
+      "prompt_tokens": 1314,
+      "completion_tokens": 465,
+      "steps": 3,
+      "excluded": null,
+      "reflected": true,
+      "kept": true
+    },
+    {
+      "id": "A10",
+      "category": "A",
+      "title": "different date",
+      "http_err": null,
+      "calls": [
+        {
+          "name": "get_weather",
+          "args": {
+            "city": "Jeju"
+          }
+        },
+        {
+          "name": "list_events",
+          "args": {
+            "date": "2026-09-22"
+          }
+        }
+      ],
+      "steer_at": 1,
+      "final_text": "제주 오늘 날씨는 **맑음**이며, 현재 온도는 24 °C입니다.  \n\n오늘(2026‑09‑22) 일정은 현재 등록된 일정이 없습니다. 필요하시면 새로운 일정을 추가하거나 다른 날짜·시간을 알려주세요!",
+      "latencies": [
+        1.044161081314087,
+        0.6454329490661621,
+        1.0487618446350098
+      ],
+      "prompt_tokens": 1191,
+      "completion_tokens": 343,
+      "steps": 3,
+      "excluded": null,
+      "reflected": true,
+      "kept": true
+    },
+    {
+      "id": "B1",
+      "category": "B",
+      "title": "every fifth to 30",
+      "partial": "1  \n2  \n3  \n4  \n",
+      "continuation": "5  \n10  \n15  \n20  \n25  \n30",
+      "final_text": "1  \n2  \n3  \n4  \n5  \n10  \n15  \n20  \n25  \n30",
+      "http_err": null,
+      "latencies": [
+        0.648900032043457,
+        0.8129119873046875
+      ],
+      "prompt_tokens": 184,
+      "completion_tokens": 121,
+      "excluded": null,
+      "reflected": true,
+      "kept": true
+    },
+    {
+      "id": "B2",
+      "category": "B",
+      "title": "stop at 20 of 40",
+      "partial": "1  \n2  \n3  \n4  \n",
+      "continuation": "1  \n2  \n3  \n4  \n5  \n6  \n7  \n8  \n9  \n10  \n11  \n12  \n13  \n14  \n15  \n16  \n17  \n18  \n19  \n20",
+      "final_text": "1  \n2  \n3  \n4  \n1  \n2  \n3  \n4  \n5  \n6  \n7  \n8  \n9  \n10  \n11  \n12  \n13  \n14  \n15  \n16  \n17  \n18  \n19  \n20",
+      "http_err": null,
+      "latencies": [
+        0.6334478855133057,
+        0.8477640151977539
+      ],
+      "prompt_tokens": 182,
+      "completion_tokens": 153,
+      "excluded": null,
+      "reflected": true,
+      "kept": false
+    },
+    {
+      "id": "B3",
+      "category": "B",
+      "title": "backwards from step to 30",
+      "partial": "1  \n2  \n3  \n4  \n",
+      "continuation": "아래와 같이 두 가지 방법 중 어떤 방식으로 진행하면 될까요?\n\n1. **30부터 1까지 거꾸로** – 30, 29, 28 … 2, 1\n2. **다음 숫자(5)부터 거꾸로** – 5, 4, 3, 2, 1 (이미 1‑4는 앞에서 세었으므로)\n\n원하시는 방식을 알려주시면 그에 맞게 바로 적어드리겠습니다!",
+      "final_text": "1  \n2  \n3  \n4  \n아래와 같이 두 가지 방법 중 어떤 방식으로 진행하면 될까요?\n\n1. **30부터 1까지 거꾸로** – 30, 29, 28 … 2, 1\n2. **다음 숫자(5)부터 거꾸로** – 5, 4, 3, 2, 1 (이미 1‑4는 앞에서 세었으므로)\n\n원하시는 방식을 알려주시면 그에 맞게 바로 적어드리겠습니다!",
+      "http_err": null,
+      "latencies": [
+        0.488008975982666,
+        2.7644779682159424
+      ],
+      "prompt_tokens": 182,
+      "completion_tokens": 702,
+      "excluded": null,
+      "reflected": false,
+      "kept": false
+    },
+    {
+      "id": "B4",
+      "category": "B",
+      "title": "과일 list, continue in English (20)",
+      "partial": "사과  \n바나나  \n포도  \n",
+      "continuation": "Mango  \nStrawberry  \nWatermelon  \nOrange  \nKiwi  \nPineapple  \nPeach  \nCherry  \nPear  \nLemon  \nLime  \nBlueberry  \nRaspberry  \nCantaloupe  \nPapaya  \nGuava  \nDragonfruit",
+      "final_text": "사과  \n바나나  \n포도  \nMango  \nStrawberry  \nWatermelon  \nOrange  \nKiwi  \nPineapple  \nPeach  \nCherry  \nPear  \nLemon  \nLime  \nBlueberry  \nRaspberry  \nCantaloupe  \nPapaya  \nGuava  \nDragonfruit",
+      "http_err": null,
+      "latencies": [
+        0.7410368919372559,
+        1.4449129104614258
+      ],
+      "prompt_tokens": 182,
+      "completion_tokens": 331,
+      "excluded": null,
+      "reflected": true,
+      "kept": true
+    },
+    {
+      "id": "B5",
+      "category": "B",
+      "title": "나라 list, add emoji (15)",
+      "partial": "대한민국  \n미국  \n일본  \n프",
+      "continuation": "대한민국 🇰🇷  \n미국 🇺🇸  \n일본 🇯🇵  \n중국 🇨🇳  \n독일 🇩🇪  \n프랑스 🇫🇷  \n영국 🇬🇧  \n브라질 🇧🇷  \n캐나다 🇨🇦  \n호주 🇦🇺  \n인도 🇮🇳  \n러시아 🇷🇺  \n이탈리아 🇮🇹  \n멕시코 🇲🇽  \n남아프리카 🇿🇦",
+      "final_text": "대한민국  \n미국  \n일본  \n프대한민국 🇰🇷  \n미국 🇺🇸  \n일본 🇯🇵  \n중국 🇨🇳  \n독일 🇩🇪  \n프랑스 🇫🇷  \n영국 🇬🇧  \n브라질 🇧🇷  \n캐나다 🇨🇦  \n호주 🇦🇺  \n인도 🇮🇳  \n러시아 🇷🇺  \n이탈리아 🇮🇹  \n멕시코 🇲🇽  \n남아프리카 🇿🇦",
+      "http_err": null,
+      "latencies": [
+        1.1083621978759766,
+        1.413558006286621
+      ],
+      "prompt_tokens": 190,
+      "completion_tokens": 305,
+      "excluded": null,
+      "reflected": true,
+      "kept": false
+    },
+    {
+      "id": "B6",
+      "category": "B",
+      "title": "stop at 35 of 50",
+      "partial": "1  \n2  \n3  \n4  \n",
+      "continuation": "1  \n2  \n3  \n4  \n5  \n6  \n7  \n8  \n9  \n10  \n11  \n12  \n13  \n14  \n15  \n16  \n17  \n18  \n19  \n20  \n21  \n22  \n23  \n24  \n25  \n26  \n27  \n28  \n29  \n30  \n31  \n32  \n33  \n34  \n35",
+      "final_text": "1  \n2  \n3  \n4  \n1  \n2  \n3  \n4  \n5  \n6  \n7  \n8  \n9  \n10  \n11  \n12  \n13  \n14  \n15  \n16  \n17  \n18  \n19  \n20  \n21  \n22  \n23  \n24  \n25  \n26  \n27  \n28  \n29  \n30  \n31  \n32  \n33  \n34  \n35",
+      "http_err": null,
+      "latencies": [
+        0.5081827640533447,
+        1.1762471199035645
+      ],
+      "prompt_tokens": 182,
+      "completion_tokens": 145,
+      "excluded": null,
+      "reflected": true,
+      "kept": false
+    },
+    {
+      "id": "B7",
+      "category": "B",
+      "title": "색깔 list, continue in English (15)",
+      "partial": "빨강  \n주황  \n노랑  \n초",
+      "continuation": "Red  \nOrange  \nYellow  \nGreen  \nBlue  \nIndigo  \nViolet  \nPink  \nBrown  \nGray  \nWhite  \nBlack  \nPurple  \nTurquoise  \nGold",
+      "final_text": "빨강  \n주황  \n노랑  \n초Red  \nOrange  \nYellow  \nGreen  \nBlue  \nIndigo  \nViolet  \nPink  \nBrown  \nGray  \nWhite  \nBlack  \nPurple  \nTurquoise  \nGold",
+      "http_err": null,
+      "latencies": [
+        0.7085239887237549,
+        1.6290109157562256
+      ],
+      "prompt_tokens": 183,
+      "completion_tokens": 394,
+      "excluded": null,
+      "reflected": true,
+      "kept": false
+    },
+    {
+      "id": "B8",
+      "category": "B",
+      "title": "every fifth to 45",
+      "partial": "1  \n2  \n3  \n4  \n5",
+      "continuation": "5  \n10  \n15  \n20  \n25  \n30  \n35  \n40  \n45",
+      "final_text": "1  \n2  \n3  \n4  \n55  \n10  \n15  \n20  \n25  \n30  \n35  \n40  \n45",
+      "http_err": null,
+      "latencies": [
+        0.5384330749511719,
+        0.7756471633911133
+      ],
+      "prompt_tokens": 185,
+      "completion_tokens": 144,
+      "excluded": null,
+      "reflected": true,
+      "kept": true
+    },
+    {
+      "id": "B9",
+      "category": "B",
+      "title": "backwards from step to 40",
+      "partial": "1  \n2  \n3  \n4  \n",
+      "continuation": "잠시만요! 어떤 방식으로 거꾸로 세기를 원하시는지 확인하고 싶어요.\n\n- 1 ~ 4까지 이미 올린 뒤, 바로 4부터 1까지 거꾸로 내려가기를 원하시나요?  \n- 아니면 1 ~ 40까지 모두 올린 뒤, 40부터 1까지 역순으로 전체를 다시 적어드리기를 원하시나요?  \n\n원하시는 방법을 알려주시면 바로 진행해드릴게요!",
+      "final_text": "1  \n2  \n3  \n4  \n잠시만요! 어떤 방식으로 거꾸로 세기를 원하시는지 확인하고 싶어요.\n\n- 1 ~ 4까지 이미 올린 뒤, 바로 4부터 1까지 거꾸로 내려가기를 원하시나요?  \n- 아니면 1 ~ 40까지 모두 올린 뒤, 40부터 1까지 역순으로 전체를 다시 적어드리기를 원하시나요?  \n\n원하시는 방법을 알려주시면 바로 진행해드릴게요!",
+      "http_err": null,
+      "latencies": [
+        0.5180590152740479,
+        2.1349239349365234
+      ],
+      "prompt_tokens": 182,
+      "completion_tokens": 458,
+      "excluded": null,
+      "reflected": false,
+      "kept": false
+    },
+    {
+      "id": "B10",
+      "category": "B",
+      "title": "나라 list, add emoji (12)",
+      "partial": "대한민국  \n일본  \n중국  \n미",
+      "continuation": "대한민국 🌸  \n일본 🇯🇵  \n중국 🐉  \n미국 🇺🇸  \n프랑스 🥖  \n독일 🍺  \n브라질 🏟️  \n인도 🕌  \n캐나다 🍁  \n오스트레일리아 🐨  \n남아프리카공화국 🐘  \n이집트 🏺",
+      "final_text": "대한민국  \n일본  \n중국  \n미대한민국 🌸  \n일본 🇯🇵  \n중국 🐉  \n미국 🇺🇸  \n프랑스 🥖  \n독일 🍺  \n브라질 🏟️  \n인도 🕌  \n캐나다 🍁  \n오스트레일리아 🐨  \n남아프리카공화국 🐘  \n이집트 🏺",
+      "http_err": null,
+      "latencies": [
+        0.5352680683135986,
+        2.077986001968384
+      ],
+      "prompt_tokens": 190,
+      "completion_tokens": 169,
+      "excluded": null,
+      "reflected": true,
+      "kept": false
+    }
+  ],
+  "blocked": null
+}

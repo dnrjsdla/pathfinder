@@ -1,0 +1,88 @@
+{
+ "date": "2026-10-05",
+ "bench": "bench/m9_memory_write.py --variant current (the split pass's write call, prompts/consolidate.txt after U9; the summary is its own call and is not replayed)",
+ "baseline": "docs/measurements/m9-2026-09-29.json replay: 0 edits on both slices with the one-prompt pass",
+ "pass_criterion": "partition-8 contract (8): at least one edit per slice in each of two runs; a standing instruction becomes a USER.md proposal",
+ "note": "the bench keeps targets and ops, never text; USER.md add is the proposal shape a standing instruction takes",
+ "runs": [
+  {
+   "run": 1,
+   "since": 3194,
+   "upto": 3641,
+   "readable_lines": 79,
+   "user_lines": 22,
+   "steps": 3,
+   "calls": [
+    "read_ledger",
+    "edit_memory"
+   ],
+   "edits": [
+    {
+     "target": "USER.md",
+     "op": "add"
+    }
+   ],
+   "tokens": 11632
+  },
+  {
+   "run": 1,
+   "since": 4882,
+   "upto": 5087,
+   "readable_lines": 21,
+   "user_lines": 5,
+   "steps": 4,
+   "calls": [
+    "read_ledger",
+    "search_memory",
+    "edit_memory"
+   ],
+   "edits": [
+    {
+     "target": "USER.md",
+     "op": "add"
+    }
+   ],
+   "tokens": 9723
+  },
+  {
+   "run": 2,
+   "since": 3194,
+   "upto": 3641,
+   "readable_lines": 79,
+   "user_lines": 22,
+   "steps": 3,
+   "calls": [
+    "read_ledger",
+    "edit_memory"
+   ],
+   "edits": [
+    {
+     "target": "USER.md",
+     "op": "add"
+    }
+   ],
+   "tokens": 11620
+  },
+  {
+   "run": 2,
+   "since": 4882,
+   "upto": 5087,
+   "readable_lines": 21,
+   "user_lines": 5,
+   "steps": 4,
+   "calls": [
+    "read_ledger",
+    "search_memory",
+    "edit_memory"
+   ],
+   "edits": [
+    {
+     "target": "USER.md",
+     "op": "add"
+    }
+   ],
+   "tokens": 9723
+  }
+ ],
+ "tokens_total": 42698
+}

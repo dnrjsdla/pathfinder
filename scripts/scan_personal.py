@@ -8,15 +8,19 @@ Run `python3 scripts/scan_personal.py --selfcheck` to test the patterns.
 import re
 import subprocess
 import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from pathfinder.keychain import TOKEN_RE  # noqa: E402 - one pattern with the ledger door (D53)
 
 ALLOWED_EMAIL_DOMAINS = {"example.com", "example.org", "example.net", "users.noreply.github.com", "anthropic.com"}
 PATTERNS = [
-    ("api-key", re.compile(r"sk-[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AIza[0-9A-Za-z_-]{30,}|xox[abprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}")),
-    ("private-key", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")),
+    ("token", TOKEN_RE),
     ("home-path", re.compile(r"/(?:Users|home)/(?!\.\.\.|<|\$|USER\b|user\b|you\b|name\b)[A-Za-z0-9._-]+/")),
     ("phone-kr", re.compile(r"\b01[016789][- .]?\d{3,4}[- .]?\d{4}\b")),
 ]
-EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+)")
+# the last label must be alphabetic: an npm spec like `pkg@1.2.3` is not an address
+EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,})")
 BLOCKED_FILES = re.compile(r"(^|/)\.env(\..*)?$|\.(db|db-wal|db-shm|pem|p12|keychain)$|(^|/)credentials(\.|$)")
 
 
@@ -67,7 +71,7 @@ def all_tracked_lines():
 
 def selfcheck():
     h = {"somehandle"}
-    bad = ["key " + "sk-" + "a" * 24, "mail someone" + "@" + "corp.co.kr", "/Us" + "ers/someone/x", "call 010" + "-1234-5678", "repo SomeHandle/thing"]
+    bad = ["key " + "sk-" + "Ab1" * 8, "mail someone" + "@" + "corp.co.kr", "/Us" + "ers/someone/x", "call 010" + "-1234-5678", "repo SomeHandle/thing"]
     ok = ["admin@example.com", "1+bot@users.noreply.github.com", "/Users/<name>/x", "~/.pathfinder/state.db", "version 0.1.0"]
     assert all(hits_in(s, h) for s in bad), [s for s in bad if not hits_in(s, h)]
     assert not any(hits_in(s, h) for s in ok), [s for s in ok if hits_in(s, h)]

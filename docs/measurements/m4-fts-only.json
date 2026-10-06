@@ -1,0 +1,253 @@
+{
+ "embed": null,
+ "top_k": 3,
+ "ts": 1790179023.769675,
+ "results": [
+  {
+   "id": "search-01",
+   "query": "맥에서 캘린더 권한이 꺼져 있으면 어떻게 되나",
+   "expect": [
+    "wiki/EventKit 권한.md"
+   ],
+   "fts": [
+    "wiki/2026-03-05.md",
+    "wiki/EventKit 권한.md",
+    "wiki/전세 계약 확인 목록.md"
+   ],
+   "vector": [],
+   "hybrid": [
+    "wiki/2026-03-05.md",
+    "wiki/EventKit 권한.md",
+    "wiki/전세 계약 확인 목록.md"
+   ]
+  },
+  {
+   "id": "search-02",
+   "query": "미리 알림 접근 권한을 따로 켜야 하나",
+   "expect": [
+    "wiki/EventKit 권한.md"
+   ],
+   "fts": [
+    "wiki/EventKit 권한.md",
+    "wiki/2026-03-05.md",
+    "wiki/제주 3박 4일.md"
+   ],
+   "vector": [],
+   "hybrid": [
+    "wiki/EventKit 권한.md",
+    "wiki/2026-03-05.md",
+    "wiki/제주 3박 4일.md"
+   ]
+  },
+  {
+   "id": "search-03",
+   "query": "원두를 냉장고에 넣어도 되나",
+   "expect": [
+    "wiki/원두 보관법.md"
+   ],
+   "fts": [
+    "wiki/2026-03-02.md"
+   ],
+   "vector": [],
+   "hybrid": [
+    "wiki/2026-03-02.md"
+   ]
+  },
+  {
+   "id": "search-04",
+   "query": "커피 원두 오래 두고 마시려면",
+   "expect": [
+    "wiki/원두 보관법.md"
+   ],
+   "fts": [
+    "wiki/수면 위생.md",
+    "wiki/원두 보관법.md",
+    "wiki/2026-03-02.md"
+   ],
+   "vector": [],
+   "hybrid": [
+    "wiki/수면 위생.md",
+    "wiki/원두 보관법.md",
+    "wiki/2026-03-02.md"
+   ]
+  },
+  {
+   "id": "search-05",
+   "query": "자전거 체인에 기름 바르는 순서",
+   "expect": [
+    "wiki/자전거 체인 정비.md"
+   ],
+   "fts": [
+    "wiki/자전거 체인 정비.md",
+    "wiki/2026-03-02.md"
+   ],
+   "vector": [],
+   "hybrid": [
+    "wiki/자전거 체인 정비.md",
+    "wiki/2026-03-02.md"
+   ]
+  },
+  {
+   "id": "search-06",
+   "query": "체인 언제 갈아야 하지",
+   "expect": [
+    "wiki/자전거 체인 정비.md"
+   ],
+   "fts": [
+    "wiki/자전거 체인 정비.md",
+    "wiki/2026-03-02.md"
+   ],
+   "vector": [],
+   "hybrid": [
+    "wiki/자전거 체인 정비.md",
+    "wiki/2026-03-02.md"
+   ]
+  },
+  {
+   "id": "search-07",
+   "query": "전세 계약할 때 등기부등본 뭘 봐야 해",
+   "expect": [
+    "wiki/전세 계약 확인 목록.md"
+   ],
+   "fts": [
+    "wiki/전세 계약 확인 목록.md",
+    "wiki/2026-03-11.md",
+    "wiki/제주 3박 4일.md"
+   ],
+   "vector": [],
+   "hybrid": [
+    "wiki/전세 계약 확인 목록.md",
+    "wiki/2026-03-11.md",
+    "wiki/제주 3박 4일.md"
+   ]
+  },
+  {
+   "id": "search-08",
+   "query": "확정일자 전입신고 언제",
+   "expect": [
+    "wiki/전세 계약 확인 목록.md"
+   ],
+   "fts": [
+    "wiki/전세 계약 확인 목록.md"
+   ],
+   "vector": [],
+   "hybrid": [
+    "wiki/전세 계약 확인 목록.md"
+   ]
+  },
+  {
+   "id": "search-09",
+   "query": "잠이 안 올 때 침대에 계속 누워 있어야 하나",
+   "expect": [
+    "wiki/수면 위생.md"
+   ],
+   "fts": [
+    "wiki/수면 위생.md",
+    "wiki/2026-03-05.md",
+    "wiki/파이썬 가상환경.md"
+   ],
+   "vector": [],
+   "hybrid": [
+    "wiki/수면 위생.md",
+    "wiki/2026-03-05.md",
+    "wiki/파이썬 가상환경.md"
+   ]
+  },
+  {
+   "id": "search-10",
+   "query": "editable 설치가 폴더를 복사하면 어디를 보나",
+   "expect": [
+    "wiki/파이썬 가상환경.md"
+   ],
+   "fts": [
+    "wiki/파이썬 가상환경.md"
+   ],
+   "vector": [],
+   "hybrid": [
+    "wiki/파이썬 가상환경.md"
+   ]
+  },
+  {
+   "id": "search-11",
+   "query": "제주도 3박 4일 동선 어떻게 짜지",
+   "expect": [
+    "wiki/제주 3박 4일.md"
+   ],
+   "fts": [
+    "wiki/제주 3박 4일.md",
+    "wiki/원두 보관법.md"
+   ],
+   "vector": [],
+   "hybrid": [
+    "wiki/제주 3박 4일.md",
+    "wiki/원두 보관법.md"
+   ]
+  },
+  {
+   "id": "search-12",
+   "query": "배추 절이는 소금물 농도",
+   "expect": [
+    "wiki/김장 담그기.md"
+   ],
+   "fts": [
+    "wiki/김장 담그기.md"
+   ],
+   "vector": [],
+   "hybrid": [
+    "wiki/김장 담그기.md"
+   ]
+  },
+  {
+   "id": "search-n1",
+   "query": "쿠버네티스 인그레스 설정",
+   "expect": [],
+   "fts": [
+    "wiki/2026-03-05.md",
+    "wiki/파이썬 가상환경.md",
+    "wiki/EventKit 권한.md"
+   ],
+   "vector": [],
+   "hybrid": [
+    "wiki/2026-03-05.md",
+    "wiki/파이썬 가상환경.md",
+    "wiki/EventKit 권한.md"
+   ],
+   "top_cosine": null
+  },
+  {
+   "id": "search-n2",
+   "query": "바이올린 활 쓰는 법",
+   "expect": [],
+   "fts": [
+    "wiki/파이썬 가상환경.md"
+   ],
+   "vector": [],
+   "hybrid": [
+    "wiki/파이썬 가상환경.md"
+   ],
+   "top_cosine": null
+  },
+  {
+   "id": "search-n3",
+   "query": "주식 배당락일 계산",
+   "expect": [],
+   "fts": [],
+   "vector": [],
+   "hybrid": [],
+   "top_cosine": null
+  },
+  {
+   "id": "search-n4",
+   "query": "강아지 예방접종 일정",
+   "expect": [],
+   "fts": [
+    "wiki/2026-03-05.md"
+   ],
+   "vector": [],
+   "hybrid": [
+    "wiki/2026-03-05.md"
+   ],
+   "top_cosine": null
+  }
+ ]
+}

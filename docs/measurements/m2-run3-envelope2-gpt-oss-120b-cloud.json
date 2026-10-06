@@ -1,0 +1,188 @@
+{
+  "model": "gpt-oss:120b-cloud",
+  "base_url": "http://localhost:11434/v1",
+  "n_tasks": 10,
+  "results": [
+    {
+      "id": "B1",
+      "category": "B",
+      "title": "every fifth to 30",
+      "partial": "1  \n2  \n3  \n4  \n",
+      "continuation": "5  \n10  \n15  \n20  \n25  \n30",
+      "final_text": "1  \n2  \n3  \n4  \n5  \n10  \n15  \n20  \n25  \n30",
+      "http_err": null,
+      "latencies": [
+        1.4308021068572998,
+        2.4899067878723145
+      ],
+      "prompt_tokens": 215,
+      "completion_tokens": 171,
+      "excluded": null,
+      "reflected": true,
+      "kept": true
+    },
+    {
+      "id": "B2",
+      "category": "B",
+      "title": "stop at 20 of 40",
+      "partial": "1  \n2  \n3  \n4  \n",
+      "continuation": "5  \n6  \n7  \n8  \n9  \n10  \n11  \n12  \n13  \n14  \n15  \n16  \n17  \n18  \n19  \n20",
+      "final_text": "1  \n2  \n3  \n4  \n5  \n6  \n7  \n8  \n9  \n10  \n11  \n12  \n13  \n14  \n15  \n16  \n17  \n18  \n19  \n20",
+      "http_err": null,
+      "latencies": [
+        0.5191380977630615,
+        1.5085880756378174
+      ],
+      "prompt_tokens": 213,
+      "completion_tokens": 203,
+      "excluded": null,
+      "reflected": true,
+      "kept": true
+    },
+    {
+      "id": "B3",
+      "category": "B",
+      "title": "backwards from step to 30",
+      "partial": "1  \n2  \n3  \n4  \n",
+      "continuation": "30  \n29  \n28  \n27  \n26  \n25  \n24  \n23  \n22  \n21  \n20  \n19  \n18  \n17  \n16  \n15  \n14  \n13  \n12  \n11  \n10  \n9  \n8  \n7  \n6  \n5",
+      "final_text": "1  \n2  \n3  \n4  \n30  \n29  \n28  \n27  \n26  \n25  \n24  \n23  \n22  \n21  \n20  \n19  \n18  \n17  \n16  \n15  \n14  \n13  \n12  \n11  \n10  \n9  \n8  \n7  \n6  \n5",
+      "http_err": null,
+      "latencies": [
+        0.49478602409362793,
+        2.04683780670166
+      ],
+      "prompt_tokens": 213,
+      "completion_tokens": 396,
+      "excluded": null,
+      "reflected": true,
+      "kept": false
+    },
+    {
+      "id": "B4",
+      "category": "B",
+      "title": "과일 list, continue in English (20)",
+      "partial": "사과  \n배  \n바나나  \n",
+      "continuation": "Here are the remaining fruit names, one per line:\n\n딸기  \n포도  \n복숭아  \n파인애플  \n키위  \n체리  \n감  \n오렌지  \n레몬  \n라임  \n망고  \n파파야  \n석류  \n매실  \n대추  \n구아바  \n블루베리",
+      "final_text": "사과  \n배  \n바나나  \nHere are the remaining fruit names, one per line:\n\n딸기  \n포도  \n복숭아  \n파인애플  \n키위  \n체리  \n감  \n오렌지  \n레몬  \n라임  \n망고  \n파파야  \n석류  \n매실  \n대추  \n구아바  \n블루베리",
+      "http_err": null,
+      "latencies": [
+        1.0420489311218262,
+        2.3607611656188965
+      ],
+      "prompt_tokens": 212,
+      "completion_tokens": 565,
+      "excluded": null,
+      "reflected": false,
+      "kept": true
+    },
+    {
+      "id": "B5",
+      "category": "B",
+      "title": "나라 list, add emoji (15)",
+      "partial": "대한민국  \n일본  \n중국  \n미",
+      "continuation": "미국 🇺🇸  \n독일 🇩🇪  \n프랑스 🇫🇷  \n영국 🇬🇧  \n캐나다 🇨🇦  \n호주 🇦🇺  \n브라질 🇧🇷  \n인도 🇮🇳  \n러시아 🇷🇺  \n남아프리카 🇿🇦  \n멕시코 🇲🇽  \n이집트 🇪🇬  \n스페인 🇪🇸  \n이탈리아 🇮🇹  \n터키 🇹🇷",
+      "final_text": "대한민국  \n일본  \n중국  \n미미국 🇺🇸  \n독일 🇩🇪  \n프랑스 🇫🇷  \n영국 🇬🇧  \n캐나다 🇨🇦  \n호주 🇦🇺  \n브라질 🇧🇷  \n인도 🇮🇳  \n러시아 🇷🇺  \n남아프리카 🇿🇦  \n멕시코 🇲🇽  \n이집트 🇪🇬  \n스페인 🇪🇸  \n이탈리아 🇮🇹  \n터키 🇹🇷",
+      "http_err": null,
+      "latencies": [
+        1.1032681465148926,
+        2.761582136154175
+      ],
+      "prompt_tokens": 221,
+      "completion_tokens": 683,
+      "excluded": null,
+      "reflected": true,
+      "kept": false
+    },
+    {
+      "id": "B6",
+      "category": "B",
+      "title": "stop at 35 of 50",
+      "partial": "1  \n2  \n3  \n4  \n5",
+      "continuation": "6  \n7  \n8  \n9  \n10  \n11  \n12  \n13  \n14  \n15  \n16  \n17  \n18  \n19  \n20  \n21  \n22  \n23  \n24  \n25  \n26  \n27  \n28  \n29  \n30  \n31  \n32  \n33  \n34  \n35",
+      "final_text": "1  \n2  \n3  \n4  \n56  \n7  \n8  \n9  \n10  \n11  \n12  \n13  \n14  \n15  \n16  \n17  \n18  \n19  \n20  \n21  \n22  \n23  \n24  \n25  \n26  \n27  \n28  \n29  \n30  \n31  \n32  \n33  \n34  \n35",
+      "http_err": null,
+      "latencies": [
+        0.9106616973876953,
+        1.5131316184997559
+      ],
+      "prompt_tokens": 214,
+      "completion_tokens": 189,
+      "excluded": null,
+      "reflected": true,
+      "kept": true
+    },
+    {
+      "id": "B7",
+      "category": "B",
+      "title": "색깔 list, continue in English (15)",
+      "partial": "빨강  \n주황  \n노랑  \n초",
+      "continuation": "Blue  \nNavy  \nPurple  \nPink  \nBrown  \nGray  \nBlack  \nWhite  \nBeige  \nGold  \nSilver",
+      "final_text": "빨강  \n주황  \n노랑  \n초Blue  \nNavy  \nPurple  \nPink  \nBrown  \nGray  \nBlack  \nWhite  \nBeige  \nGold  \nSilver",
+      "http_err": null,
+      "latencies": [
+        0.7549083232879639,
+        3.5109591484069824
+      ],
+      "prompt_tokens": 214,
+      "completion_tokens": 670,
+      "excluded": null,
+      "reflected": true,
+      "kept": true
+    },
+    {
+      "id": "B8",
+      "category": "B",
+      "title": "every fifth to 45",
+      "partial": "1\n2\n3\n4\n",
+      "continuation": "5\n10\n15\n20\n25\n30\n35\n40\n45",
+      "final_text": "1\n2\n3\n4\n5\n10\n15\n20\n25\n30\n35\n40\n45",
+      "http_err": null,
+      "latencies": [
+        1.1026232242584229,
+        1.3050341606140137
+      ],
+      "prompt_tokens": 215,
+      "completion_tokens": 256,
+      "excluded": null,
+      "reflected": true,
+      "kept": true
+    },
+    {
+      "id": "B9",
+      "category": "B",
+      "title": "backwards from step to 40",
+      "partial": "1  \n2  \n3  \n4  \n",
+      "continuation": "5  \n6  \n7  \n8  \n9  \n10  \n11  \n12  \n13  \n14  \n15  \n16  \n17  \n18  \n19  \n20  \n21  \n22  \n23  \n24  \n25  \n26  \n27  \n28  \n29  \n30  \n31  \n32  \n33  \n34  \n35  \n36  \n37  \n38  \n39  \n40  ",
+      "final_text": "1  \n2  \n3  \n4  \n5  \n6  \n7  \n8  \n9  \n10  \n11  \n12  \n13  \n14  \n15  \n16  \n17  \n18  \n19  \n20  \n21  \n22  \n23  \n24  \n25  \n26  \n27  \n28  \n29  \n30  \n31  \n32  \n33  \n34  \n35  \n36  \n37  \n38  \n39  \n40  ",
+      "http_err": null,
+      "latencies": [
+        0.5492758750915527,
+        2.576035737991333
+      ],
+      "prompt_tokens": 213,
+      "completion_tokens": 675,
+      "excluded": null,
+      "reflected": false,
+      "kept": true
+    },
+    {
+      "id": "B10",
+      "category": "B",
+      "title": "나라 list, add emoji (12)",
+      "partial": "대한민국  \n미국  \n일본  \n중",
+      "continuation": "대한민국  \n미국  \n일본  \n중  \n중국🌏  \n인도🇮🇳  \n브라질🇧🇷  \n러시아🇷🇺  \n독일🇩🇪  \n프랑스🇫🇷  \n이집트🇪🇬  \n남아프리카공화국🇿🇦",
+      "final_text": "대한민국  \n미국  \n일본  \n중대한민국  \n미국  \n일본  \n중  \n중국🌏  \n인도🇮🇳  \n브라질🇧🇷  \n러시아🇷🇺  \n독일🇩🇪  \n프랑스🇫🇷  \n이집트🇪🇬  \n남아프리카공화국🇿🇦",
+      "http_err": null,
+      "latencies": [
+        0.7409229278564453,
+        2.3921849727630615
+      ],
+      "prompt_tokens": 221,
+      "completion_tokens": 658,
+      "excluded": null,
+      "reflected": false,
+      "kept": false
+    }
+  ],
+  "blocked": null
+}

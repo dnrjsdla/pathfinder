@@ -1,0 +1,5 @@
+{
+  "waiting_for": ["jamie@example.com", "alex@example.org"],
+  "subject_alerts": ["action required", "overdue"],
+  "noise_domains": ["example.net"]
+}

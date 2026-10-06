@@ -1,0 +1,188 @@
+{
+  "model": "gemma4:31b-cloud",
+  "base_url": "http://localhost:11434/v1",
+  "n_tasks": 10,
+  "results": [
+    {
+      "id": "B1",
+      "category": "B",
+      "title": "every fifth to 30",
+      "partial": "1\n2\n3\n",
+      "continuation": "5\n10\n15\n20\n25\n30",
+      "final_text": "1\n2\n3\n5\n10\n15\n20\n25\n30",
+      "http_err": null,
+      "latencies": [
+        0.45653510093688965,
+        0.46143317222595215
+      ],
+      "prompt_tokens": 161,
+      "completion_tokens": 17,
+      "excluded": null,
+      "reflected": true,
+      "kept": true
+    },
+    {
+      "id": "B2",
+      "category": "B",
+      "title": "stop at 20 of 40",
+      "partial": "1\n2\n3\n",
+      "continuation": "4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20",
+      "final_text": "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20",
+      "http_err": null,
+      "latencies": [
+        0.36844491958618164,
+        0.6063637733459473
+      ],
+      "prompt_tokens": 161,
+      "completion_tokens": 45,
+      "excluded": null,
+      "reflected": true,
+      "kept": true
+    },
+    {
+      "id": "B3",
+      "category": "B",
+      "title": "backwards from step to 30",
+      "partial": "1\n2\n3\n",
+      "continuation": "30\n29\n28\n27\n26\n25\n24\n23\n22\n21\n20\n19\n18\n17\n16\n15\n14\n13\n12\n11\n10\n9\n8\n7\n6\n5\n4\n3\n2\n1",
+      "final_text": "1\n2\n3\n30\n29\n28\n27\n26\n25\n24\n23\n22\n21\n20\n19\n18\n17\n16\n15\n14\n13\n12\n11\n10\n9\n8\n7\n6\n5\n4\n3\n2\n1",
+      "http_err": null,
+      "latencies": [
+        0.4084360599517822,
+        1.0258910655975342
+      ],
+      "prompt_tokens": 159,
+      "completion_tokens": 81,
+      "excluded": null,
+      "reflected": true,
+      "kept": false
+    },
+    {
+      "id": "B4",
+      "category": "B",
+      "title": "과일 list, continue in English (20)",
+      "partial": "사과\n배\n포도\n",
+      "continuation": "Strawberry\nBanana\nOrange\nWatermelon\nPineapple\nMango\nKiwi\nPeach\nCherry\nPlum\nApricot\nBlueberry\nRaspberry\nMelon\nPapaya\nPersimmon\nFig\nPomegranate\nGrapefruit\nLemon",
+      "final_text": "사과\n배\n포도\nStrawberry\nBanana\nOrange\nWatermelon\nPineapple\nMango\nKiwi\nPeach\nCherry\nPlum\nApricot\nBlueberry\nRaspberry\nMelon\nPapaya\nPersimmon\nFig\nPomegranate\nGrapefruit\nLemon",
+      "http_err": null,
+      "latencies": [
+        0.9419519901275635,
+        0.6439847946166992
+      ],
+      "prompt_tokens": 158,
+      "completion_tokens": 53,
+      "excluded": null,
+      "reflected": true,
+      "kept": false
+    },
+    {
+      "id": "B5",
+      "category": "B",
+      "title": "나라 list, add emoji (15)",
+      "partial": "대한민국\n미국\n일본\n",
+      "continuation": "캐나다 🇨🇦\n영국 🇬🇧\n프랑스 🇫🇷\n독일 🇩🇪\n이탈리아 🇮🇹\n중국 🇨🇳\n인도 🇮🇳\n브라질 🇧🇷\n호주 🇦🇺\n러시아 🇷🇺\n스페인 🇪🇸\n멕시코 🇲🇽",
+      "final_text": "대한민국\n미국\n일본\n캐나다 🇨🇦\n영국 🇬🇧\n프랑스 🇫🇷\n독일 🇩🇪\n이탈리아 🇮🇹\n중국 🇨🇳\n인도 🇮🇳\n브라질 🇧🇷\n호주 🇦🇺\n러시아 🇷🇺\n스페인 🇪🇸\n멕시코 🇲🇽",
+      "http_err": null,
+      "latencies": [
+        0.39206576347351074,
+        0.6887490749359131
+      ],
+      "prompt_tokens": 166,
+      "completion_tokens": 78,
+      "excluded": null,
+      "reflected": true,
+      "kept": true
+    },
+    {
+      "id": "B6",
+      "category": "B",
+      "title": "stop at 35 of 50",
+      "partial": "1\n2\n3\n",
+      "continuation": "4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20\n21\n22\n23\n24\n25\n26\n27\n28\n29\n30\n31\n32\n33\n34\n35",
+      "final_text": "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20\n21\n22\n23\n24\n25\n26\n27\n28\n29\n30\n31\n32\n33\n34\n35",
+      "http_err": null,
+      "latencies": [
+        0.4647092819213867,
+        1.0463099479675293
+      ],
+      "prompt_tokens": 161,
+      "completion_tokens": 90,
+      "excluded": null,
+      "reflected": true,
+      "kept": true
+    },
+    {
+      "id": "B7",
+      "category": "B",
+      "title": "색깔 list, continue in English (15)",
+      "partial": "빨간색\n주황색\n노란색\n",
+      "continuation": "Green\nBlue\nIndigo\nViolet\nPink\nBrown\nBlack\nWhite\nGray\nGold\nSilver\nNavy\nOlive\nCyan",
+      "final_text": "빨간색\n주황색\n노란색\nGreen\nBlue\nIndigo\nViolet\nPink\nBrown\nBlack\nWhite\nGray\nGold\nSilver\nNavy\nOlive\nCyan",
+      "http_err": null,
+      "latencies": [
+        0.4432539939880371,
+        1.1280620098114014
+      ],
+      "prompt_tokens": 162,
+      "completion_tokens": 28,
+      "excluded": null,
+      "reflected": true,
+      "kept": true
+    },
+    {
+      "id": "B8",
+      "category": "B",
+      "title": "every fifth to 45",
+      "partial": "1\n2\n3\n",
+      "continuation": "5\n10\n15\n20\n25\n30\n35\n40\n45",
+      "final_text": "1\n2\n3\n5\n10\n15\n20\n25\n30\n35\n40\n45",
+      "http_err": null,
+      "latencies": [
+        0.342059850692749,
+        0.531238317489624
+      ],
+      "prompt_tokens": 161,
+      "completion_tokens": 26,
+      "excluded": null,
+      "reflected": true,
+      "kept": true
+    },
+    {
+      "id": "B9",
+      "category": "B",
+      "title": "backwards from step to 40",
+      "partial": "1\n2\n3\n",
+      "continuation": "3\n2\n1",
+      "final_text": "1\n2\n3\n3\n2\n1",
+      "http_err": null,
+      "latencies": [
+        0.8905749320983887,
+        0.6623389720916748
+      ],
+      "prompt_tokens": 159,
+      "completion_tokens": 6,
+      "excluded": null,
+      "reflected": true,
+      "kept": true
+    },
+    {
+      "id": "B10",
+      "category": "B",
+      "title": "나라 list, add emoji (12)",
+      "partial": "대한민국\n미국\n일본\n",
+      "continuation": "캐나다 🇨🇦\n영국 🇬🇧\n프랑스 🇫🇷\n독일 🇩🇪\n이탈리아 🇮🇹\n브라질 🇧🇷\n호주 🇦🇺\n인도 🇮🇳\n중국 🇨🇳\n스페인 🇪🇸\n멕시코 🇲🇽",
+      "final_text": "대한민국\n미국\n일본\n캐나다 🇨🇦\n영국 🇬🇧\n프랑스 🇫🇷\n독일 🇩🇪\n이탈리아 🇮🇹\n브라질 🇧🇷\n호주 🇦🇺\n인도 🇮🇳\n중국 🇨🇳\n스페인 🇪🇸\n멕시코 🇲🇽",
+      "http_err": null,
+      "latencies": [
+        0.3768770694732666,
+        0.639103889465332
+      ],
+      "prompt_tokens": 166,
+      "completion_tokens": 72,
+      "excluded": null,
+      "reflected": true,
+      "kept": true
+    }
+  ],
+  "blocked": null
+}

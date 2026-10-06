@@ -16,11 +16,32 @@ from . import clock
 # m4: off-topic queries' cosine topped out at 0.32-0.37 on the transplanted corpus; live, a
 # one-page wiki answered every query with that page and the model kept searching anyway.
 VECTOR_FLOOR = 0.45
+WAITING = " waiting for approval"
+RECORD_HEADER = ("Tools you called here (from the ledger; names and arguments, not results).\n"
+                 "ok = the tool returned, not that it did what was asked:")
+_BREAKS = re.compile("[\x00-\x1f\x7f-\x9f\u2028\u2029]")  # everything a line split can happen on
+CALL_ARGS_CLIP = 120  # D52: characters of a call's compact-JSON arguments kept in history
+_TOKEN = re.compile(r"\\u[0-9a-f]{4}|\\.|.", re.S)  # one escape sequence or one character
+
+
+def _one_line_args(args) -> str:
+    """The arguments as one line of at most CALL_ARGS_CLIP characters, marked when cut, and never
+    cut inside an escape sequence: escape first, then clip."""
+    text = _BREAKS.sub(lambda m: "\\u%04x" % ord(m[0]),
+                       json.dumps(args, separators=(",", ":"), ensure_ascii=False))
+    if len(text) <= CALL_ARGS_CLIP:
+        return text
+    out, room = "", CALL_ARGS_CLIP - len("...(truncated)")
+    for token in _TOKEN.findall(text):
+        if len(out) + len(token) > room:
+            break
+        out += token
+    return out + "...(truncated)"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, started_ts REAL, last_ts REAL, turns INTEGER DEFAULT 0);
-CREATE TABLE IF NOT EXISTS messages (seq INTEGER PRIMARY KEY, session TEXT, role TEXT, content TEXT, ts REAL);
+CREATE TABLE IF NOT EXISTS messages (seq INTEGER PRIMARY KEY, session TEXT, role TEXT, content TEXT, ts REAL, ref TEXT);
 CREATE TABLE IF NOT EXISTS approvals (
     id TEXT PRIMARY KEY, call_id TEXT, session TEXT, turn TEXT, tool TEXT,
     args_json TEXT, messages_json TEXT, ts REAL, decision TEXT, job TEXT
@@ -68,13 +89,15 @@ class Today:
     last_signal_ts: float | None  # ts of the last signal turn opened (rate limit)
     burst: int                # signal turns opened in the last 60 s
     recent_counts: dict       # kind -> signals of that kind in the last 600 s, incl. this one (count_over)
-    away: bool = True         # target session's presence is stale/idle (claude_code's "away")
+    away: bool = True         # the newest presence is stale/idle (claude_code's "away")
     jobs: int = 0             # job_start events today - jobs.py's own daily budget
 
 
 class State:
     def __init__(self, path: Path):
         self.path = Path(path)
+        if str(self.path) != ":memory:":
+            self.path.touch(mode=0o600, exist_ok=True)  # born 0600: SQLite gives -wal and -shm the db's mode
         # isolation_level=None: transactions are explicit (BEGIN IMMEDIATE in apply), so the
         # cursor check and the projection are one atomic step even with a second process.
         self.db = sqlite3.connect(self.path, check_same_thread=False, isolation_level=None)
@@ -85,6 +108,8 @@ class State:
         # shipped (partition 4: approvals.job) is added here, so an existing home keeps starting.
         if "job" not in {r[1] for r in self.db.execute("PRAGMA table_info(approvals)")}:
             self.db.execute("ALTER TABLE approvals ADD COLUMN job TEXT")
+        if "ref" not in {r[1] for r in self.db.execute("PRAGMA table_info(messages)")}:
+            self.db.execute("ALTER TABLE messages ADD COLUMN ref TEXT")  # D52: a record row's call id
         self.db.execute("INSERT OR IGNORE INTO meta (key, value) VALUES ('cursor', '0')")
         self.db.execute("INSERT OR IGNORE INTO meta (key, value) VALUES ('memory_cursor', '0')")
         self.db.commit()
@@ -124,12 +149,36 @@ class State:
                 "INSERT OR IGNORE INTO sessions (id, started_ts, last_ts, turns) VALUES (?, ?, ?, 0)",
                 (session, event["ts"], event["ts"]),
             )
-        # only what was said is remembered: a user event needs origin "user" (not a
-        # signal envelope), an assistant event needs final=true (not tool chatter mid-turn)
+        # history is what was said and what was called: a user event needs origin "user" (not a
+        # signal envelope), an assistant event needs final=true (not tool chatter mid-turn);
+        # calls come only from the ledger's own tool_call/tool_result/approval_pending/approval
         if event["type"] == "user" and event.get("origin") == "user" and not event.get("job"):  # a job steer is not chat
             self._insert_message(seq, session, "user", event.get("text", ""), event["ts"])
         if event["type"] == "assistant" and event.get("final"):
             self._insert_message(seq, session, "assistant", event.get("text", ""), event["ts"])
+        # D52: what was called, from the ledger's own events - name and clipped args, never a result
+        gate = event["type"] == "approval_pending" and event.get("origin") == "user" \
+            and event.get("messages")  # a broker gate: a proposal has no messages, a job's gate has origin "job"
+        if event["type"] == "tool_call" and event.get("origin") == "user" or gate:
+            name = event["name"] if event["type"] == "tool_call" else event["tool"]
+            line = _BREAKS.sub(lambda m: "\\u%04x" % ord(m[0]), name) + " " + _one_line_args(event.get("args"))
+            ref = event["id"] if event["type"] == "tool_call" else "approval:" + event["id"]
+            self.db.execute(
+                "INSERT OR IGNORE INTO messages (seq, session, role, content, ts, ref) VALUES (?, ?, 'calls', ?, ?, ?)",
+                (seq, session, line + (f" (approval {event['id']})" + WAITING if gate else ""), event["ts"], ref))
+        if event["type"] == "approval":  # only the row of this approval's own gate; none (an older gate) -> nothing
+            if event["decision"] == "approved":  # the resumed turn's tool_call writes the real row
+                self.db.execute("DELETE FROM messages WHERE ref = ?", ("approval:" + event["id"],))
+            else:
+                self.db.execute(f"UPDATE messages SET content = substr(content, 1, length(content) - {len(WAITING)}) "
+                                f"|| ' denied' WHERE ref = ? AND substr(content, -{len(WAITING)}) = ?",
+                                ("approval:" + event["id"], WAITING))
+        if event["type"] == "tool_result" and event.get("origin") == "user":
+            self.db.execute(  # the call's own row, by the id both events carry
+                "UPDATE messages SET content = content || ? WHERE seq = "
+                "(SELECT MAX(seq) FROM messages WHERE session = ? AND role = 'calls' AND ref = ?)",
+                (" denied" if event.get("denied") else " refused" if event.get("refused")  # D69: turned away at the door
+                 else " ok" if event.get("ok") else " failed", session, event["id"]))
         if event["type"] == "turn_end" and session:
             if event.get("kind") != "gated":  # a gate is a pause, not an exchange
                 self.db.execute("UPDATE sessions SET turns = turns + 1 WHERE id = ?", (session,))
@@ -241,8 +290,9 @@ class State:
         # they would keep the session alive forever and the pass would never see it go idle.
         # Nor may a screen's 30 s `presence` heartbeat or a signal's silent triage (D41: live, one
         # session ran four days) - of a signal turn, only the notice it delivered is conversation.
+        # Nor a job's own events: acting on a job - a steer, an approval - is not conversation (D63).
         origin = event.get("origin")
-        if (session and origin != "memory" and event["type"] != "presence"
+        if (session and origin not in ("memory", "job") and not event.get("job") and event["type"] != "presence"
                 and (origin != "signal" or event["type"] == "assistant")):
             self.db.execute("UPDATE sessions SET last_ts = ? WHERE id = ?", (event["ts"], session))
         self.db.execute("UPDATE meta SET value = ? WHERE key = 'cursor'", (str(seq),))
@@ -269,24 +319,33 @@ class State:
 
     def history(self, session: str) -> list:
         summary = self.db.execute("SELECT upto, text FROM summaries WHERE session = ?", (session,)).fetchone()
-        if summary is not None:
-            upto, text = summary
-            rows = self.db.execute(
-                "SELECT role, content FROM messages WHERE session = ? AND seq > ? ORDER BY seq", (session, upto)
-            ).fetchall()
-            head = [{"role": "system", "content": "Earlier in this conversation, summarized: " + text}]
-            return head + [{"role": role, "content": content} for role, content in rows]
-        rows = self.db.execute(
-            "SELECT role, content FROM messages WHERE session = ? ORDER BY seq", (session,)
-        ).fetchall()
-        return [{"role": role, "content": content} for role, content in rows]
+        upto = summary[0] if summary is not None else 0
+        out = [{"role": "system", "content": "Earlier in this conversation, summarized: " + summary[1]}] if summary else []
+        calls = []  # consecutive `calls` rows fold into one system message before the turn's answer
+        for role, content in self.db.execute(
+                "SELECT role, content FROM messages WHERE session = ? AND seq > ? ORDER BY seq", (session, upto)):
+            if role == "calls":
+                calls.append(content)
+                continue
+            if calls:
+                out.append(self._calls_message(calls))
+                calls = []
+            out.append({"role": role, "content": content})
+        if calls:
+            out.append(self._calls_message(calls))
+        return out
+
+    @staticmethod
+    def _calls_message(calls: list) -> dict:
+        return {"role": "system", "content": RECORD_HEADER + "\n" + "\n".join(calls)}
 
     def session_messages(self, session: str, after: int, upto: int) -> list:
         """`session`'s own messages with seq in `(after, upto]`, as render_line-compatible event
         dicts - every stored row already passed `_project`'s own filters (a real user turn, a
         final assistant reply), so "user"/"assistant" and `final=True` are safe to fill back in."""
         rows = self.db.execute(
-            "SELECT seq, role, content FROM messages WHERE session = ? AND seq > ? AND seq <= ? ORDER BY seq",
+            "SELECT seq, role, content FROM messages WHERE session = ? AND seq > ? AND seq <= ? "
+            "AND role IN ('user', 'assistant') ORDER BY seq",
             (session, after, upto)).fetchall()
         out = []
         for seq, role, content in rows:
@@ -312,7 +371,8 @@ class State:
         """The seq of the session's n-th newest message, or None when fewer than n exist - the
         boundary a pass's session summary keeps verbatim (the last n-1 messages stay out of it)."""
         row = self.db.execute(
-            "SELECT seq FROM messages WHERE session = ? ORDER BY seq DESC LIMIT 1 OFFSET ?",
+            "SELECT seq FROM messages WHERE session = ? AND role IN ('user', 'assistant') "
+            "ORDER BY seq DESC LIMIT 1 OFFSET ?",
             (session, n - 1)).fetchone()
         return row[0] if row else None
 
@@ -354,6 +414,16 @@ class State:
         return [{"id": r[0], "session": r[1], "turn": r[2], "tool": r[3], "args": json.loads(r[4]), "ts": r[5],
                 "job": r[6]} for r in rows]
 
+    def open_approvals(self, session: str, max_age_s: float) -> list:
+        """D52: `session`'s pending approvals newer than its last user message - a gate the owner
+        has talked past is not open. A job's gate counts from any session (D63) while it is younger
+        than `max_age_s` (`session_resume_s`): a forgotten one must not swallow a new session's reply."""
+        last = self.db.execute("SELECT MAX(ts) FROM messages WHERE session = ? AND role = 'user'",
+                               (session,)).fetchone()[0]
+        return [p for p in self.pending()
+                if (p["session"] == session or p["job"] and time.time() - p["ts"] <= max_age_s)
+                and (last is None or p["ts"] > last)]
+
     def pending_memory(self) -> list:
         """The pending approvals whose tool is `edit_memory` - `pathfinder approvals`'s memory view."""
         return [p for p in self.pending() if p["tool"] == "edit_memory"]
@@ -377,8 +447,9 @@ class State:
         ).fetchone()
         return row[0] if row else None
 
-    def presence(self, session: str):
-        row = self.db.execute("SELECT ts, idle_s FROM presence WHERE session = ?", (session,)).fetchone()
+    def presence(self):
+        """The newest row across sessions: the owner has one pair of hands (5a)."""
+        row = self.db.execute("SELECT ts, idle_s FROM presence ORDER BY ts DESC LIMIT 1").fetchone()
         return None if row is None else {"ts": row[0], "idle_s": row[1]}
 
     def latest_delivery(self):
@@ -400,9 +471,8 @@ class State:
         row = self.db.execute("SELECT 1 FROM signals WHERE key = ? AND ts >= ?", (key, since)).fetchone()
         return row is not None
 
-    def today(self, now: float | None = None, session: str | None = None,
-             idle_threshold_s: float | None = None) -> Today:
-        """`session`/`idle_threshold_s` (only the daemon's signal-turn triage passes them) fill
+    def today(self, now: float | None = None, idle_threshold_s: float | None = None) -> Today:
+        """`idle_threshold_s` (only the daemon's signal-turn triage passes it) fills
         in `away` - a predicate (claude_code's) only ever sees `(signal, value, today, now)`,
         never `rules` or `state` itself, so the threshold has to be applied here, not there."""
         now = now if now is not None else time.time()
@@ -420,8 +490,8 @@ class State:
             "SELECT kind, COUNT(*) FROM signals WHERE ts >= ? GROUP BY kind", (now - 600,)).fetchall())
         jobs_today = self.db.execute("SELECT COUNT(*) FROM jobs WHERE started_ts >= ?", (start,)).fetchone()[0]
         away = True
-        if session is not None and idle_threshold_s is not None:
-            row = self.presence(session)
+        if idle_threshold_s is not None:
+            row = self.presence()
             fresh = row is not None and now - row["ts"] < 60
             away = not fresh or row["idle_s"] >= idle_threshold_s
         return Today(spoken, judgments, last_signal_ts, burst, recent_counts, away, jobs_today)

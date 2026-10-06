@@ -1,6 +1,8 @@
 """`memory.Manager` end to end against fake step factories - no daemon, no socket, no network.
 Same harness shape as `test_jobs.py`: `record`/`push` are the test's own, backed by a real
 Ledger+State on a temp home."""
+import contextlib
+import io
 import tempfile
 import threading
 import time
@@ -8,7 +10,8 @@ import types
 import unittest
 from pathlib import Path
 
-from pathfinder import clock, config, memory
+from pathfinder import __main__ as cli
+from pathfinder import clock, config, memory, skills
 from pathfinder import rules as rules_mod
 from pathfinder import tools as tools_mod
 from pathfinder.ledger import Ledger
@@ -178,6 +181,25 @@ class GateTest(MemoryHarness):
 
 
 class ApplyTest(MemoryHarness):
+    def test_edit_memory_refusal_is_a_failed_call(self):
+        """U23: a vet refusal raises, so the model gets `ok: false` and the tool record says
+        `failed`, not `ok` for an edit that did not happen."""
+        from pathfinder.broker import Broker
+        from pathfinder.state import RECORD_HEADER
+        self.manager()
+        emitted = []
+        broker = Broker(memory.TOOLS, "user", {"edit_memory": "allow"}, control=None,
+                        emit=lambda kind, payload: emitted.append((kind, payload)))
+        out = broker.call("c1", "edit_memory", {"target": "USER.md", "op": "replace", "old": "- no such line", "new": "x"})
+        self.assertEqual(out, {"ok": False, "error": "old does not match any line in the file"})
+        self.record("session_start", session="s1")
+        for kind, payload in emitted:
+            self.record(kind, session="s1", turn="t1", origin="user", **payload)
+        record = self.state.history("s1")[-1]["content"]
+        self.assertTrue(record.startswith(RECORD_HEADER))
+        self.assertTrue(record.splitlines()[-1].startswith("edit_memory "))
+        self.assertTrue(record.splitlines()[-1].endswith(" failed"))
+
     def test_wiki_applies_at_once(self):
         mgr = self.manager()
         control = TurnControl()
@@ -237,6 +259,117 @@ class ApplyTest(MemoryHarness):
         p["allowed"][last["seq"]] = last
         result2 = mgr.edit("USER.md", "add", "", "- likes tea", [last["seq"]], control2)
         self.assertTrue(result2.startswith("queued"))
+
+    SKILL = "---\nname: foo\ndescription: Weekly report steps\n---\nCollect the notes.\nSend them.\n"
+
+    def _skill_control(self):
+        self.record("session_start", session="s1")
+        self.record("user", session="s1", turn="t1", origin="user", trust="user", text="keep this procedure")
+        control = TurnControl()
+        control.session = "s1"
+        return control
+
+    def test_skill_edit_from_user_turn_always_waits_for_approval(self):
+        config.set(self.home, "grants", {"edit_memory": "allow"})
+        mgr = self.manager()
+        result = mgr.edit("skills/foo.md", "add", "", self.SKILL, [], self._skill_control())
+        self.assertTrue(result.startswith("queued for your approval as "))
+        path = self.home / "skills" / "foo.md"
+        self.assertFalse(path.exists())
+        pending = self.state.pending()
+        self.assertEqual([r["tool"] for r in pending], ["edit_memory"])
+        mgr.decide(pending[0]["id"], "approved")
+        self.assertEqual(path.read_text(encoding="utf-8"), self.SKILL.rstrip("\n"))
+        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+        self.assertIn("- foo: Weekly report steps", skills.index(self.home))
+
+    def test_skill_edit_from_pass_signal_or_job_is_refused(self):
+        mgr = self.manager()
+        p = {"since": 0, "upto": 5, "lines": [], "allowed": {}, "read": 0, "applied": 0, "proposed": 0,
+             "pages": [], "session": "s1"}
+        control = TurnControl()
+        control.memory_pass, control.session = p, "s1"
+        with self.assertRaises(ValueError):
+            mgr.edit("skills/foo.md", "add", "", self.SKILL, [], control)
+        self.assertFalse((self.home / "skills").exists())
+        self.assertEqual(self.state.pending(), [])
+        for origin in ("signal", "job"):
+            self.assertNotIn("edit_memory", tools_mod.for_origin(origin))
+
+    def test_third_party_text_cannot_become_a_skill(self):
+        mgr = self.manager()
+        token = "ghp_" + "A" * 36
+        for text in ("no frontmatter", self.SKILL.replace("name: foo", "name: bar"),
+                     self.SKILL + f"use {token}\n"):
+            proposal, error = mgr.vet("skills/foo.md", "add", "", text, [], "user", {}, "s1")
+            self.assertIsNone(proposal)
+            self.assertTrue(error)
+            with self.assertRaises(ValueError):
+                mgr.edit("skills/foo.md", "add", "", text, [], self._skill_control())
+        self.assertEqual(self.state.pending(), [])
+        with self.assertRaisesRegex(ValueError, "frontmatter"):
+            mgr.edit("skills/x.md", "add", "", "1. step", [], self._skill_control())
+        target = memory.TOOLS["edit_memory"].params["target"]["description"]
+        self.assertIn("name:", target)
+        self.assertIn("description:", target)
+        for bad in ("skills/a/b.md", "skills/../x.md", "skills/x.txt"):
+            with self.assertRaises(ValueError):
+                memory.vault_path(self.home, bad)
+
+    def test_approvals_prints_a_skill_proposal_whole(self):
+        lines = ["---", "name: foo", "description: Weekly report steps", "---", "Send\u200b them."]
+        self.record("approval_pending", session="s1", origin="user", id="a1", call_id="a1", tool="edit_memory",
+                    args={"target": "skills/foo.md", "op": "add", "old": "", "new": "\n".join(lines),
+                          "evidence": []}, messages=[])
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            cli.approvals(self.home)
+        printed = out.getvalue().split("\n")
+        for line in lines[:4]:
+            self.assertIn("    " + line, printed)
+        self.assertIn("    Send\\u200b them.", printed)
+        self.assertNotIn("\u200b", out.getvalue())
+
+    def test_approvals_shows_removed_skill_lines_and_survives_a_gate_row(self):
+        for id, args in (("r1", {"target": "skills/foo.md", "op": "replace", "old": "Send them.\nThen rest.",
+                                 "new": "Mail them."}),
+                         ("g1", {"target": "USER.md", "op": "add", "new": "- likes tea"})):
+            self.record("approval_pending", session="s1", origin="user", id=id, call_id=id, tool="edit_memory",
+                        args=args, messages=[])
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            cli.approvals(self.home)
+        printed = out.getvalue().split("\n")
+        for line in ("  old text:", "    Send them.", "    Then rest.", "  new text:", "    Mail them."):
+            self.assertIn(line, printed)
+        self.assertIn("likes tea", out.getvalue())
+
+    def test_skill_edge_cases(self):
+        mgr = self.manager()
+        control = self._skill_control()
+        (self.home / "skills").mkdir()
+        outside = self.home / "outside.md"
+        outside.write_text(self.SKILL.replace("foo", "y"), encoding="utf-8")
+        (self.home / "skills" / "y.md").symlink_to(outside)
+        with self.assertRaisesRegex(ValueError, "symlink"):
+            mgr.edit("skills/y.md", "add", "", "more", [], control)
+        mgr.apply({"target": "skills/foo.md", "op": "add", "old": "", "new": self.SKILL.rstrip("\n"), "evidence": []})
+        mgr.undo(1)
+        self.assertFalse((self.home / "skills" / "foo.md").exists())
+        with self.assertLogs("pathfinder.skills", level="WARNING") as logs:
+            skills._log.warning("sentinel")
+            skills.index(self.home)
+        self.assertEqual(len(logs.records), 2)  # the sentinel and the symlinked y.md, nothing for foo
+        mgr.apply({"target": "skills/foo.md", "op": "add", "old": "", "new": self.SKILL.rstrip("\n"), "evidence": []})
+        with self.assertRaisesRegex(ValueError, "cannot be emptied"):
+            mgr.edit("skills/foo.md", "remove", self.SKILL.rstrip("\n"), "", [], control)
+        p = {"since": 0, "upto": 1, "lines": [], "allowed": {}, "read": 0, "applied": 0, "proposed": 0,
+             "pages": [], "session": "s1"}
+        passed = TurnControl()
+        passed.memory_pass, passed.session = p, "s1"
+        for ctl in (control, passed):
+            with self.assertRaisesRegex(ValueError, "read_skill"):
+                memory._read_memory("skills/foo.md", ctl)
 
     def test_rules_apply_calls_on_rules_changed(self):
         mgr = self.manager()
@@ -350,6 +483,7 @@ class PassTest(MemoryHarness):
             [("tool_calls", [{"id": "c3", "name": "edit_memory", "arguments": {
                 "target": "USER.md", "op": "add", "old": "", "new": "- likes coffee",
                 "evidence": [u3_seq]}}])],
+            [("text", "wrote two lines")],
             [("text", "Summary: talked about coffee.")],
         ]
         mgr = self.manager(step_factory=_steps(steps),
@@ -388,6 +522,106 @@ class PassTest(MemoryHarness):
         self.assertEqual(passes[0]["upto"], passes[0]["since"])
         self.assertEqual(self.state.memory_cursor, 0)
         self.assertGreater(mgr._retry_at, time.time())
+
+    def _recording(self, per_call):
+        """A step factory that logs (tools, messages) of every request; per_call[i] answers request i."""
+        log = []
+
+        def factory(cfg, control, tools):
+            def step(messages):
+                log.append((tools, list(messages)))
+                r = per_call[len(log) - 1]
+                if isinstance(r, Exception):
+                    raise r
+                return iter(r)
+            return step
+        return factory, log
+
+    def _session_of_six(self):
+        self._seed_pass_events()
+        return rules_mod.Rules(consolidate_min_events=1, consolidate_steps=3)
+
+    def test_pass_makes_a_write_call_then_a_summary_call(self):
+        rules = self._session_of_six()
+        factory, log = self._recording([[("text", "nothing"), ("usage", {"total_tokens": 5})],
+                                        [("text", "the summary"), ("usage", {"total_tokens": 7})]])
+        self.manager(step_factory=factory, rules=rules).run_pass()
+        self.assertEqual(len(log), 2)
+        self.assertTrue(log[0][0] and not log[1][0])  # the write call has tools, the summary none
+        self.assertIn(memory.SUMMARIZE_PROMPT, [m["content"] for m in log[1][1]])
+        self.assertEqual([e["text"] for e in self.events("session_summary")], ["the summary"])
+        p = self.events("memory_pass")[0]
+        self.assertEqual((p["steps"], p["usage"]["total_tokens"]), (2, 12))
+
+    def test_summary_is_recorded_when_the_write_call_wrote_nothing(self):
+        rules = self._session_of_six()
+        factory, log = self._recording([[("text", "nothing")], [("text", "the summary")]])
+        self.manager(step_factory=factory, rules=rules).run_pass()
+        self.assertEqual(self.events("memory_pass")[0]["applied"], 0)
+        self.assertEqual(len(self.events("session_summary")), 1)
+
+    def test_no_summary_call_without_new_messages(self):
+        rules = self._session_of_six()
+        self.record("session_summary", session="s1", origin="memory", upto=10**6, text="old")
+        factory, log = self._recording([[("text", "nothing")]])
+        self.manager(step_factory=factory, rules=rules).run_pass()
+        self.assertEqual(len(log), 1)
+
+    def test_write_call_has_no_final_step(self):
+        """D30's extra final request is gone: an exhausted write budget makes no tool-less call
+        of its own - the only tool-less request is the summary's."""
+        rules = self._session_of_six()
+        call = {"id": "c", "name": "read_ledger", "arguments": {"after": 0, "limit": 80}}
+        factory, log = self._recording([[("tool_calls", [call])]] * 3 + [[("text", "the summary")]])
+        self.manager(step_factory=factory, rules=rules).run_pass()
+        self.assertEqual(len(log), 4)  # three write steps, one summary; with a final_step there would be five
+        self.assertEqual([bool(t) for t, _ in log], [True, True, True, False])
+
+    def test_write_outage_keeps_the_slice_and_makes_no_summary_call(self):
+        rules = self._session_of_six()
+        factory, log = self._recording([LLMError(500, "down")])
+        mgr = self.manager(step_factory=factory, rules=rules)
+        mgr.run_pass()
+        self.assertEqual(len(log), 1)
+        self.assertEqual(self.state.memory_cursor, 0)
+        self.assertGreater(mgr._retry_at, time.time())
+
+    def test_summary_llm_error_does_not_keep_the_slice(self):
+        rules = self._session_of_six()
+        factory, log = self._recording([[("text", "nothing")], LLMError(500, "down")])
+        mgr = self.manager(step_factory=factory, rules=rules)
+        mgr.run_pass()
+        self.assertGreater(self.state.memory_cursor, 0)
+        self.assertEqual(mgr._retry_at, 0.0)
+        self.assertEqual(self.events("memory_pass")[0]["error"], "down")
+        self.assertEqual(len(self.events("session_summary")), 0)
+
+    def test_tool_call_in_the_summary_reply_is_an_honest_error(self):
+        rules = self._session_of_six()
+        call = {"id": "c", "name": "read_ledger", "arguments": {}}
+        factory, log = self._recording([[("text", "nothing")], [("tool_calls", [call])]])
+        self.manager(step_factory=factory, rules=rules).run_pass()
+        self.assertEqual(self.events("memory_pass")[0]["error"], "summary: the model asked for a tool")
+        self.assertEqual(len(self.events("session_summary")), 0)
+
+    def test_forced_pass_clears_the_retry_wait(self):
+        rules = self._session_of_six()
+        factory, log = self._recording([[("text", "nothing")], [("text", "the summary")]])
+        mgr = self.manager(step_factory=factory, rules=rules)
+        mgr._retry_at = time.time() + 1800  # an earlier outage
+        mgr.run_pass(force=True)
+        self.assertEqual(mgr._retry_at, 0.0)
+
+    def test_write_prompt_names_standing_instructions(self):
+        for word in ("in any language", "how to behave", "not a list", "You must add", "USER.md", "a rule the judgments call for", "none of the kinds above", "nothing"):
+            self.assertIn(word, " ".join(memory.CONSOLIDATE_PROMPT.split()))  # a line wrap is not a change
+        self.assertNotIn("summary", memory.CONSOLIDATE_PROMPT.lower())
+
+    def test_wiki_dir_0700(self):
+        mgr = self.manager()
+        mgr.apply({"target": "wiki/Coffee.md", "op": "add", "old": "", "new": "# Coffee\nGood.",
+                   "evidence": []}, origin="user")
+        self.assertEqual((self.home / "wiki").stat().st_mode & 0o777, 0o700)
 
     def test_pass_request_error_moves_on(self):
         """A 400 the slice itself causes would fail the same way every retry - it advances."""
@@ -450,7 +684,7 @@ class PassTest(MemoryHarness):
         mgr2 = self.manager(step_factory=factory2, rules=rules_mod.Rules(consolidate_min_events=1))
         mgr2.run_pass()
 
-        self.assertIn("Earlier lines of this session not yet summarized:", captured["goal"])
+        self.assertIn("Conversation since:", captured["goal"])  # the summary call reads them
         self.assertIn("early one", captured["goal"])
         self.assertIn("early two", captured["goal"])
         self.assertIn("early three", captured["goal"])

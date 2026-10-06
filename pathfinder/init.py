@@ -2,7 +2,7 @@
 
 `run()` walks the checks in order, prints one line per check - `ok` or the exact fix line -
 and stops at the first hard failure. Every write goes through `config.set` (the one config
-writer), `merge_json_file` (the one foreign-file helper, installer.py, D36) for
+writer), `merge_json_file` (the one foreign-file helper, config.py, D60) for
 `~/.claude/settings.json`, or a small backup-then-append for `~/.zshrc` (the one foreign edit
 that is not a JSON merge). `RULES.md`/`USER.md` are the daemon's first-start job, not this
 module's. Every step is idempotent: running `init` twice changes nothing on the second run.
@@ -22,7 +22,7 @@ from pathlib import Path
 
 from . import config
 from .daemon import is_serving
-from .installer import backup_file, merge_json_file
+from .config import backup_file, merge_json_file
 from .ledger import Ledger
 
 LAUNCH_LABEL = "pathfinder.daemon"
@@ -102,10 +102,10 @@ def _fetch_model_ids(url):
 
 def _install_shell_hook(home_path):
     hooks_dir = home_path / "hooks"
-    hooks_dir.mkdir(parents=True, exist_ok=True)
+    hooks_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
     zsh_path = hooks_dir / "pathfinder.zsh"
     zsh_path.write_text(_ZSHRC_SNIPPET, encoding="utf-8")
-    os.chmod(zsh_path, 0o644)
+    os.chmod(zsh_path, 0o600)
 
     zshrc = Path(os.environ["HOME"]) / ".zshrc"
     guard = f'[ -f "{zsh_path}" ] && source "{zsh_path}"\n'

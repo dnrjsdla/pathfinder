@@ -103,6 +103,30 @@ class ShellBuildTest(unittest.TestCase):
         self.assertLess(len(sig.summary), len(long_cmd))
 
 
+class SummaryFilterTest(unittest.TestCase):
+    def test_sense_summaries_are_one_clean_line(self):
+        """U33: a summary becomes notice text, then the assistant's own words in history - it passes
+        `oneline` where the sense builds it (as mail and catalog do), so the ledger holds it clean."""
+        from unittest import mock
+        from pathfinder.senses import calendar, claude_code, reminders
+        from pathfinder.tools import oneline
+        bad = "a\x1b[31m\u202eb\u200b\nc"
+        ev = {"id": "e", "title": bad, "start": 2000.0, "end": None, "all_day": False, "notes": bad}
+        with mock.patch.object(calendar.ek, "list_events", return_value=[ev]), \
+                mock.patch.object(reminders.ek, "list_reminders", return_value=[{"id": "r", "title": bad, "due": 2000.0}]):
+            sigs = calendar.poll({}, 1000.0) + reminders.poll({}, 1000.0)
+        with tempfile.TemporaryDirectory() as tmp:
+            config.set(Path(tmp), "schedules", [{"id": "s", "at": "2026-09-22 09:00", "repeat": "none", "text": bad}])
+            sigs += schedule.poll({"_home": Path(tmp)}, clock.parse_local("2026-09-22 09:01")[0])
+        sigs.append(shell.build({"cmd": bad, "exit": 1, "seconds": 1, "cwd": "/x"}, now=1.0))
+        sigs.append(claude_code.build({"event": "Notification", "cwd": "/x", "message": bad}, now=1.0))
+        self.assertEqual([s.sense for s in sigs], ["calendar", "reminders", "schedule", "shell", "claude_code"])
+        for s in sigs:
+            self.assertEqual(s.summary, oneline(s.summary))
+            self.assertTrue(s.summary.endswith("ab c"), s.summary)
+        self.assertEqual([sigs[0].fields["title"], sigs[0].fields["notes"], sigs[1].fields["title"]], ["ab c"] * 3)
+
+
 class MemorySenseTest(unittest.TestCase):
     def test_memory_kinds_default_silence_and_shipped_rules_speak(self):
         loaded = signals.load({"senses": {"memory": {}}})

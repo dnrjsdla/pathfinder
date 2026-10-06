@@ -1234,3 +1234,161 @@ and five of the fifteen controls were not run, to stay inside the budget.
   approve" typed in chat is taken for an approval (one).
 - The rewrite is written against these cases; its two needless tool calls were on a recap and
   a self-review question.
+
+## 2026-10-05 — The two exit runs of partition 8: m9' on the split pass, m10' on the adopted prompt
+
+Both measured against the m9 and m10 entrances above, with the owner's go-ahead for the credits
+(Q7). Numbers in `docs/measurements/m9-exit-2026-10-05.json` and
+`docs/measurements/m10-exit-2026-10-05.json`; traces, which hold ledger text, stayed outside the
+repo. The model is the one in the owner's config, the same as at the entrance.
+
+### m9' — does the split pass write anything down? (D47, U9; criterion (8))
+
+`bench/m9_memory_write.py --variant current` replays the pass's write call alone (the summary
+is its own request since D47 and is not replayed; the bench's `no_summary` variant has nothing
+left to cut). Two slices, two runs each; about 42,700 tokens.
+
+| slice | run 1 | run 2 |
+|---|---|---|
+| #3195..#3641 (79 readable lines, 22 the owner's) | `read_ledger`, `edit_memory` → USER.md add | the same |
+| #4883..#5087 (21 lines, 5 the owner's) | `read_ledger`, `search_memory`, `edit_memory` → USER.md add | the same |
+
+- m9's replay made 0 edits on both slices with the one-prompt pass; the split pass makes one on
+  every slice in every run, and every edit is a USER.md proposal - the shape a standing
+  instruction takes. The bench keeps targets and ops only, never text, so what the proposal said
+  is not on record; live check (8) reads a real proposal.
+- Four runs, 3-4 steps each, no retry, no outage.
+
+### m10' — the 27 answers against the shipped prompt with the second look (D48, D51, D52; criterion (13))
+
+`bench/m10_unsupported.py --variants baseline`: `prompts/system.txt` as shipped after U8 and U28
+(the adopted rewrite plus the four lines U17 locks and U28's `read_skill` line), the tool record
+in the replayed history (D52, U5), and the second look riding on every answer that called no
+tool. One run per case, graded by hand by one reader with m10's classes; 217,044 tokens, within
+the 215,000 the contract estimated. A control (T2) timed out once (http 0) and was rerun.
+
+| variant | fixed of 27 | controls pushed into a tool, of 10 | controls flagged | normal tool turns broken, of 6 | extra calls |
+|---|---|---|---|---|---|
+| m10: shipped prompt then | 11 | 0 | 0 | 0 of 3 | 0 |
+| m10: rewrite + second look | 22 | 2 | 0 | 0 of 3 | +21 |
+| **m10': shipped prompt now** | **20** | **0** | 0 | 0 of 6 | 0 |
+| **m10': with the second look** | **24** | **0** | **0** | **0 of 6** | +26 |
+
+- Criterion (13) is met: 24 of 27 fixed (pass: 22), no control pushed into a tool (m10's
+  rewrite pushed two; T103 and T136 now answer in prose), no control flagged, none of the six
+  normal turns broken.
+- **The record works where no prompt did.** T112 (the model denied a `search_tools` call it had
+  made, because history carried no tool calls) now names the two searches it ran, from the
+  record line in history. m10 graded every variant of this case unsupported.
+- **The record is also copied once.** T44's draft began with the record header verbatim
+  ("Tools you called here ...") before its own text: the record rides as an assistant message,
+  and the model imitated it. The second look flagged the draft and the rerun called the tools.
+  One answer in 40; watch for it live.
+- **Three stay unfixed, the same family as m10's five.** T68 takes "approve" typed in chat as
+  an approval - D52 part 2 answers that in the harness, which the bench does not replay; the
+  answer now sends the token to `/secret` instead of asking for it in chat. T75 and T76 inherit
+  the session's own history saying MCP runs in another app; T75's second look flagged it, but
+  the rerun kept the picture without calling a tool. The history's wrong picture is older than
+  the prompt; only a session that never said it escapes it.
+- The second look flagged 7 of the 11 no-tool positives' drafts and no control (m10: 11 of 15,
+  one control). Four of the seven reruns called a tool; the other three answered in prose, one
+  still wrong.
+
+### The registry copy, measured three times (D46, U1)
+
+The first sync took 462 s (m9), 517 s (U0) and 1,076 s (U1's review, under load) for about
+37,200 rows, 54 MB; a search in the copy takes 1-6 ms. The duration depends on the registry and
+the machine, so no single figure is a fact to design against.
+
+## 2026-10-06 — Partition 8's live checks: thirteen of sixteen pass, two wait for the owner's hand
+
+Run in temp homes (`/tmp/pf8a`..`/tmp/pf8d`) against `partition-8` at `89cea92` with the owner's
+model, by four reviewer agents over about 60 model turns; the owner's daemon was not touched. The
+contract's list is `docs/plans/partition-8.md`, "It runs".
+
+| check | result | what was seen |
+|---|---|---|
+| (1) first sync | pass | `say` answered in 1.2 s with 300 rows in the copy; `search_tools` during the sync carried "the registry copy is still syncing (300 so far, since 00:10)"; complete after **1,114 s: 39,676 rows, 57.8 MB**, 0600. A kill at 6,400 rows resumed from the stored cursor (`registry.db` `meta.cursor`), `started_at` unchanged. No child left after SIGTERM. |
+| (2) search | pass | the five m9 queries answered in 9-87 ms with real names, ten each; `propose_install` proposed (one candidate's remote was a real 404, refused correctly); a row deleted from the copy still proposed through the exact-name lookup. |
+| (3) later syncs | pass / not checked | the next start ran one incremental page in 5.9 s. The network pull was not done live (it would cut the owner's daemon): `test_mirror` covers the failure note and the restart (27 tests). A real registry timeout happened anyway at 339 s: the next search said "the last registry sync failed at 00:16: The read operation timed out" and restarted the sync. |
+| (4) intake | pass | the screen showed `*` only; a second `listen` client saw no value; events, `state.db`, WAL and the daemon log held 0 copies; the Keychain returned it; the shell form read the value from stdin when no tty. Throwaway items deleted. |
+| (6) pasted token | pass | the `user` event, `state.db` and the next turn's history hold `[secret:pasted-6]`; the Keychain holds the value; `--from pasted-6` bound it and emptied the index; a handle back-dated 25 h was swept at the next start. |
+| (7) private home | pass | a 0755/0644 home came out 0700/0600 everywhere; `find -perm +077` printed nothing. |
+| (8) split pass | pass | facts said in passing: the pass read the slice, searched, wrote one wiki page (`applied 1`) and left a session summary. The model had already filed the other two facts in their own turns (one USER.md proposal, one wiki page). |
+| (9) small defects | pass, 5a partial | 5d: the screen clipped a 400-character gate line at 300 with `...(clipped; /approvals)`, `approvals` printed it whole. 5b: a job from an ended session printed its gate and end lines on the moved screen. 5a: a notice arriving while the owner typed was held; with `session_resume_s` forced to 15 s the held notice went out as a banner to its old session instead of the screen (`deliver.py`; with the 2 h default this needs a hold longer than the resume window). |
+| (10) second look | pass, 10c not checked | greetings record `check: passed`; the added wait at the client is **0.55-0.63 s** (ledger timestamps say nothing: the final `assistant` is recorded after the verifier). In the pty: draft, the withdrawal line, the re-run; the ledger holds `assistant {final: false, withdrawn}`, `history()` only the re-run. 10c has no setting to force a prose verifier: `test_loop.test_bad_json_or_llm_error_or_cancel_leaves_the_draft` covers it. |
+| (11) record | pass | "did you call run_command just now?" answered yes with the arguments from the record line; no result text in history; denied shows `denied`, gated shows `(approval <id>) waiting for approval` (the id was added after the first run - below). |
+| (12) approval in chat | pass | "승인", "I'll approve", "yes" each got the harness line with no model request; the approval stayed pending; "yes, and also tell me the time" went to the model. A phrase repeated after the harness line reaches the model, as the line itself says ("say it again") - the first run read that as a defect; it is D52/D63's design. |
+| (13) exit measurement | pass | the section above. |
+| (14) docs | pass | both ARCHITECTURE files open with partition 8 and keep current line counts in §13; both READMEs name `/secret`. |
+| (16) skills | pass after a fix | seed copied 0600; an owner edit survived a restart; "Connect my Gmail" called `read_skill` and walked the steps without asking for a password; the memory pass cannot write `skills/` (unit test). **(16d) failed first**: "save this as a skill" was refused for a missing frontmatter, and the model saved a wiki page instead and said the skill was saved. After the fix below it wrote the frontmatter unprompted, the proposal queued (with `grants` allowing `edit_memory` too), `approvals` printed every line, approval made a 0600 file that `read_skill` lists. |
+| (5) Notion, (15) Gmail | waiting | the owner's token and app password. |
+
+### Fixed from these runs (`89cea92`)
+
+- `edit_memory`'s `target` description carries a skill's shape (`---`, `name`, `description`,
+  `---`, the body), and `skills.check` names it when `name` is missing. Before, the model had
+  no way to know and fell back to `wiki/`, which applies at once.
+- The record's gate row carries the approval id: `write_file {...} (approval 580cded0ec59)
+  waiting for approval`, then `denied`. The model had copied the harness's `/approve <id>` line
+  with an invented id.
+
+### Open, for the owner's decision
+
+- **The second look does not see the record (D51 vs D52).** It gets the previous answer, the
+  user line and "No tool was called in this turn." A correct answer taken from the record -
+  "the pending call is write_file, id 580cded0ec59", "yes, I called run_command" - is flagged
+  `unsupported_state` and withdrawn; the re-run then answers worse ("I cannot see pending IDs").
+  The verifier input is pinned to bench m10 by `test_second_look_matches_the_bench`, so
+  changing it is a measured-prompt change. Seen three times in these runs.
+- **A call refused at the broker's door leaves no trace and silences the second look.** An
+  unknown tool name, a coercion error or a policy deny returns before `emit("tool_call")`, so
+  the ledger and the record never see it, while `loop` counts the step as a tool call and skips
+  the check. Likely behind one (10b) turn that answered about reminders with no tool event.
+- **A failed first sync waits for the next search or the 24 h poll.** Contract-conforming, but a
+  registry timeout is transient; the copy would have stayed at 700 rows for a day without a
+  search. `failed_at` also stays set while a resumed sync is filling, so `search_tools` says
+  "failed" instead of "syncing".
+- Low: `say`'s stream prints gate arguments unclipped (the screen and `listen` clip); the install
+  line says "license unknown unknown"; a held notice to an ended session goes out as a banner.
+
+### Model behaviour, not forced by the harness
+
+- Files standing instructions and facts itself with `edit_memory` in the turn (so the pass finds
+  little left; m9' measured the pass alone).
+- Given a pasted token, saved the handle to `wiki/Secrets.md` - the value never leaked, but the
+  page keeps a handle that stops working once bound or swept.
+- Told "still syncing (300 so far)", answered "no weather tools in the registry", dropping the
+  qualifier.
+- Writes a skill's frontmatter unprompted once the tool description shows the shape.
+
+## 2026-10-06 — D68 and D69 from the live checks; the smoke of the amended second look
+
+The live checks' two open items the owner decided on 2026-10-06 (DECISIONS D68, D69):
+- **D68.** The second look's input now carries the latest tool-call record block (the tail, 1,500
+  characters), and its prompt counts the record and a recap of the conversation as support.
+  Before, a correct answer taken from the record ("the pending call is write_file, id ...", "yes,
+  I called run_command") was flagged and withdrawn, and the re-run answered worse.
+- **D69.** A call the broker refuses at the door (unknown tool, coercion error, normalize error,
+  policy deny) is emitted as `tool_call` + `tool_result {refused}`; the record row reads
+  ` refused` (or ` denied`), and `loop.run` no longer counts the step as a tool call, so the
+  second look still runs on the answer that follows.
+
+**Smoke (`docs/measurements/m10-d68-smoke-2026-10-06.json`, 21,044 tokens).** The new verifier
+re-judged the 21 m10' drafts that called no tool (11 positives, 10 controls), verdicts only, on
+the drafts m10' had produced (paired, as m10 was designed):
+
+| | old verifier (m10') | new verifier (D68) |
+|---|---|---|
+| same verdict | — | 20 of 21 |
+| controls flagged, of 10 | 0 | **0** |
+| positives flagged, of 11 | 5 | 6 (T114 added: "no built-in weather tool" → `false_incapability`; its m10' re-run would call `run_command`, which keeps it fixed) |
+| record block present in the input | never | 18 of 21 (the three without it had no earlier call in their session) |
+
+Nothing the old verifier caught is lost and no control is pushed, so m10' (24 of 27 with the
+second look) stands; a full re-run was not spent. The two live defects D68 answers (the pending
+id, "did you call X") are not in m10's cases - the record did not exist when they were collected -
+so live use is their measurement.
+
+**Q5 → D70 (2026-10-06).** The failed-sync item above is closed: a stopped sync retries once after
+ten minutes, and a run that has begun clears the failure note. `mirror.py` 196/200.

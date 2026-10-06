@@ -52,7 +52,7 @@ pathfinder say "안녕"                    # 또는 한 번에 한 마디
 | `~/.zshrc`(가드된 한 줄)와 `~/.pathfinder/hooks/pathfinder.zsh` | 셸 감각, 예라고 했을 때만 |
 | `~/.claude/settings.json`(훅 두 항목) | Claude Code 감각, 예라고 했을 때만 |
 | `~/.claude.json`(`mcpServers`) | 승인한 도구; Claude Code도 같이 본다 |
-| macOS 키체인 | 모든 비밀(MCP 서버 토큰, 메일 비밀번호); 파일에는 절대 없다 |
+| macOS 키체인 | 모든 비밀(MCP 서버 토큰, 메일 비밀번호), `/secret` 으로 넣는다; 파일에는 절대 없다 |
 
 `ARCHITECTURE.ko.md`(와 `ARCHITECTURE.md`)가 모듈 하나하나를 설명한다;
 `docs/decisions/DECISIONS.md`는 결정 목록이며 각각을 뒤집을 조건이 적혀 있다.
@@ -63,21 +63,41 @@ pathfinder say "안녕"                    # 또는 한 번에 한 마디
 `config set senses` 는 값 전체를 바꾸므로 이미 켜진 것을 같이 적는다:
 
 ```bash
-security add-generic-password -s pathfinder-mail -a you@example.com -w      # IMAP 비밀번호
 pathfinder config set senses '{"attach": {}, "catalog": {}, "schedule": {}, "reminders": {}, "shell": {}, "claude_code": {}, "calendar": {}, "mail": {"host": "imap.example.com", "user": "you@example.com"}}'
+pathfinder secret mail                   # IMAP 비밀번호, 가려 쳐서 키체인에 (화면에서는 /secret mail)
 ```
 
+메일이 켜져 있는데 비밀번호가 없으면 화면이 붙을 때 묻는다.
 캘린더 감각이 처음 돌 때 macOS가 캘린더 접근을 묻는다.
 
 ## 도구 설치
 
 ```bash
-pathfinder search "postgres"             # MCP 레지스트리에서; 라이선스와 무결성 검사
+pathfinder search "postgres"             # MCP 레지스트리의 로컬 사본, 카탈로그 감각이 채운다
 pathfinder install <레지스트리 이름>      # 제안; 행에 검사 결과와 발견한 툴이 보인다
 pathfinder approve ID                    # config.json과 ~/.claude.json에 설치; pathfinder uninstall <id>가 되돌린다
 ```
 
 또는 데몬이 지금 연 프로젝트에 맞는 도구를 제안하면 "설치해"라고 말하면 된다.
+
+토큰이 필요한 서버는 시험 전에 멈추고, 화면이 토큰을 가려서 묻는다. 직접 넣으려면 화면에서
+`/secret <id> NAME`, 셸에서 `pathfinder secret <id> NAME` 을 친 뒤 설치를 다시 청한다. 값은 절대
+채팅을 지나지 않는다. 실수로 채팅에 붙여 넣은 토큰은 키체인에 `pasted-<n>` 으로 들어가고, 화면이
+묶는 법(`/secret <id> NAME --from pasted-<n>`)을 알려 준다.
+
+## 업그레이드
+
+이 버전으로 올린 뒤에는 데몬을 멈춘 채 파생 상태를 한 번 다시 지어서, 지난 턴도 툴 호출
+기록(`messages.ref` 칸)을 갖게 한다:
+
+```bash
+pathfinder service stop
+pathfinder reindex
+pathfinder service start
+```
+
+`pathfinder service restart`(또는 stop 과 start)는 화면의 연결을 끊는다: `pathfinder tui` 를
+다시 띄워 붙는다.
 
 ## 모델 제공자
 

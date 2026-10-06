@@ -3,6 +3,7 @@ import asyncio
 import dataclasses
 import json
 import os
+import shlex
 import shutil
 import signal
 import stat
@@ -16,12 +17,13 @@ from unittest import mock
 
 from pathfinder import config
 from pathfinder import tools as tools_mod
+from pathfinder import tui
 from pathfinder.daemon import SOCKET, Daemon
 from pathfinder.deliver import Notice
 from pathfinder.ledger import Ledger
 from pathfinder.llm import LLMError
 from pathfinder.mcp import pins as mcp_pins
-from pathfinder.loop import TurnControl
+from pathfinder.loop import FLAG_WORDS, VERIFIER_PROMPT, TurnControl
 from pathfinder.signals import Signal
 from pathfinder.state import State
 from pathfinder.tools import ToolSpec
@@ -31,7 +33,8 @@ def fake_model(reply="Hello there."):
     def factory(cfg, cancel=None, tools=None):
         factory.cancels.append(cancel)
         def step(messages):
-            step.seen.append([dict(m) for m in messages])
+            if messages[0]["content"] != VERIFIER_PROMPT:  # the second look's ask is not a turn's request
+                step.seen.append([dict(m) for m in messages])
             for word in reply.split(" "):
                 yield ("text", word + " ")
             yield ("usage", {"prompt_tokens": 10, "completion_tokens": 3})
@@ -416,7 +419,7 @@ class DaemonTest(DaemonHarness):
 
         seen = self.run_with(factory, scenario)
         self.assertEqual(seen[-1]["kind"], "answer")
-        self.assertEqual(len(seen_messages), 2)
+        self.assertEqual(len(seen_messages), 2)  # no second look: the turn called a tool before the steer (D51)
         steer_msgs = [m for m in seen_messages[1] if m.get("role") == "user" and m.get("content") == "steer now"]
         self.assertEqual(len(steer_msgs), 1)
         steer_events = [e for e in self.events() if e["type"] == "user" and e.get("steer")]
@@ -541,6 +544,8 @@ class ReviewRegressionsTest(DaemonHarness):
     def test_steer_after_the_last_chunk_gets_its_own_turn(self):
         def late_steer_model(cfg, control=None, tools=None):
             def step(messages):
+                if messages[0]["content"] == VERIFIER_PROMPT:
+                    return  # the second look: no verdict, the draft stands
                 late_steer_model.calls += 1
                 late_steer_model.last = messages[-1]
                 yield ("text", "answer ")
@@ -563,6 +568,159 @@ class ReviewRegressionsTest(DaemonHarness):
         self.assertEqual([u["text"] for u in users], ["hello"])  # the fake put the steer in directly
         self.assertEqual(sum(1 for e in self.events() if e["type"] == "turn_start"), 2)
         self.assertEqual(late_steer_model.last, {"role": "user", "content": "and in Korean"})
+
+
+FLAGGED = json.dumps({"unsupported_state": True, "unsupported_done": False, "empty_promise": False,
+                      "false_incapability": False, "why": "no list_reminders result"})
+PASSED = FLAGGED.replace("true", "false")
+
+
+def scripted_model(verdict, draft="Your list is empty.", rerun="Checked: it holds two."):
+    """Answers `draft` first and `rerun` after; the second look answers `verdict`. A user message,
+    or `rerun`, names another ending: "error" breaks mid-stream, "stop" is interrupted mid-stream,
+    "loop" calls a tool until the budget runs out ("loop-error": then D30's final step breaks
+    mid-stream), "write" stops at the gate."""
+    def factory(cfg, control=None, tools=None):
+        def step(messages):
+            if messages[0]["content"] == VERIFIER_PROMPT:
+                yield ("text", verdict)
+                return
+            said = [m["content"] for m in messages if m["role"] == "user"][-1]
+            if said not in ("error", "stop", "loop", "loop-error", "write"):
+                factory.answers += 1
+                said = draft if factory.answers == 1 else rerun
+            if said == "error":
+                yield ("text", "half an ans")
+                raise LLMError(500, "upstream went away")
+            if said == "stop":
+                yield ("text", "partial ")
+                control.interrupt.set()
+                yield ("cancelled", None)
+            elif said in ("loop", "loop-error"):
+                yield ("text", "working " if tools else "no luck.")
+                if not tools and said == "loop-error":
+                    raise LLMError(500, "upstream went away")
+                if tools:
+                    yield ("tool_calls", [{"id": "c1", "name": "anything", "arguments": {}}])
+            elif said == "write":
+                yield ("text", "writing it. ")
+                yield ("tool_calls", [{"id": "c1", "name": "write_file", "arguments": {"path": "n.txt", "content": "x"}}])
+            else:
+                yield ("text", said)
+        return step
+    factory.answers = 0
+    return factory
+
+
+class SecondLookDaemonTest(DaemonHarness):
+    """D51 in the daemon: the withdrawn draft is recorded as the owner saw it, marked, and kept
+    out of history; turn_end carries the check."""
+
+    def _say(self, factory, *texts):
+        async def scenario(daemon):
+            c = await Client.open(self.home)
+            turns = []
+            for text in texts:
+                c.send({"type": "say", "text": text})
+                turns.append(await c.until("turn.end"))
+            c.close()
+            return turns, daemon.state.history(next(iter(daemon.sessions)))
+        return self.run_with(factory, scenario)
+
+    def test_retract_records_withdrawn_assistant_and_sends_line(self):
+        (seen,), _ = self._say(scripted_model(FLAGGED), "any reminders?")
+        self.assertEqual([m["type"] for m in seen], ["attached", "turn.start", "delta", "retract", "delta", "turn.end"])
+        self.assertEqual(seen[3], {"type": "retract", "what": FLAG_WORDS["unsupported_state"],
+                                   "why": "no list_reminders result"})
+        said = [(e["text"], e["final"], e.get("withdrawn")) for e in self.events() if e["type"] == "assistant"]
+        self.assertEqual(said, [("Your list is empty.", False, {"flags": ["unsupported_state"],
+                                                                 "why": "no list_reminders result"}),
+                                ("Checked: it holds two.", True, None)])
+
+    def test_withdrawn_draft_marked_with_reason_and_out_of_history(self):
+        _, history = self._say(scripted_model(FLAGGED), "any reminders?")
+        withdrawn = [e for e in self.events() if e["type"] == "assistant" and not e["final"]]
+        self.assertEqual([(e["text"], e["withdrawn"]["why"]) for e in withdrawn],
+                         [("Your list is empty.", "no list_reminders result")])
+        self.assertNotIn("Your list is empty.", [m["content"] for m in history])
+
+    def test_history_holds_only_the_rerun(self):
+        _, history = self._say(scripted_model(FLAGGED), "any reminders?")
+        self.assertEqual(history, [{"role": "user", "content": "any reminders?"},
+                                   {"role": "assistant", "content": "Checked: it holds two."}])
+
+    def test_turn_end_carries_check(self):
+        checks = []
+        for verdict in (PASSED, FLAGGED, "I think the draft is fine."):
+            self._say(scripted_model(verdict), "hi")
+            checks.append([e.get("check") for e in self.events() if e["type"] == "turn_end"][-1])
+        self._say(scripted_model(PASSED), "loop")
+        checks.append(self.events()[-1]["check"])  # an answer after tools is never checked
+        for ending in ("write", "error"):  # a flagged draft whose re-run gates or breaks
+            self._say(scripted_model(FLAGGED, rerun=ending), "any reminders?")
+            end = [e for e in self.events() if e["type"] == "turn_end"][-1]
+            checks.append((end["kind"], end["check"]))
+        self.assertEqual(checks, ["passed", "flagged", "failed", None, ("gated", "flagged"), ("error", "flagged")])
+
+    def test_steer_during_the_look_waits_for_it(self):
+        """The owner types during the 1-3 s look: the steer is queued, not a cut, so the verdict
+        stands; it is answered in the re-run (flagged) or in a turn of its own (passed)."""
+        for verdict, turns in ((PASSED, 2), (FLAGGED, 1)):
+            release = threading.Event()
+
+            def factory(cfg, control=None, tools=None):
+                def step(messages):
+                    if messages[0]["content"] == VERIFIER_PROMPT:
+                        factory.looks += 1
+                        if factory.looks == 1:
+                            release.wait(5)
+                        # the real adapter's cancel check: a cut here would fail the look
+                        answer = verdict if factory.looks == 1 else PASSED
+                        yield ("cancelled", None) if control.is_set() else ("text", answer)
+                        return
+                    factory.answers += 1
+                    yield ("text", f"answer {factory.answers}")
+                return step
+            factory.looks = factory.answers = 0
+
+            async def scenario(daemon):
+                c = await Client.open(self.home)
+                c.send({"type": "say", "text": "any reminders?"})
+                while not factory.looks:
+                    await asyncio.sleep(0.01)
+                s = next(iter(daemon.sessions.values()))
+                c.send({"type": "say", "text": "and in Korean"})
+                while not s.control.steers:
+                    await asyncio.sleep(0.01)
+                release.set()
+                for _ in range(turns):
+                    await c.until("turn.end")
+                c.close()
+
+            start = len(self.events())
+            self.run_with(factory, scenario)
+            events = [e for e in self.events()[start:] if e["type"] != "session_start"]
+            self.assertEqual([(e["type"], e.get("steer"), e.get("final"), e.get("check")) for e in events], {
+                PASSED: [("user", None, None, None), ("turn_start", None, None, None), ("user", True, None, None),
+                         ("assistant", None, True, None), ("turn_end", None, None, "passed"),
+                         ("turn_start", None, None, None), ("assistant", None, True, None),
+                         ("turn_end", None, None, "passed")],
+                FLAGGED: [("user", None, None, None), ("turn_start", None, None, None), ("user", True, None, None),
+                          ("assistant", None, False, None), ("assistant", None, True, None),
+                          ("turn_end", None, None, "flagged")]}[verdict])
+
+    def test_every_streamed_delta_is_in_the_ledger(self):
+        """Invariant 2: whatever the ending, the turn's assistant events hold every delta sent."""
+        endings = ("hi", "loop", "loop-error", "stop", "error", "any reminders?", "write")
+        turns, _ = self._say(scripted_model(FLAGGED), *endings)
+        self.assertEqual([seen[-1]["kind"] for seen in turns],
+                         ["answer", "exhausted", "error", "cancelled", "error", "answer", "gated"])
+        for seen in turns:
+            turn = next(m for m in seen if m["type"] == "turn.start")["turn"]
+            streamed = "".join(m["text"] for m in seen if m["type"] == "delta")
+            recorded = "".join(e["text"] for e in self.events() if e["type"] == "assistant" and e["turn"] == turn)
+            self.assertTrue(streamed)
+            self.assertEqual(streamed, recorded)
 
 
 class RealStepFactoryTest(unittest.TestCase):
@@ -1039,6 +1197,20 @@ class PushDoorValidationTest(DaemonHarness):
         self.assertEqual(reply["type"], "error")
         self.assertEqual(seen[-1]["kind"], "answer")
 
+    def test_close_does_not_wait_for_a_client_that_only_pushed(self):
+        """F5: a push sense's connection (a hook's `signal`, never `attach`) is in no session - close()
+        closes it too, or wait_closed() hangs a `service stop`."""
+        config.set(self.home, "senses", {"shell": {}})
+
+        async def main():
+            daemon = Daemon(self.home, step_factory=fake_model("ok"))
+            await daemon.start()
+            c = await Client.open(self.home)
+            c.send({"type": "signal", "sense": "shell", "fields": {"cmd": "ls", "exit": 0, "seconds": 1, "cwd": "/x"}})
+            await asyncio.sleep(0.2)  # the daemon has read it; the client stays connected
+            await asyncio.wait_for(daemon.close(), 10)
+        asyncio.run(main())
+
     def test_signal_fields_over_4kb_refused(self):
         config.set(self.home, "senses", {"shell": {}})
 
@@ -1422,6 +1594,34 @@ class JobDaemonIntegrationTest(DaemonHarness):
         self.assertEqual(first[-1]["kind"], "answer")
         self.assertEqual(second[-1]["kind"], "answer")
 
+    def test_job_lines_reach_a_moved_screen(self):
+        """U4 (5b): the job's session went quiet (D41), the screen attached to a newer one, and the
+        job's lines still reach it."""
+        def job_factory(cfg, control, tools):
+            def step(messages):
+                yield ("text", "found it")
+            return step
+
+        async def scenario(daemon):
+            daemon.record("session_start", session="older")
+            daemon.state.db.execute("UPDATE sessions SET last_ts = last_ts - ? WHERE id = ?", (3 * 3600, "older"))
+            c = await Client.open(self.home)
+            c.send({"type": "attach"})
+            attached = (await c.until("attached"))[-1]
+            daemon.jobs_mgr.start("research", "older")
+            lines = await c.until("job.end")
+            for _ in range(200):  # let the job finish before close() tears down the state under it
+                if all(j.state != "running" for j in daemon.jobs_mgr.jobs.values()):
+                    break
+                await asyncio.sleep(0.01)
+            c.close()
+            return attached, lines
+
+        attached, lines = self.run_with(fake_model("ok"), scenario, job_factory=job_factory)
+        self.assertNotEqual(attached["session"], "older")
+        self.assertEqual([m["type"] for m in lines if m["type"].startswith("job.")], ["job.start", "job.end"])
+        self.assertEqual(lines[-1]["state"], "done")
+
 
 class JobSignalTest(DaemonHarness):
     def test_job_done_speaks_without_budget(self):
@@ -1464,6 +1664,24 @@ class McpDaemonTest(DaemonHarness):
         self.assertEqual(len([e for e in self.events() if e["type"] == "pin_accept"]), 1)
         self.assertNotIn("mcp__fake__echo", tools_mod.TOOLS)  # closed: the key is gone
         self.assertIsNotNone(proc.poll())  # and the child is dead
+
+    def test_a_refused_tool_is_never_held(self):
+        """U33: the install pinned only what its trial kept; at load the tools the loader refuses are
+        dropped before the pin check - no `accept_pins` proposal, no `tool_held`, never pinned."""
+        cmd = [sys.executable, str(FAKE_SERVER)]
+        config.set(self.home, "mcp_servers", {"fake": {"transport": "stdio", "command": cmd}})
+        self.run_with(fake_model("ok"), lambda daemon: _noop())  # the pins an install writes: echo only
+        config.set(self.home, "mcp_servers", {"fake": {"transport": "stdio", "command": [*cmd, "--refused-tools"]}})
+
+        async def scenario(daemon):
+            await daemon.mcp.loaded
+            return sorted(n for n in tools_mod.TOOLS if n.startswith("mcp__"))
+
+        self.assertEqual(self.run_with(fake_model("ok"), scenario), ["mcp__fake__echo"])
+        events = self.events()
+        self.assertEqual([e for e in events if e["type"] == "approval_pending" and e["tool"] == "accept_pins"], [])
+        self.assertEqual([e for e in events if e["type"] == "signal" and e["kind"] == "tool_held"], [])
+        self.assertEqual([e["tool"] for e in events if e["type"] == "pin_accept"], ["echo"])
 
     def test_rug_pull_holds(self):
         config.set(self.home, "mcp_servers",
@@ -1601,7 +1819,7 @@ class InstallerDaemonTest(DaemonHarness):
             "pathfinder.installer.subprocess.run",
             return_value=type("R", (), {"returncode": 0, "stdout": json.dumps(
                 {"dist.integrity": "sha512-abc", "dist.tarball": "https://x", "license": "MIT"})})())
-        fake_fetch = mock.patch("pathfinder.catalog.fetch", return_value=[{"server": {
+        fake_fetch = mock.patch("pathfinder.mirror.find", return_value=[{"server": {
             "name": "io.github.acme/widget", "version": "1.0.0", "description": "a widget server",
             "packages": [{"registryType": "npm", "identifier": "widget", "version": "1.0.0",
                          "runtimeHint": "npx"}]}}])
@@ -1676,6 +1894,449 @@ class ProposalGateLineTest(DaemonHarness):
         self.assertTrue(line["args"].startswith("io.github.acme/widget@1.0.0  license MIT ok"), line["args"])
 
 
+class PastedTokenScreenTest(DaemonHarness):
+    """D53: a screen line shows what the ledger holds, so the owner approves what will run. A
+    model's call is not the owner's text, so a token there is redacted (D66). The Keychain is a
+    dict here."""
+    TOKEN = "ntn_" + "s" * 40  # built by concatenation, so the scanner never flags this file
+
+    def setUp(self):
+        super().setUp()
+        self.items, self.deleted = {}, []
+        for name, fake in (("store", lambda s, a, v: self.items.__setitem__(a, v)),
+                           ("delete", lambda s, a: self.deleted.append(a) or True),
+                           ("secret", lambda s, a: None), ("_gone", lambda a: True)):
+            patch = mock.patch(f"pathfinder.keychain.{name}", side_effect=fake)
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def test_gate_line_shows_what_the_approval_holds(self):
+        note_path = str(self.home / "note.txt")
+
+        def gate_model(cfg, control=None, tools=None):
+            def step(messages):
+                yield ("tool_calls", [{"id": "c1", "name": "write_file",
+                                        "arguments": {"path": note_path, "content": self.TOKEN}}])
+            return step
+
+        async def scenario(daemon):
+            c = await Client.open(self.home)
+            c.send({"type": "attach"})
+            sid = (await c.recv())["session"]
+            c.send({"type": "say", "text": "please write a note"})
+            seen = await c.until("turn.end")
+            daemon.record("approval_pending", session=sid, origin="user", id="a2", call_id="a2",
+                          tool="write_file", args={"content": self.TOKEN}, messages=[])
+            seen.append(await c.recv())
+            c.close()
+            return seen
+
+        seen = self.run_with(gate_model, scenario)
+        gates = [m for m in seen if m["type"] == "gate"]
+        self.assertEqual([g["args"]["content"] for g in gates], ["[redacted]", "[redacted]"])
+        self.assertEqual(self.items, {})  # no Keychain call for a call's arguments
+        self.assertNotIn(self.TOKEN, json.dumps(seen))
+        state = State(self.home / "state.db")
+        self.addCleanup(state.close)
+        for gate in gates:
+            self.assertEqual(state.approval(gate["id"])["args"], gate["args"])
+
+    def test_pasted_notice_shows_the_handle(self):
+        """U15b: the owner's line was vaulted - the screen and `say` are told the handle; a handle
+        merely typed again is not announced."""
+        async def scenario(daemon):
+            c = await Client.open(self.home)
+            c.send({"type": "attach"})
+            await c.recv()
+            c.send({"type": "say", "text": f"use {self.TOKEN}"})
+            seen = await c.until("turn.end")
+            c.send({"type": "say", "text": "bind [secret:pasted-1] please"})
+            seen += await c.until("turn.end")
+            c.close()
+            return seen
+
+        seen = self.run_with(fake_model("ok"), scenario)
+        pasted = [m for m in seen if m["type"] == "pasted"]
+        self.assertEqual(len(pasted), 1)
+        (handle,) = pasted[0]["handles"]
+        self.assertEqual(self.items, {handle: self.TOKEN})
+        self.assertIn(f"stored as {handle} for 24 h - bind it with /secret <id> NAME --from {handle}",
+                      tui.render(pasted[0]))
+        self.assertNotIn(self.TOKEN, json.dumps(seen))
+
+    def test_daemon_start_sweeps_expired_pastes(self):
+        """D53: a daemon start sweeps once; opening a ledger does not (a CLI command, the memory
+        pass's read-only ledger)."""
+        index = self.home / "pasted.json"
+        index.write_text(json.dumps({"pasted": {"pasted-1": time.time() - 25 * 3600}}))
+        Ledger(self.home)
+        self.assertEqual(self.deleted, [])
+
+        async def scenario(daemon):
+            return None
+
+        self.run_with(fake_model("ok"), scenario)
+        self.assertEqual(self.deleted, ["pasted-1"])
+        self.assertEqual(json.loads(index.read_text()), {"pasted": {}})
+
+    def test_steer_is_kept_as_recorded(self):
+        """A steer said after the model's last chunk is re-sent as the next turn's `trailing` text
+        from `control.steers`, so that deque holds the handle, not the token."""
+        async def scenario(daemon):
+            s = mock.Mock(id="s1", turn="t1", control=TurnControl())
+            daemon.steer(s, f"use {self.TOKEN}")
+            return list(s.control.steers)
+
+        (steer,) = self.run_with(fake_model("ok"), scenario)
+        self.assertRegex(steer, r"^use \[secret:pasted-\d+\]$")
+
+
+class SecretAskTest(DaemonHarness):
+    """U16, D53's main path: the harness asks every screen for a missing secret, and the masked
+    answer goes to the Keychain through the daemon - never the ledger, the state or another line.
+    `security` is a fake over a dict at the keychain module's `subprocess.run`."""
+    VALUE = "hunter2-" + "v" * 12  # not token-shaped: a leak would show raw, not as a handle
+
+    def setUp(self):
+        super().setUp()
+        self.items = {}
+        patch = mock.patch("pathfinder.keychain.subprocess.run", side_effect=self._security)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def _security(self, argv, input=None, **kw):
+        if argv[1] == "-i":  # add-generic-password -U -s "..." -a "..." -w "..."
+            cmd = shlex.split(input)
+            self.items[(cmd[cmd.index("-s") + 1], cmd[cmd.index("-a") + 1])] = cmd[cmd.index("-w") + 1]
+            return mock.Mock(returncode=0, stdout="", stderr="")
+        key = (argv[argv.index("-s") + 1], argv[argv.index("-a") + 1])
+        found = key in self.items
+        return mock.Mock(returncode=0 if found else 44, stdout=self.items.get(key, "") + "\n", stderr="")
+
+    @staticmethod
+    def _stopped(daemon, names=("NOTION_TOKEN", "WORKSPACE")):
+        """What `check` hands `propose` at D40's stop. Its id is `notion-2`, not what `_server_id`
+        would give now: the ask stores under the check's own id."""
+        daemon.installer.propose({"outcome": "install_failed", "name": "io.example/notion", "verification": {
+            "names": list(names), "server_id": "notion-2", "failed_step": "secrets",
+            "reason": "needs NOTION_TOKEN, WORKSPACE - store each with /secret notion-2 NAME in the screen"}}, "user")
+
+    def test_secret_ask_reaches_every_screen(self):
+        async def scenario(daemon):
+            a, b = await Client.open(self.home), await Client.open(self.home)
+            for c in (a, b):
+                c.send({"type": "attach"})
+                await c.recv()
+            daemon.installer.propose_by_name = lambda *a, **k: {"id": "", "line": ""}
+            self._stopped(daemon)
+            asks = [(await a.until("secret.ask"))[-1], (await b.until("secret.ask"))[-1]]
+            a.send({**{k: asks[0][k] for k in ("server_id", "name", "server")}, "type": "secret", "value": self.VALUE})
+            stored = [(await a.until("secret.stored"))[-1], (await b.until("secret.stored"))[-1]]
+            a.close()
+            b.close()
+            return asks, stored
+
+        asks, stored = self.run_with(fake_model("ok"), scenario)
+        self.assertEqual(asks, [{"type": "secret.ask", "server_id": "notion-2",
+                                 "name": "NOTION_TOKEN", "server": "io.example/notion"}] * 2)
+        # every screen hears the answer, so the one that did not answer leaves its entry
+        self.assertEqual(stored, [{"type": "secret.stored", "server_id": "notion-2", "name": "NOTION_TOKEN",
+                                   "server": "io.example/notion"}] * 2)
+        self.assertEqual(self.items, {("pathfinder-mcp-notion-2", "NOTION_TOKEN"): self.VALUE})
+
+    def test_secret_ask_without_a_screen_falls_back_to_the_line(self):
+        async def scenario(daemon):
+            def propose(name, origin="user", session="", registry=None):
+                daemon.installer.record("install_failed", id="", name=name, names=["NOTION_TOKEN"], step="secrets",
+                                        reason="needs NOTION_TOKEN - store it with /secret notion NOTION_TOKEN")
+                return {"error": "needs NOTION_TOKEN - store it with /secret notion NOTION_TOKEN"}
+            daemon.installer.propose_by_name = propose
+            c = await Client.open(self.home)  # `pathfinder install`: a client that never attached
+            c.send({"type": "install", "name": "io.example/notion"})
+            reply = await c.recv()
+            c.send({"type": "nothing"})
+            after = await c.recv()
+            c.close()
+            return reply, after
+
+        reply, after = self.run_with(fake_model("ok"), scenario)
+        ask = {"type": "secret.ask", "server_id": "notion", "name": "NOTION_TOKEN", "server": "x"}
+        self.assertIn("/secret notion NOTION_TOKEN in the screen", tui.render(ask))  # what `say` prints
+        self.assertIn("/secret mail", tui.render({**ask, "server_id": "", "name": "mail"}))
+        self.assertEqual(reply["type"], "error")
+        self.assertIn("/secret notion NOTION_TOKEN", reply["message"])
+        self.assertEqual(after["type"], "error")  # the next line is the next reply: no ask came between
+
+    def test_secret_answer_is_checked_and_mail_needs_no_name(self):
+        """Review: a field missing or of the wrong type is refused before anything is stored; `mail`
+        with no name is the mail password, and the reply names what it stored."""
+        config.set(self.home, "senses", {"mail": {"host": "imap.example.invalid", "user": "mailbox-user"}})
+
+        async def scenario(daemon):
+            c = await Client.open(self.home)
+            c.send({"type": "attach"})
+            await c.recv()
+            replies = []
+            for bad in ({"server_id": "notion", "name": "N"}, {"server_id": "notion", "name": 5, "value": "x"},
+                        {"name": "N", "value": "x"}):
+                c.send({"type": "secret", **bad})
+                replies.append((await c.until("error"))[-1])
+            c.send({"type": "secret", "server_id": "mail", "value": self.VALUE})
+            replies.append((await c.until("secret.stored"))[-1])
+            c.close()
+            return replies
+
+        *errors, stored = self.run_with(fake_model("ok"), scenario)
+        self.assertTrue(all(e["message"].startswith("secret needs") for e in errors))  # refused first; nothing stored
+        self.assertEqual(stored, {"type": "secret.stored", "server_id": "mail", "name": None, "server": ""})
+        self.assertEqual(tui.render(stored), "저장됨 · mail password stored")
+        self.assertEqual(self.items, {("pathfinder-mail", "mailbox-user"): self.VALUE})
+
+    def test_stop_during_a_reproposal_cancels_it_promptly(self):
+        """Review: a stop does not wait out the re-proposal's trial, nor close state.db under it."""
+        release = threading.Event()
+
+        async def main():
+            daemon = Daemon(self.home, step_factory=fake_model("ok"))
+            await daemon.start()
+
+            def propose(name, origin="user", session="", registry=None):
+                release.wait(5)  # a slow trial
+                return daemon.state.installed_names()
+            daemon.installer.propose_by_name = propose
+            c = await Client.open(self.home)
+            c.send({"type": "attach"})
+            await c.recv()
+            self._stopped(daemon)
+            c.send({"type": "secret", "server_id": "notion-2", "name": "NOTION_TOKEN", "value": self.VALUE})
+            await c.until("secret.stored")
+            c.close()
+            began = time.monotonic()
+            await daemon.close()
+            took = time.monotonic() - began
+            release.set()
+            return took, daemon.installer._again.cancelled()
+
+        took, cancelled = asyncio.run(main())
+        self.assertLess(took, 2)
+        self.assertTrue(cancelled)
+
+    def test_a_bad_answer_errs_only_to_its_sender(self):
+        """Round 2: only `secret.stored` reaches every screen; an error is the sender's alone, so
+        another screen - or a `say` in flight - is never told of it."""
+        async def scenario(daemon):
+            a, b = await Client.open(self.home), await Client.open(self.home)
+            for c in (a, b):
+                c.send({"type": "attach"})
+                await c.recv()
+            a.send({"type": "secret", "server_id": "notion", "name": "NOTION_TOKEN"})  # no value
+            to_a = (await a.until("error"))[-1]
+            b.send({"type": "nothing"})
+            to_b = await b.recv()
+            a.close()
+            b.close()
+            return to_a, to_b
+
+        to_a, to_b = self.run_with(fake_model("ok"), scenario)
+        self.assertTrue(to_a["message"].startswith("secret needs"))
+        self.assertEqual(to_b, {"type": "error", "message": "unknown type: 'nothing'"})
+
+    def test_a_secret_for_a_pending_install_proposes_it_again(self):
+        """Round 2: `/secret <id> NAME` typed in the screen after its ask was dropped reaches the same
+        path: the install waiting on that id is proposed again, once."""
+        async def scenario(daemon):
+            proposed = []
+            daemon.installer.propose_by_name = lambda name, origin="user", session="", registry=None: \
+                proposed.append((name, session)) or {}
+            c = await Client.open(self.home)
+            c.send({"type": "attach"})
+            sid = (await c.recv())["session"]
+            self._stopped(daemon)
+            await c.until("secret.ask")
+            replies = []
+            for value in ("v4lue-one", "v4lue-two"):  # what the screen's `/secret notion-2 NOTION_TOKEN` sends
+                c.send({"type": "secret", "server_id": "notion-2", "name": "NOTION_TOKEN", "value": value})
+                replies.append((await c.until("secret.stored"))[-1])
+                await daemon.installer._again
+            c.close()
+            return sid, proposed, replies
+
+        sid, proposed, replies = self.run_with(fake_model("ok"), scenario)
+        self.assertEqual(proposed, [("io.example/notion", sid)])  # once: the second finds nothing waiting
+        self.assertEqual([r["server"] for r in replies], ["io.example/notion", ""])
+
+    def test_missing_mail_password_is_asked_at_start(self):
+        """U26: at a start no screen is attached, so a screen is asked as it attaches while the mail
+        sense is on and its item is missing; once stored, it is not asked again."""
+        config.set(self.home, "senses", {"mail": {"host": "imap.example.invalid", "user": "mailbox-user"}})
+
+        async def scenario(daemon):
+            seen = []
+            for _ in range(2):
+                c = await Client.open(self.home)
+                c.send({"type": "attach"})
+                await c.recv()
+                c.send({"type": "nothing"})
+                seen.append(await c.until("error"))
+                c.close()
+                self.items[("pathfinder-mail", "mailbox-user")] = "stored-" + "x" * 8
+            return seen
+
+        first, second = self.run_with(fake_model("ok"), scenario)
+        self.assertEqual(first[0], {"type": "secret.ask", "server_id": "", "name": "mail", "server": ""})
+        self.assertNotIn("secret.ask", [m["type"] for m in second])
+
+    def test_secret_value_never_reaches_ledger_or_state(self):
+        async def scenario(daemon):
+            proposed = []
+
+            def propose(name, origin="user", session="", registry=None):
+                proposed.append((name, origin, session))
+                daemon.installer.record("approval_pending", session=session, origin="user", id="a1", call_id="a1",
+                                        tool="write_file", args={"path": "x"}, messages=[])
+                return {"id": "a1", "line": "x"}
+            daemon.installer.propose_by_name = propose
+            c = await Client.open(self.home)
+            c.send({"type": "attach"})
+            sid = (await c.recv())["session"]
+            self._stopped(daemon)
+            ask = (await c.until("secret.ask"))[-1]
+            c.send({**{k: ask[k] for k in ("server_id", "name", "server")}, "type": "secret", "value": self.VALUE})
+            seen = await c.until("gate")
+            c.close()
+            return sid, proposed, seen
+
+        sid, proposed, seen = self.run_with(fake_model("ok"), scenario)
+        self.assertEqual(self.items, {("pathfinder-mcp-notion-2", "NOTION_TOKEN"): self.VALUE})
+        self.assertIn({"type": "secret.stored", "server_id": "notion-2", "name": "NOTION_TOKEN",
+                       "server": "io.example/notion"}, seen)
+        self.assertEqual(proposed, [("io.example/notion", "user", sid)])  # proposed again once, in this screen's session
+        self.assertNotIn(self.VALUE, json.dumps(seen))
+        for path in self.home.rglob("*"):  # the ledger, state.db and its journal, every other file
+            if path.is_file():
+                self.assertNotIn(self.VALUE.encode(), path.read_bytes(), path.name)
+
+
+class ChatApprovalTest(DaemonHarness):
+    """D52 part 2 (m10's T68): "I approve" typed into chat was taken by the model for an approval."""
+
+    def _gate(self, daemon, sid, id):
+        daemon.record("approval_pending", session=sid, turn="t0", origin="user", id=id, call_id=id,
+                      tool="edit_memory", args={"target": "USER.md"}, messages=[])
+
+    async def _say(self, c, text):
+        c.send({"type": "say", "text": text})
+        return [m for m in await c.until("turn.end") if m["type"] != "gate"]
+
+    async def _attach(self):
+        c = await Client.open(self.home)
+        c.send({"type": "attach"})
+        return c, (await c.recv())["session"]
+
+    def test_chat_approval_answered_without_a_model_call(self):
+        factory = fake_model("ok")
+
+        async def scenario(daemon):
+            c, sid = await self._attach()
+            self._gate(daemon, sid, "a1")
+            seen = await self._say(c, "I'll approve.")
+            c.close()
+            return seen, daemon.state.approval("a1")["decision"]
+
+        seen, decision = self.run_with(factory, scenario)
+        self.assertEqual([m["type"] for m in seen], ["turn.start", "delta", "turn.end"])
+        self.assertTrue(seen[1]["text"].endswith(": /approve a1 or /deny a1 (edit_memory; shell: pathfinder "
+                                                 "approve|deny a1) - if you meant something else, say it "
+                                                 "again · 다른 뜻이었다면 다시 말해 주세요"), seen[1]["text"])
+        self.assertEqual(seen[-1]["kind"], "answer")
+        self.assertEqual(factory.seen, [])  # no model request
+        self.assertIsNone(decision)  # still pending
+        turn = [e for e in self.events() if e["type"] in ("user", "turn_start", "assistant", "turn_end")]
+        self.assertEqual([e["type"] for e in turn], ["user", "turn_start", "assistant", "turn_end"])
+        self.assertEqual((turn[0]["text"], turn[2]["text"], turn[2]["final"]), ("I'll approve.", seen[1]["text"], True))
+        self.assertEqual((turn[3]["kind"], "usage" in turn[3]), ("answer", False))
+
+    def test_chat_approval_needs_an_open_gate_newer_than_the_last_user_message(self):
+        factory = fake_model("ok")
+
+        async def scenario(daemon):
+            c, sid = await self._attach()
+            no_gate = await self._say(c, "yes")
+            self._gate(daemon, sid, "old")
+            await self._say(c, "something else first")
+            talked_past = await self._say(c, "yes")
+            self._gate(daemon, sid, "new")
+            answered = await self._say(c, "yes")
+            c.close()
+            return no_gate, talked_past, answered
+
+        no_gate, talked_past, answered = self.run_with(factory, scenario)
+        self.assertEqual(len(factory.seen), 3)  # the answered "yes" made no request
+        for seen in (no_gate, talked_past):
+            self.assertEqual([m["text"] for m in seen if m["type"] == "delta"], ["ok "])
+        self.assertIn("/approve new ", answered[1]["text"])
+        self.assertNotIn("old", answered[1]["text"])
+
+    def test_longer_message_still_reaches_the_model(self):
+        factory = fake_model("ok")
+
+        async def scenario(daemon):
+            c, sid = await self._attach()
+            self._gate(daemon, sid, "a1")
+            seen = await self._say(c, "yes, and also add X")
+            c.close()
+            return seen, daemon.state.approval("a1")["decision"]
+
+        seen, decision = self.run_with(factory, scenario)
+        self.assertEqual(factory.seen[0][-1], {"role": "user", "content": "yes, and also add X"})
+        self.assertEqual([m["text"] for m in seen if m["type"] == "delta"], ["ok "])
+        self.assertIsNone(decision)
+
+    def test_steer_is_never_intercepted(self):
+        """D17: a `say` while the owner's turn runs is a steer, with a gate open or not."""
+        proceed = threading.Event()
+        tools_mod.TOOLS["slow_tool"] = ToolSpec(name="slow_tool", description="", params={}, required=[],
+                                                handler=lambda control=None: proceed.wait(2) and {"slept": True})
+        self.addCleanup(tools_mod.TOOLS.pop, "slow_tool", None)
+        seen_messages = []
+
+        def factory(cfg, control=None, tools=None):
+            def step(messages):
+                seen_messages.append([dict(m) for m in messages])
+                if len(seen_messages) == 1:
+                    yield ("tool_calls", [{"id": "c1", "name": "slow_tool", "arguments": {}}])
+                else:
+                    yield ("text", "done")
+            return step
+
+        async def scenario(daemon):
+            c, sid = await self._attach()
+            c.send({"type": "say", "text": "go"})
+            await c.until("turn.start")
+            s = daemon.sessions[sid]
+            for _ in range(200):
+                if s.control is not None and s.control.in_tool:
+                    break
+                await asyncio.sleep(0.01)
+            self._gate(daemon, sid, "a1")  # open: newer than "go"
+            c.send({"type": "say", "text": "yes"})
+            for _ in range(200):
+                if s.control.steers:
+                    break
+                await asyncio.sleep(0.01)
+            proceed.set()
+            seen = await c.until("turn.end")
+            c.close()
+            return seen
+
+        seen = self.run_with(factory, scenario)
+        self.assertEqual([m["text"] for m in seen if m["type"] == "delta"], ["done"])
+        self.assertIn({"role": "user", "content": "yes"}, seen_messages[1])
+        steers = [e["text"] for e in self.events() if e["type"] == "user" and e.get("steer")]
+        self.assertEqual(steers, ["yes"])
+        self.assertFalse(any("/approve" in e.get("text", "") for e in self.events() if e["type"] == "assistant"))
+
+
 class SessionLifetimeTest(DaemonHarness):
     """D41 (live 2026-09-29): an open screen's `presence` kept one session alive for four days,
     and its old wrong answers kept coming back. Two hours without conversation end a session."""
@@ -1745,6 +2406,34 @@ class SessionLifetimeTest(DaemonHarness):
 
         self.assertEqual(self.run_with(fake_model("ok"), scenario), [0, 0])
 
+    def test_notice_held_while_typing_after_a_move(self):
+        """5a: the screen typed on the old session; the notice opened a new one with no presence
+        row, and went out mid-sentence. The owner has one pair of hands: the newest row counts."""
+        async def scenario(daemon):
+            _never_quiet(daemon)
+            c = await Client.open(self.home)
+            c.send({"type": "attach"})
+            first = (await c.recv())["session"]
+            c.send({"type": "presence", "idle_s": 1})  # typing
+            await asyncio.sleep(0.05)
+            self._age(daemon, first, 3 * 3600)
+            daemon.push_signal(Signal(sense="schedule", kind="schedule_due", key="gap-3",
+                                      summary="Scheduled note: call", fields={"id": "s3"}, trust="user"))
+            for _ in range(200):
+                if daemon.outbox.queue or any(e["type"] == "delivery" for e in self.events()):
+                    break
+                await asyncio.sleep(0.01)
+            held = [n.session for n in daemon.outbox.queue]
+            c.send({"type": "presence", "idle_s": 999})  # stopped typing, now on the new session
+            notice = (await c.until("notice"))[-1]
+            c.close()
+            return first, held, notice
+
+        first, held, notice = self.run_with(fake_model("ok"), scenario)
+        self.assertEqual(len(held), 1)
+        self.assertNotEqual(held[0], first)  # the notice's session is the new one
+        self.assertIn("Scheduled note: call", notice["text"])
+
     def test_silent_triage_does_not_keep_a_session(self):
         """Review: every silenced signal records a `decision` in the session; only a delivered
         notice is conversation."""
@@ -1759,6 +2448,154 @@ class SessionLifetimeTest(DaemonHarness):
         sid, after_triage, after_notice = self.run_with(fake_model("ok"), scenario)
         self.assertIsNone(after_triage)
         self.assertEqual(after_notice, sid)
+
+    def _old_session(self, daemon):
+        daemon.record("session_start", session="old")
+        daemon.record("user", session="old", turn="t1", origin="user", trust="user", text="old question")
+        self._age(daemon, "old", 3 * 3600)
+
+    async def _settle(self, daemon):  # let a job's thread finish before close() tears the state down
+        for _ in range(300):
+            if all(j.state not in ("running", "gated") for j in daemon.jobs_mgr.jobs.values()):
+                break
+            await asyncio.sleep(0.01)
+
+    def test_say_after_a_job_gate_in_an_aged_session_lands_in_the_new_session(self):
+        """D63 (live 2026-09-30): a job's gate made a session D41 had ended the newest again, and the
+        owner's next message went into it with its old history. The phrase typed after the gate gets
+        the harness line in the screen's session; said again, it reaches the model there."""
+        def job_factory(cfg, control, tools):
+            def step(messages):
+                if not any(m.get("role") == "tool" for m in messages):
+                    yield ("tool_calls", [{"id": "c1", "name": "write_file",
+                                           "arguments": {"path": str(self.home / "n.txt"), "content": "hi"}}])
+                else:
+                    yield ("text", "done")
+            return step
+        model = fake_model("ok")
+
+        async def scenario(daemon):
+            self._old_session(daemon)
+            aged = daemon.state.session("old")["last_ts"]
+            c = await Client.open(self.home)
+            c.send({"type": "attach"})
+            screen = (await c.until("attached"))[-1]["session"]
+            daemon.jobs_mgr.start("write a note", "old")
+            gate = (await c.until("job.gate"))[-1]
+            said = []
+            for _ in range(2):
+                c.send({"type": "say", "text": "응"})
+                said.append("".join(m["text"] for m in await c.until("turn.end") if m["type"] == "delta"))
+            seen = list(model.seen)
+            c.send({"type": "approve", "id": gate["approval"]})
+            await c.until("job.end")
+            await self._settle(daemon)
+            c.close()
+            return screen, gate, said, seen, daemon.state.session("old")["last_ts"] == aged
+
+        screen, gate, said, seen, still_aged = self.run_with(model, scenario, job_factory=job_factory)
+        self.assertNotEqual(screen, "old")
+        self.assertTrue(still_aged)  # the job's start, gate, approval and end moved nothing
+        self.assertIn(f"/approve {gate['approval']} ", said[0])
+        self.assertTrue(said[0].endswith(" - if you meant something else, say it again · 다른 뜻이었다면 다시 말해 주세요"))
+        self.assertEqual(said[1], "ok ")
+        self.assertEqual(len(seen), 1)  # only the phrase said again made a request
+        self.assertNotIn("old question", json.dumps(seen[0], ensure_ascii=False))
+        self.assertEqual([e["session"] for e in self.events() if e["type"] == "user" and e["text"] == "응"],
+                         [screen, screen])
+
+    def test_job_done_notice_lands_in_the_screens_session(self):
+        """D63: a job from a session D41 ended reports where the screen is - the goal and the summary,
+        not the old session's history."""
+        def job_factory(cfg, control, tools):
+            def step(messages):
+                yield ("text", "found it")
+            return step
+        model = fake_model("ok")
+
+        async def scenario(daemon):
+            _never_quiet(daemon)
+            self._old_session(daemon)
+            c = await Client.open(self.home)
+            c.send({"type": "attach"})
+            screen = (await c.until("attached"))[-1]["session"]
+            daemon.jobs_mgr.start("research", "old")
+            notice = (await c.until("notice"))[-1]
+            await self._settle(daemon)
+            c.send({"type": "say", "text": "and then?"})
+            await c.until("turn.end")
+            c.close()
+            return screen, notice
+
+        screen, notice = self.run_with(model, scenario, job_factory=job_factory)
+        self.assertNotEqual(screen, "old")
+        self.assertTrue(notice["text"].startswith("Job done: research\nfound it"), notice["text"])
+        self.assertEqual([e["session"] for e in self.events() if e["type"] in ("delivery", "assistant")
+                          and e["origin"] == "signal"], [screen, screen])
+        history = json.dumps(model.seen[-1], ensure_ascii=False)
+        self.assertIn("found it", history)
+        self.assertNotIn("old question", history)
+
+    def test_notice_text_passes_clean(self):
+        """D62, found at U25's review: every sense's summary reaches the screen and then history. It
+        is cleaned once where the notice text is formed - live, rebuilt after a restart, and a job's
+        worker text."""
+        def job_factory(cfg, control, tools):
+            def step(messages):
+                yield ("text", "found \x1b[31mit\x1b[0m\u202e now")
+            return step
+
+        async def scenario(daemon):
+            _never_quiet(daemon)
+            c = await Client.open(self.home)
+            c.send({"type": "attach"})
+            screen = (await c.until("attached"))[-1]["session"]
+            daemon.jobs_mgr.start("research", screen)
+            live = (await c.until("notice"))[-1]
+            await self._settle(daemon)
+            c.send({"type": "presence", "idle_s": 0})  # typing: the next notice is held, then the daemon stops
+            await asyncio.sleep(0.05)
+            daemon.push_signal(Signal(sense="schedule", kind="schedule_due", key="dirty-1", fields={"id": "s1"},
+                                      summary="Scheduled note: \x1b[1mtrain\u202e", trust="user"))
+            for _ in range(200):
+                if any(e.get("signal_key") == "dirty-1" and e.get("action") == "speak" for e in self.events()):
+                    break
+                await asyncio.sleep(0.01)
+            c.close()
+            return live
+
+        live = self.run_with(fake_model("ok"), scenario, job_factory=job_factory)
+        self.assertTrue(live["text"].startswith("Job done: research\nfound it now"), live["text"])
+        rebuilt = State(self.home / "rebuilt.db")  # a restart's state, rebuilt from the ledger
+        rebuilt.catch_up(Ledger(self.home))
+        held = [row["text"] for row in rebuilt.undelivered()]
+        rebuilt.close()
+        self.assertEqual(held, ["Scheduled note: train"])
+        texts = [e["text"] for e in self.events() if e["type"] in ("decision", "assistant") and e.get("text")]
+        self.assertTrue(texts)
+        for text in texts:
+            self.assertNotRegex(text, "[\x1b\u202e]")
+
+    def test_a_notice_held_by_the_rate_limit_goes_out_later_clean(self):
+        """U32's review: the release of a notice the rate limit held (`signal_ready`) carries the
+        clean summaries recorded with its decision."""
+        async def scenario(daemon):
+            daemon.rules = dataclasses.replace(daemon.rules, quiet_hours="0-0", min_interval_s=1, burst_limit=999)
+            c = await Client.open(self.home)
+            c.send({"type": "attach"})
+            await c.until("attached")
+            for i, summary in enumerate(["Scheduled note: one\n\ttwo", "Scheduled note: \x1b[31mred\u202e"]):
+                daemon.push_signal(Signal(sense="schedule", kind="schedule_due", key=f"held-{i}", fields={"id": str(i)},
+                                          summary=summary, trust="user"))
+                await asyncio.sleep(0.05)
+            texts = [(await c.until("notice"))[-1]["text"] for _ in range(2)]
+            c.close()
+            return texts
+
+        texts = self.run_with(fake_model(""), scenario)
+        self.assertEqual(texts, ["Scheduled note: one\n\ttwo", "Scheduled note: red"])
+        held = [e for e in self.events() if e["type"] == "decision" and e["signal_key"] == "held-1"]
+        self.assertEqual(held[0]["text"], "Scheduled note: red")
 
 
 class AgendaTest(DaemonHarness):

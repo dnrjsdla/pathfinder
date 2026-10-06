@@ -10,9 +10,12 @@ import os
 import re
 import subprocess
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
+
+from .tools import oneline  # the one filter for someone else's text; `catalog.oneline(...)` callers keep working
 
 REGISTRY = "https://registry.modelcontextprotocol.io"
 # PyPI's own JSON API - not the invariant's registry, but still one named place tests can repoint.
@@ -42,32 +45,54 @@ _EXACT_MARKERS = {
 _SEP_RE = re.compile(r"[/.\-_]")
 
 
-def fetch(since=None, search=None, *, registry=REGISTRY, limit=100, pages=5, timeout=20) -> list:
-    """`GET {registry}/v0.1/servers`, cursor-paginated, at most `pages` requests. Raises on a
-    network error - the sense loop logs it and retries next cadence (`signals.SenseLoop`)."""
-    items = []
-    cursor = None
-    for _ in range(pages):
-        params = {"version": "latest", "limit": str(limit)}
-        if search:
-            params["search"] = search
-        if since is not None:
-            # RFC3339 UTC, built with plain string formatting (test_invariants counts every date
-            # computation outside clock.py/ledger.py, and this one call site is not worth adding
-            # a UTC escape hatch there for).
-            t = time.gmtime(since)
-            params["updated_since"] = "%04d-%02d-%02dT%02d:%02d:%02dZ" % (
-                t.tm_year, t.tm_mon, t.tm_mday, t.tm_hour, t.tm_min, t.tm_sec)
-        if cursor:
-            params["cursor"] = cursor
-        url = f"{registry}/v0.1/servers?{urllib.parse.urlencode(params)}"
-        with urllib.request.urlopen(url, timeout=timeout) as resp:
-            data = json.loads(resp.read())
-        items.extend(data.get("servers", []))
-        cursor = (data.get("metadata") or {}).get("nextCursor")
-        if not cursor:
-            break
-    return items
+def rfc3339(ts: float) -> str:
+    """UTC, built with plain string formatting (test_invariants counts every date computation
+    outside clock.py/ledger.py, and this one call site is not worth a UTC escape hatch there)."""
+    t = time.gmtime(ts)
+    return "%04d-%02d-%02dT%02d:%02d:%02dZ" % (t.tm_year, t.tm_mon, t.tm_mday, t.tm_hour, t.tm_min, t.tm_sec)
+
+
+def _get(url: str, timeout: float) -> dict:
+    with urllib.request.urlopen(url, timeout=timeout) as resp:
+        return json.loads(resp.read())
+
+
+def page(registry, cursor=None, since=None, limit=100, timeout=30) -> tuple:
+    """One `GET {registry}/v0.1/servers?version=latest` page: `(items, next_cursor or None)`.
+    `since` is a timestamp (sent as `updated_since`, RFC3339 only). Raises on a network or HTTP
+    error - `mirror` decides what a failure means."""
+    params = {"version": "latest", "limit": str(limit)}
+    if since is not None:
+        params["updated_since"] = rfc3339(since)
+    if cursor:
+        params["cursor"] = cursor
+    data = _get(f"{registry}/v0.1/servers?{urllib.parse.urlencode(params)}", timeout)
+    return data.get("servers", []), (data.get("metadata") or {}).get("nextCursor") or None
+
+
+def latest(name: str, registry, timeout=20):
+    """The registry's latest version of exactly `name`, or None when it has none (404)."""
+    try:
+        return _get(f"{registry}/v0.1/servers/{urllib.parse.quote(name, safe='')}/versions/latest", timeout)
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            e.close()
+            return None
+        raise
+
+
+def listing(item) -> str:
+    """One search line for a registry row: name, description, and what tells one server from another - the kind
+    (a remote's host), "no source" for a package without a repository URL (most remotes have none), the month it was published."""
+    cand, server = candidate(item), item["server"]
+    pkg = cand["package"]
+    kind = pkg["registry_type"]
+    if kind == "remote":
+        kind += " " + oneline(urllib.parse.urlparse(pkg["identifier"]).hostname or "", 60)
+    published = re.match(r"\d{4}-\d\d", cand["verification"]["maintenance"]["last_publish_at"])
+    parts = [kind.strip(), *(["no source"] if pkg["registry_type"] != "remote" and not (server.get("repository") or {}).get("url") else []),
+             *([published[0]] if published else []), "license not checked"]
+    return f"{oneline(cand['name'], 80)} - {oneline(cand['description'], 100)} ({', '.join(parts)})"
 
 
 def _arg_str(arg) -> str:
@@ -91,8 +116,10 @@ def _package(server: dict) -> dict:
             if runtime in ("npx", "uvx") and spec not in args:
                 args.append(spec)  # another runtime hint (node, docker, an interpreter) names its own program
             args += [_arg_str(a) for a in (pkg.get("packageArguments") or [])]
-            env = [{"name": e["name"], "secret": bool(e.get("isSecret")), "required": bool(e.get("isRequired"))}
-                  for e in (pkg.get("environmentVariables") or [])]
+            env = [{"name": e["name"], "secret": bool(e.get("isSecret")), "required": bool(e.get("isRequired")),
+                    "default": oneline(e["default"]) if isinstance(e.get("default"), str) else None}  # registry text
+                  for e in (pkg.get("environmentVariables") or [])
+                  if isinstance(e.get("name"), str) and e["name"].isidentifier() and e["name"].isascii()]  # a name with `=` would read as account and default (D65); `valid_target`'s rule
             return {"registry_type": rtype, "identifier": pkg["identifier"],
                     "version": pkg.get("version", server.get("version", "")),
                     "runtime": runtime,

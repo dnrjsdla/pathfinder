@@ -447,7 +447,162 @@ a skill it has: then the matching skill's title rides in the turn, as the wiki m
 the second look (D51) has been measured in live use. When it comes it is a write tool that asks
 every time, showing the recipient, the subject and the body.
 
+**D60. D36's foreign-file helper moves to `config.py`** (`backup_file`, `_atomic_write_json`,
+`merge_json_file`, about 40 lines; decided 2026-09-30). `installer.py` reached 700/700 at U3 and
+U10 and U16 still need 6 lines; by D56 a file past its ceiling is cut, not raised. The helper
+writes files, it does not install, and `init` already imports it. It stays one reviewed copy:
+`installer.py` and `init.py` import it from `config`. It writes foreign files only; `config.set()`
+remains the one writer of PATHFINDER's own config. — *Reversed if* `config.py` needs a ceiling
+the helper crowds: then D36's own reversal applies, a module of its own.
+
+**D61. Skills live in one place, `<home>/skills/<name>.md`; their index rides in `read_skill`'s
+own description; the assistant may propose a skill from a user turn (confirms and amends D58).**
+The package's `pathfinder/skills/*.md` are seeds: a seed is copied into the home when its file is
+missing, the way `rules.load` writes `RULES.md` and `USER.md` at the daemon's first start, and the
+copy never overwrites. A new shipped skill arrives on upgrade; one the owner edited is left alone.
+There is no override rule and no marker for a newer shipped version. The owner proposed this; its
+cost is that a fix to a shipped skill does not reach a home that already has that file. The index
+is every skill's `name` and `description`, sorted, never cut, bounded at load. The owner writes
+skills by hand, and the assistant may propose one from a user turn: always the approval box,
+never `grants`, never the memory pass, never from a signal, job or memory origin. One directory,
+whatever the source, is also where a server package's skill lands (D44/D45). — *Reversed if* two
+weeks of use show the assistant not opening a skill it has: then the matching skill's title
+rides in the turn, as the wiki map does. If shipped fixes failing to reach homes becomes a real
+cost, a marker is added then.
+
+**D62. Every tool result passes a character filter before the model sees it.** Found at U22's
+review: a tool result was clipped for length and otherwise raw, so bidi marks, zero-width
+characters, ANSI sequences and control characters reached the model from web pages, mail bodies
+and MCP servers; U21 filters only the signal envelope. One function, `tools.clean(text)`, removes
+those and keeps newlines and tabs without collapsing whitespace, since a result may be code or a
+page. `oneline` becomes `clean` plus its flattening, so there is one character rule, and the mail
+body's per-line `oneline` becomes `clean`. It runs in `broker._clip_for_model`, which every
+result and every error string already passes. The ledger's `tool_result` keeps what the tool
+returned; the filter is on the way to the model. It is inside partition 8 because the deploy
+gate's purpose is that third-party text is filtered before the model, and a tool result is the
+larger path. — *Reversed if* a tool's legitimate output needs a removed character (a zero-width
+joiner inside an emoji the owner uses): that character is allowed back in `clean`, in one place.
+
+**D63. Only the owner's activity keeps a session alive (amends D41).** A job's events - its
+start, each tool call and result, its gate, its end - no longer move its session's `last_ts`,
+and neither does the approval of a job's gate. Found on 2026-09-30: a job that gated or ended
+in a session more than two hours old made that session the newest again, so the owner's next
+message went into it, without a word on the screen, and the model received the old history -
+the 109-turn case D41 was written to stop. D41 never named jobs; its rule for a signal turn
+("only the notice it delivered is conversation") now holds for a job too. The `job_done` notice
+lands in the session the screen is in, with the goal and the summary. A job's open gate is
+answered by the harness from any session (D52), because the gate no longer pulls the owner back
+to the session that holds it. — *Reversed if* live use shows follow-up questions about a
+finished job failing for lack of the conversation that started it: then the notice carries more
+of the job, not the old session.
+
 **The owner's direction for the server (D44/D45), recorded so it is not lost:** what the server
 is for is handing over tool PACKAGES that are useful as they arrive - not wiring services one by
 one. Partition 8 connects single services because the secret path and the registry copy need a
 real case; the server's design starts from the package.
+
+## 2026-10-01 — The screen's masked input, and an entry's optional and default (owner's choices)
+
+**D64. The screen's masked `/secret` input moves to `tui_secret.py`, ceiling 150** (decided
+2026-10-01). `tui.py` was 392/400 with U15b, U16 and U26 still to add about 20 lines to it. The
+new module holds what is the masked entry's own: its target, where a bracketed paste stands (the
+marks `[200~`/`[201~`), the 50 ms drain, the one-line refusal, the store, the `/secret` arguments
+and their strings. `tui.py` keeps the key loop, the escape parser, the input buffer and the switch
+into and out of the mode, and calls in; it is 367 after the move. Raising the ceiling was the
+other way, and D34's intent is that a module past its line is cut, not its ceiling raised;
+trimming the three units would cut the intake the secret path depends on. — *Reversed if*
+`tui_secret.py` ends up needing the screen's state: then the split goes back and `tui.py`'s
+ceiling is raised instead.
+
+**D65. An installed server's entry says which variables are optional and which have a default,
+in its value grammar** (decided 2026-10-01). `keychain:NAME` is required, `keychain?:NAME`
+optional, and after the first `=` comes the value used when the Keychain item is missing:
+`keychain:NAME=<default>`, `keychain?:NAME=<default>`. The installer writes a default only for a
+variable not marked secret - a secret's registry default is a placeholder, not a value - and an
+empty default is none. One resolver, `mcp/servers._resolve`, reads the entry for the check and
+for the start, so the two agree: a required variable with a default no longer stops the check,
+and a missing optional secret no longer disables a server the check trialled without it. New
+config keys (`optional`, `defaults`) were rejected because the entry would then live in two
+places; keeping the grammar and reinstalling was rejected because an optional secret added later
+would need a reinstall. A registry variable whose name is not an ASCII identifier is dropped
+from the candidate: it could not be stored under that name anyway, and a `=` in it would read as
+the grammar. Entries written before D65 keep `keychain:NAME` and stay disabled while
+the item is missing; there is no migration - a reinstall is the way.
+
+## 2026-10-01 — The pasted-token handle, and what the ledger door vaults (owner's choices)
+
+**D66. A pasted token's handle is `pasted-<seq>[-i]`, the ledger seq of the event it came from,
+and only text the owner typed is vaulted; any other text is redacted at the door** (decided
+2026-10-01; amends D53). The first token in an event is `pasted-<seq>`, further ones in the same
+event `pasted-<seq>-2`, `-3`, and `pasted.json` keeps only `{"pasted": {handle: created}}`. The
+counter it kept before did not survive a lost or malformed index: it restarted, so an old handle
+in the ledger could come to name a new value. A seq never recurs, so U15b's "expired - enter it
+again" can trust that a number means one value. The service is shared by every home and a seq
+is unique only within its own ledger, so an item that already holds the name (a trial home's,
+or one left from before a reset) is never replaced: that token is written `[redacted]`. A sweep,
+at daemon start and on a paste, also drops a handle whose item is gone; an item whose handle a
+lost index listed stays in the Keychain, unknown - the accepted limit.
+The vault runs only for an event with `trust: user` - the owner's chat text and steers, and a
+reminder or a schedule entry, whose senses declare `user`. Every other event (a tool's call and
+result, a third party's signal, a job's and the model's words, memory) passes `keychain.mask`,
+so a token there becomes `[redacted]` with no Keychain call: one tool result could hold about
+285 token-shaped strings, which was about 285 `security` calls under the ledger's lock and 95
+items left for 24 hours. The cost accepted: a token in third-party text cannot be read back - it
+never should reach the model anyway.
+
+## 2026-10-02 — The daemon's push door (owner's choice)
+
+**D67. The socket's `signal` branch moves to `signals.py`; the daemon keeps one delegating line**
+(decided 2026-10-02). `signals.pushed(senses, msg, push, reply)` checks that the sense is loaded
+and push-capable, that `fields` fits the 4 KB limit and that the sense's `build` accepts it, then
+either pushes the Signal or answers one `error` line; `PUSH_FIELDS_LIMIT` moves with it.
+`daemon.py` reached its 780 ceiling for the third time in partition 8: U3 and U4 moved code out
+before, and U16's review fixes brought it back to 780, which f0a1b13 met only by folding a
+docstring into a comment - undone here. The branch is the signal path's own responsibility: what
+a pushed signal must satisfy is the senses' rule, not the socket's. The move takes 14 lines out
+of the daemon; `signals.py` and `rules.py` stay inside their shared 585. Moving the `react` branch
+to `loop.py` was rejected: it does not belong there, and it would free 6 lines. Raising the
+ceiling was rejected: it ignores the pressure D34's per-module line exists to apply.
+
+## 2026-10-06 — The second look and the record (owner's choice)
+
+**D68. The second look sees the record (amends D51)** (decided 2026-10-06). `verifier_input`
+carries the most recent record block of the history (D52: names, arguments and state, never
+results, clipped to 1,500 characters) after the previous answer, and `VERIFIER_PROMPT` counts that
+record, and a recap of the conversation, as support. Live on 2026-10-06 the model answered "the
+pending call is write_file, id ..." and "yes, I called run_command with ..." correctly from the
+record, but the verifier, which saw only the previous answer, the user line and "No tool was
+called in this turn.", flagged both `unsupported_state`: the drafts were withdrawn and the re-runs
+answered worse. "What did I just send you? quote it" was flagged too - a recap the main prompt
+exempts and the verifier prompt did not. The cost: the verifier input m10 measured changes (the
+prompt gains two sentences, the input up to 1,500 characters); m10' stays as measured and a smoke
+of the affected cases follows. *Reversed if* the smoke or live use shows the record making the
+verifier pass an unsupported answer. The record it sees is every record block of the session, newest rows last, cut to its last 1,500
+characters at a row boundary: each turn has its own block, so the latest one alone loses a gate still
+waiting from an earlier turn.
+
+**D69. A call refused at the broker's door is recorded and is not a tool call (amends D51/D52)**
+(decided 2026-10-06). For an unknown tool, a coercion error, a `normalize` error and a policy
+`deny`, `Broker.call` now emits `tool_call` and then `tool_result` with `refused: True` (a policy
+deny also `denied: True`) and returns `refused: True`; the record row ends ` refused` (` denied`
+for policy). `loop.run` counts a step as a tool run only when one of its settled calls was not
+refused, so a turn whose every call was refused is still checked by the second look. Live (10b): a
+turn of two steps, no tool event, no check - `Broker.call` returned before `emit` while the loop
+set `called` for any step with tool_calls, so the answer went out unchecked and the record never
+showed the attempt. The gate path and the user-denied path are unchanged. The cost: two more
+ledger events per refused attempt; the record shows the model's misses. *Reversed if* refused
+rows crowd the record (`CALL_ARGS_CLIP` already bounds each).
+A policy deny still counts as a tool call for the second look, because the verifier does not see
+this turn's refusals and would flag a truthful "your settings block it" as `false_incapability`.
+
+**D70. A stopped registry sync tries once more after ten minutes, and a run that has begun clears
+the failure note** (decided 2026-10-06, from live check (1)). A page that fails after its own
+retries stops the run (`failed_at`, `error`); before, the next attempt came only with a
+`search_tools` call or the catalog sense's 24 h poll, so a registry timeout at 339 s would have
+left the copy at 700 rows for a day without a search. Now `_sync` schedules one `refresh` after
+`RETRY_AFTER_FAILURE_S` (600 s) on a daemon timer, and a retry that fails schedules nothing more -
+the search or the poll takes over. `_run` clears `failed_at` and `error` as it starts, so
+`search`'s note says "still syncing (N so far)" while a resumed run fills, not "failed at HH:MM".
+Cost: one more request ten minutes after a failure; `mirror.py` 196/200. — *Reversed if* a
+registry outage makes the retry itself a cost (it is one page), or if live use shows the copy
+still stale for hours: then the poll's cadence shortens after a failure instead.

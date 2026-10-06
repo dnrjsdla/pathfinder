@@ -1,0 +1,1067 @@
+{
+ "sets": {
+  "positive": [
+   35,
+   40,
+   44,
+   46,
+   56,
+   58,
+   62,
+   68,
+   74,
+   75,
+   76,
+   77,
+   80,
+   84,
+   85,
+   90,
+   97,
+   101,
+   105,
+   110,
+   112,
+   113,
+   114,
+   118,
+   128,
+   129,
+   131
+  ],
+  "control": [
+   1,
+   2,
+   14,
+   24,
+   38,
+   71,
+   96,
+   103,
+   119,
+   136
+  ],
+  "normal": [
+   47,
+   99,
+   120,
+   127,
+   132,
+   137
+  ],
+  "not_run": []
+ },
+ "metrics": {
+  "baseline": {
+   "fixed": 20,
+   "controls_bad": 0,
+   "controls_flagged": 0,
+   "controls_needless_tool": 0,
+   "normal_broken": 0,
+   "normal_flagged": 0,
+   "model_calls": 45,
+   "extra_calls": 0,
+   "tokens": 176139,
+   "classes": {
+    "tool_called": 22,
+    "unsupported": 7,
+    "plain_ok": 14
+   },
+   "run": {
+    "positive": 27,
+    "control": 10,
+    "normal": 6
+   },
+   "first_step_tokens": 167476
+  },
+  "verify": {
+   "fixed": 24,
+   "controls_bad": 0,
+   "controls_flagged": 0,
+   "controls_needless_tool": 0,
+   "normal_broken": 0,
+   "normal_flagged": 0,
+   "model_calls": 71,
+   "extra_calls": 26,
+   "tokens": 217044,
+   "classes": {
+    "tool_called": 26,
+    "plain_ok": 14,
+    "unsupported": 3
+   },
+   "run": {
+    "positive": 27,
+    "control": 10,
+    "normal": 6
+   },
+   "first_step_tokens": 208381
+  }
+ },
+ "cases": {
+  "35": {
+   "set": "positive",
+   "m9": "promise_without_action",
+   "baseline": {
+    "first_step_tools": [
+     "search_tools",
+     "search_tools",
+     "run_command"
+    ],
+    "flagged": null,
+    "tools": [
+     "search_tools",
+     "search_tools",
+     "run_command"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   },
+   "verify": {
+    "first_step_tools": [
+     "search_tools",
+     "search_tools",
+     "run_command"
+    ],
+    "flagged": null,
+    "tools": [
+     "search_tools",
+     "search_tools",
+     "run_command"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   }
+  },
+  "40": {
+   "set": "positive",
+   "m9": "state_claim_without_tool",
+   "baseline": {
+    "first_step_tools": [
+     "list_events"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_events"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   },
+   "verify": {
+    "first_step_tools": [
+     "list_events"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_events"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   }
+  },
+  "44": {
+   "set": "positive",
+   "m9": "state_claim_without_tool",
+   "baseline": {
+    "first_step_tools": [],
+    "flagged": null,
+    "tools": [],
+    "class": "unsupported",
+    "fixed": false
+   },
+   "verify": {
+    "first_step_tools": [],
+    "flagged": true,
+    "tools": [
+     "list_events",
+     "list_reminders"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   }
+  },
+  "46": {
+   "set": "positive",
+   "m9": "state_claim_without_tool",
+   "baseline": {
+    "first_step_tools": [],
+    "flagged": null,
+    "tools": [],
+    "class": "unsupported",
+    "fixed": false
+   },
+   "verify": {
+    "first_step_tools": [],
+    "flagged": true,
+    "tools": [
+     "list_events",
+     "list_reminders"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   }
+  },
+  "56": {
+   "set": "positive",
+   "m9": "promise_without_action",
+   "baseline": {
+    "first_step_tools": [],
+    "flagged": null,
+    "tools": [],
+    "class": "unsupported",
+    "fixed": false
+   },
+   "verify": {
+    "first_step_tools": [],
+    "flagged": true,
+    "tools": [
+     "list_reminders"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   }
+  },
+  "58": {
+   "set": "positive",
+   "m9": "promise_without_action",
+   "baseline": {
+    "first_step_tools": [
+     "list_reminders"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_reminders",
+     "delete_reminder"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   },
+   "verify": {
+    "first_step_tools": [
+     "list_reminders"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_reminders",
+     "delete_reminder"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   }
+  },
+  "62": {
+   "set": "positive",
+   "m9": "state_claim_without_tool",
+   "baseline": {
+    "first_step_tools": [],
+    "flagged": null,
+    "tools": [],
+    "class": "plain_ok",
+    "fixed": true
+   },
+   "verify": {
+    "first_step_tools": [],
+    "flagged": false,
+    "tools": [],
+    "class": "plain_ok",
+    "fixed": true
+   }
+  },
+  "68": {
+   "set": "positive",
+   "m9": "done_claim_without_tool",
+   "baseline": {
+    "first_step_tools": [],
+    "flagged": null,
+    "tools": [],
+    "class": "unsupported",
+    "fixed": false
+   },
+   "verify": {
+    "first_step_tools": [],
+    "flagged": false,
+    "tools": [],
+    "class": "unsupported",
+    "fixed": false
+   }
+  },
+  "74": {
+   "set": "positive",
+   "m9": "false_capability_claim",
+   "baseline": {
+    "first_step_tools": [
+     "mcp__slack__list_channels"
+    ],
+    "flagged": null,
+    "tools": [
+     "mcp__slack__list_channels"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   },
+   "verify": {
+    "first_step_tools": [
+     "mcp__slack__list_channels"
+    ],
+    "flagged": null,
+    "tools": [
+     "mcp__slack__list_channels"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   }
+  },
+  "75": {
+   "set": "positive",
+   "m9": "false_capability_claim",
+   "baseline": {
+    "first_step_tools": [],
+    "flagged": null,
+    "tools": [],
+    "class": "unsupported",
+    "fixed": false
+   },
+   "verify": {
+    "first_step_tools": [],
+    "flagged": true,
+    "tools": [],
+    "class": "unsupported",
+    "fixed": false
+   }
+  },
+  "76": {
+   "set": "positive",
+   "m9": "false_capability_claim",
+   "baseline": {
+    "first_step_tools": [],
+    "flagged": null,
+    "tools": [],
+    "class": "unsupported",
+    "fixed": false
+   },
+   "verify": {
+    "first_step_tools": [],
+    "flagged": false,
+    "tools": [],
+    "class": "unsupported",
+    "fixed": false
+   }
+  },
+  "77": {
+   "set": "positive",
+   "m9": "false_capability_claim",
+   "baseline": {
+    "first_step_tools": [],
+    "flagged": null,
+    "tools": [],
+    "class": "unsupported",
+    "fixed": false
+   },
+   "verify": {
+    "first_step_tools": [],
+    "flagged": true,
+    "tools": [
+     "read_file"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   }
+  },
+  "80": {
+   "set": "positive",
+   "m9": "promise_without_action",
+   "baseline": {
+    "first_step_tools": [
+     "list_reminders"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_reminders"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   },
+   "verify": {
+    "first_step_tools": [
+     "list_reminders"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_reminders"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   }
+  },
+  "84": {
+   "set": "positive",
+   "m9": "state_claim_without_tool",
+   "baseline": {
+    "first_step_tools": [
+     "list_reminders"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_reminders",
+     "complete_reminder"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   },
+   "verify": {
+    "first_step_tools": [
+     "list_reminders"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_reminders",
+     "complete_reminder"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   }
+  },
+  "85": {
+   "set": "positive",
+   "m9": "false_capability_claim",
+   "baseline": {
+    "first_step_tools": [],
+    "flagged": null,
+    "tools": [],
+    "class": "plain_ok",
+    "fixed": true
+   },
+   "verify": {
+    "first_step_tools": [],
+    "flagged": false,
+    "tools": [],
+    "class": "plain_ok",
+    "fixed": true
+   }
+  },
+  "90": {
+   "set": "positive",
+   "m9": "state_claim_without_tool",
+   "baseline": {
+    "first_step_tools": [
+     "list_reminders"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_reminders"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   },
+   "verify": {
+    "first_step_tools": [
+     "list_reminders"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_reminders"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   }
+  },
+  "97": {
+   "set": "positive",
+   "m9": "state_claim_without_tool",
+   "baseline": {
+    "first_step_tools": [
+     "list_reminders"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_reminders"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   },
+   "verify": {
+    "first_step_tools": [
+     "list_reminders"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_reminders"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   }
+  },
+  "101": {
+   "set": "positive",
+   "m9": "state_claim_without_tool",
+   "baseline": {
+    "first_step_tools": [
+     "list_events",
+     "list_reminders"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_events",
+     "list_reminders"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   },
+   "verify": {
+    "first_step_tools": [
+     "list_events",
+     "list_reminders"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_events",
+     "list_reminders"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   }
+  },
+  "105": {
+   "set": "positive",
+   "m9": "done_claim_without_tool",
+   "baseline": {
+    "first_step_tools": [
+     "list_reminders"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_reminders"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   },
+   "verify": {
+    "first_step_tools": [
+     "list_reminders"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_reminders"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   }
+  },
+  "110": {
+   "set": "positive",
+   "m9": "state_claim_without_tool",
+   "baseline": {
+    "first_step_tools": [
+     "search_tools"
+    ],
+    "flagged": null,
+    "tools": [
+     "search_tools"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   },
+   "verify": {
+    "first_step_tools": [
+     "search_tools"
+    ],
+    "flagged": null,
+    "tools": [
+     "search_tools"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   }
+  },
+  "112": {
+   "set": "positive",
+   "m9": "state_claim_without_tool",
+   "baseline": {
+    "first_step_tools": [],
+    "flagged": null,
+    "tools": [],
+    "class": "plain_ok",
+    "fixed": true
+   },
+   "verify": {
+    "first_step_tools": [],
+    "flagged": false,
+    "tools": [],
+    "class": "plain_ok",
+    "fixed": true
+   }
+  },
+  "113": {
+   "set": "positive",
+   "m9": "state_claim_without_tool",
+   "baseline": {
+    "first_step_tools": [
+     "list_events",
+     "list_reminders",
+     "list_schedules"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_events",
+     "list_reminders",
+     "list_schedules"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   },
+   "verify": {
+    "first_step_tools": [
+     "list_events",
+     "list_reminders",
+     "list_schedules"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_events",
+     "list_reminders",
+     "list_schedules"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   }
+  },
+  "114": {
+   "set": "positive",
+   "m9": "false_capability_claim",
+   "baseline": {
+    "first_step_tools": [],
+    "flagged": null,
+    "tools": [],
+    "class": "plain_ok",
+    "fixed": true
+   },
+   "verify": {
+    "first_step_tools": [],
+    "flagged": false,
+    "tools": [],
+    "class": "plain_ok",
+    "fixed": true
+   }
+  },
+  "118": {
+   "set": "positive",
+   "m9": "state_claim_without_tool",
+   "baseline": {
+    "first_step_tools": [
+     "list_events",
+     "list_reminders"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_events",
+     "list_reminders"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   },
+   "verify": {
+    "first_step_tools": [
+     "list_events",
+     "list_reminders"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_events",
+     "list_reminders"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   }
+  },
+  "128": {
+   "set": "positive",
+   "m9": "state_claim_without_tool",
+   "baseline": {
+    "first_step_tools": [
+     "search_tools"
+    ],
+    "flagged": null,
+    "tools": [
+     "search_tools"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   },
+   "verify": {
+    "first_step_tools": [
+     "search_tools"
+    ],
+    "flagged": null,
+    "tools": [
+     "search_tools"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   }
+  },
+  "129": {
+   "set": "positive",
+   "m9": "false_capability_claim",
+   "baseline": {
+    "first_step_tools": [
+     "search_tools"
+    ],
+    "flagged": null,
+    "tools": [
+     "search_tools"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   },
+   "verify": {
+    "first_step_tools": [
+     "search_tools"
+    ],
+    "flagged": null,
+    "tools": [
+     "search_tools"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   }
+  },
+  "131": {
+   "set": "positive",
+   "m9": "state_claim_without_tool",
+   "baseline": {
+    "first_step_tools": [
+     "list_events",
+     "list_reminders"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_events",
+     "list_reminders"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   },
+   "verify": {
+    "first_step_tools": [
+     "list_events",
+     "list_reminders"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_events",
+     "list_reminders"
+    ],
+    "class": "tool_called",
+    "fixed": true
+   }
+  },
+  "1": {
+   "set": "control",
+   "baseline": {
+    "first_step_tools": [],
+    "flagged": null,
+    "tools": [],
+    "class": "plain_ok"
+   },
+   "verify": {
+    "first_step_tools": [],
+    "flagged": false,
+    "tools": [],
+    "class": "plain_ok"
+   }
+  },
+  "2": {
+   "set": "control",
+   "baseline": {
+    "first_step_tools": [],
+    "flagged": null,
+    "tools": [],
+    "class": "plain_ok"
+   },
+   "verify": {
+    "first_step_tools": [],
+    "flagged": false,
+    "tools": [],
+    "class": "plain_ok"
+   }
+  },
+  "14": {
+   "set": "control",
+   "baseline": {
+    "first_step_tools": [],
+    "flagged": null,
+    "tools": [],
+    "class": "plain_ok"
+   },
+   "verify": {
+    "first_step_tools": [],
+    "flagged": false,
+    "tools": [],
+    "class": "plain_ok"
+   }
+  },
+  "24": {
+   "set": "control",
+   "baseline": {
+    "first_step_tools": [],
+    "flagged": null,
+    "tools": [],
+    "class": "plain_ok"
+   },
+   "verify": {
+    "first_step_tools": [],
+    "flagged": false,
+    "tools": [],
+    "class": "plain_ok"
+   }
+  },
+  "38": {
+   "set": "control",
+   "baseline": {
+    "first_step_tools": [],
+    "flagged": null,
+    "tools": [],
+    "class": "plain_ok"
+   },
+   "verify": {
+    "first_step_tools": [],
+    "flagged": false,
+    "tools": [],
+    "class": "plain_ok"
+   }
+  },
+  "71": {
+   "set": "control",
+   "baseline": {
+    "first_step_tools": [],
+    "flagged": null,
+    "tools": [],
+    "class": "plain_ok"
+   },
+   "verify": {
+    "first_step_tools": [],
+    "flagged": false,
+    "tools": [],
+    "class": "plain_ok"
+   }
+  },
+  "96": {
+   "set": "control",
+   "baseline": {
+    "first_step_tools": [],
+    "flagged": null,
+    "tools": [],
+    "class": "plain_ok"
+   },
+   "verify": {
+    "first_step_tools": [],
+    "flagged": false,
+    "tools": [],
+    "class": "plain_ok"
+   }
+  },
+  "103": {
+   "set": "control",
+   "baseline": {
+    "first_step_tools": [],
+    "flagged": null,
+    "tools": [],
+    "class": "plain_ok"
+   },
+   "verify": {
+    "first_step_tools": [],
+    "flagged": false,
+    "tools": [],
+    "class": "plain_ok"
+   }
+  },
+  "119": {
+   "set": "control",
+   "baseline": {
+    "first_step_tools": [],
+    "flagged": null,
+    "tools": [],
+    "class": "plain_ok"
+   },
+   "verify": {
+    "first_step_tools": [],
+    "flagged": false,
+    "tools": [],
+    "class": "plain_ok"
+   }
+  },
+  "136": {
+   "set": "control",
+   "baseline": {
+    "first_step_tools": [],
+    "flagged": null,
+    "tools": [],
+    "class": "plain_ok"
+   },
+   "verify": {
+    "first_step_tools": [],
+    "flagged": false,
+    "tools": [],
+    "class": "plain_ok"
+   }
+  },
+  "47": {
+   "set": "normal",
+   "baseline": {
+    "first_step_tools": [
+     "list_events",
+     "list_reminders"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_events",
+     "list_reminders"
+    ],
+    "class": "tool_called"
+   },
+   "verify": {
+    "first_step_tools": [
+     "list_events",
+     "list_reminders"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_events",
+     "list_reminders"
+    ],
+    "class": "tool_called"
+   }
+  },
+  "99": {
+   "set": "normal",
+   "baseline": {
+    "first_step_tools": [
+     "list_events"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_events"
+    ],
+    "class": "tool_called"
+   },
+   "verify": {
+    "first_step_tools": [
+     "list_events"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_events"
+    ],
+    "class": "tool_called"
+   }
+  },
+  "120": {
+   "set": "normal",
+   "baseline": {
+    "first_step_tools": [
+     "add_reminder"
+    ],
+    "flagged": null,
+    "tools": [
+     "add_reminder"
+    ],
+    "class": "tool_called"
+   },
+   "verify": {
+    "first_step_tools": [
+     "add_reminder"
+    ],
+    "flagged": null,
+    "tools": [
+     "add_reminder"
+    ],
+    "class": "tool_called"
+   }
+  },
+  "127": {
+   "set": "normal",
+   "baseline": {
+    "first_step_tools": [
+     "search_tools"
+    ],
+    "flagged": null,
+    "tools": [
+     "search_tools"
+    ],
+    "class": "tool_called"
+   },
+   "verify": {
+    "first_step_tools": [
+     "search_tools"
+    ],
+    "flagged": null,
+    "tools": [
+     "search_tools"
+    ],
+    "class": "tool_called"
+   }
+  },
+  "132": {
+   "set": "normal",
+   "baseline": {
+    "first_step_tools": [
+     "list_events",
+     "list_reminders"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_events",
+     "list_reminders"
+    ],
+    "class": "tool_called"
+   },
+   "verify": {
+    "first_step_tools": [
+     "list_events",
+     "list_reminders"
+    ],
+    "flagged": null,
+    "tools": [
+     "list_events",
+     "list_reminders"
+    ],
+    "class": "tool_called"
+   }
+  },
+  "137": {
+   "set": "normal",
+   "baseline": {
+    "first_step_tools": [
+     "search_memory"
+    ],
+    "flagged": null,
+    "tools": [
+     "search_memory"
+    ],
+    "class": "tool_called"
+   },
+   "verify": {
+    "first_step_tools": [
+     "search_memory"
+    ],
+    "flagged": null,
+    "tools": [
+     "search_memory"
+    ],
+    "class": "tool_called"
+   }
+  }
+ },
+ "date": "2026-10-05",
+ "source": "bench/m10_unsupported.py --variants baseline (prompts/system.txt as shipped after U8/U28 = the adopted rewrite, with the second look riding on every no-tool answer and the tool record in the replayed history; model from the owner's config, the same as m10)",
+ "baseline": "docs/measurements/m10-2026-09-29.json",
+ "graded_by": "one reader, by hand, same classes as m10",
+ "tokens": {
+  "traces": 217044,
+  "note": "one timed-out control (T2, http 0) was rerun; the first attempt spent nothing"
+ },
+ "notes": {
+  "record_effect": "T112: the answer names the search_tools calls it made (the record line in history); m10 graded every variant of this case unsupported because the model denied the call",
+  "record_echo": "T44: the model's draft began by copying the record header text verbatim; the second look flagged the draft and the rerun called the tools (1 of 40 answers)",
+  "not_fixed": "T68 (a chat 'approve' taken as an approval - D52 part 2 answers it in the harness, which the bench does not replay; the answer now routes the token to /secret), T75 and T76 (the session's own history says MCP runs in another app; T75's rerun kept that picture without a tool)"
+ }
+}

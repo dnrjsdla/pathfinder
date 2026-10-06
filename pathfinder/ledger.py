@@ -4,12 +4,16 @@ file name (two modules disagreeing on "the day" once lost 24 days of history).
 append() is also safe across processes: an flock on events/.lock serializes
 the daemon and any CLI process (e.g. `pathfinder config set`) that append
 while the daemon is running."""
+import contextlib
 import fcntl
 import json
+import os
 import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+
+from . import keychain
 
 TYPES = frozenset({
     "session_start", "user", "assistant", "tool_call", "tool_result",
@@ -31,14 +35,36 @@ def partition(ts: float) -> str:
     return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d")
 
 
+def _clean(value):
+    """Every string in an event with a lone surrogate replaced by U+FFFD: SQLite refuses to
+    bind one, so one such line stopped catch_up and reindex forever. A valid pair is untouched."""
+    if isinstance(value, str):
+        return value.encode("utf-16", "surrogatepass").decode("utf-16", "replace")
+    if isinstance(value, dict):
+        return {_clean(k): _clean(v) for k, v in value.items()}
+    return [_clean(v) for v in value] if isinstance(value, (list, tuple)) else value
+
+
+@contextlib.contextmanager
+def locked(root):
+    """append()'s cross-process lock, `events/.lock`, for a writer beside it: `keychain.bind`
+    rewrites the pasted index that `vault` writes under this lock (D53)."""
+    path = Path(root) / "events"
+    path.mkdir(mode=0o700, parents=True, exist_ok=True)
+    with os.fdopen(os.open(path / ".lock", os.O_RDWR | os.O_CREAT, 0o600), "r+") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)  # released when the file closes
+        yield
+
+
 class Ledger:
     def __init__(self, root: Path):
         self.dir = Path(root) / "events"
-        self.dir.mkdir(parents=True, exist_ok=True)
+        self.dir.mkdir(mode=0o700, parents=True, exist_ok=True)
         self._thread_lock = threading.Lock()  # guards this instance's threads
         self._lock_path = self.dir / ".lock"
-        self._lock_path.touch(exist_ok=True)
+        self._lock_path.touch(mode=0o600, exist_ok=True)
         self.last_seq, self._known_tail = self._recover_last_seq()
+        self.pasted = Path(root) / "pasted.json"  # D53: pasted tokens' handles and times; the daemon sweeps it
 
     def _files(self):
         return sorted(self.dir.glob("*.jsonl"))  # YYYY-MM-DD names sort chronologically
@@ -87,10 +113,14 @@ class Ledger:
                     self.last_seq, self._known_tail = self._recover_last_seq()
                 ts = time.time()
                 self.last_seq += 1
-                event = {
+                event = _clean({
                     "seq": self.last_seq, "ts": ts, "type": type, "session": session,
                     "turn": turn, "origin": origin, "trust": trust, **data,
-                }
+                })
+                # D53/D66: a token-shaped string the owner typed enters the Keychain here, and the
+                # event, written and returned, carries only its handle - so state, history and the
+                # record do too; in any other text it is redacted, with no Keychain call
+                event = keychain.vault(event, self.pasted) if trust == "user" else keychain.mask(event)
                 path = self.dir / f"{partition(ts)}.jsonl"
                 line = json.dumps(event) + "\n"
                 # A crash mid-write leaves a fragment without a newline. Appending straight
@@ -100,7 +130,7 @@ class Ledger:
                         f.seek(-1, 2)
                         if f.read(1) != b"\n":
                             line = "\n" + line
-                with path.open("a") as f:
+                with open(os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600), "a") as f:
                     f.write(line)
                     f.flush()
                     # ponytail: no fsync here - a crash can still lose the last buffered line;
@@ -119,4 +149,4 @@ class Ledger:
                 except (ValueError, KeyError, TypeError):
                     continue  # truncated line - skipped, not fatal
                 if seq > after:
-                    yield event
+                    yield _clean(event)

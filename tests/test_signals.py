@@ -42,6 +42,64 @@ class RenderTest(unittest.TestCase):
         self.assertIn("kind: command_failed", out)
 
 
+HOSTILE = "a‮b​c\x1b[31md\x1b[0m\ne"  # bidi mark, zero-width, ANSI colour, newline -> "abcd e"
+
+
+class EnvelopeFilterTest(unittest.TestCase):
+    """U21: a signal's key, summary and fields carry someone else's text to the model."""
+
+    def test_envelope_strips_bidi_zero_width_and_ansi_from_fields(self):
+        sig = Signal(sense="mail", kind="new_mail", key="k" + HOSTILE, summary="s" + HOSTILE,
+                     fields={"subject": HOSTILE, HOSTILE: [HOSTILE, {"name": HOSTILE}], "n": 3, "x": None},
+                     trust="third_party")
+        self.assertEqual(signals.render_block(sig),
+                         'kind: new_mail\ntrust: third_party\nkey: kabcd e\nsummary: sabcd e\nfields: '
+                         '{"subject": "abcd e", "abcd e": ["abcd e", {"name": "abcd e"}], "n": 3, "x": null}')
+
+    def test_envelope_clips_long_fields_and_summary(self):
+        sig = Signal(sense="mail", kind="new_mail", key="k" * 500, summary="s" * 5000,
+                     fields={"body": "b" * 5000, "many": ["x" * 400] * 20}, trust="third_party")
+        kind, trust, key, summary, fields = signals.render_block(sig).split("\n")
+        self.assertEqual(key, "key: " + "k" * 200)
+        self.assertEqual(summary, "summary: " + "s" * 2200)
+        self.assertTrue(fields.startswith('fields: {"body": "' + "b" * 300 + '", "many": ["' + "x" * 300 + '"'))
+        self.assertEqual(len(fields), len("fields: ") + 2000)
+
+    def test_single_line_summary_block_unchanged(self):
+        sig = Signal(sense="calendar", kind="upcoming_event", key="event:E1:1790000000.0",
+                     summary="Upcoming: 2026-09-30 14:00 Café", trust="third_party",
+                     fields={"title": "Café", "end": None, "all_day": False, "minutes_until": 30})
+        self.assertEqual(signals.render_block(sig),
+                         "kind: upcoming_event\ntrust: third_party\nkey: event:E1:1790000000.0\n"
+                         "summary: Upcoming: 2026-09-30 14:00 Café\n"
+                         'fields: {"title": "Café", "end": null, "all_day": false, "minutes_until": 30}')
+
+    def test_third_party_senses_pass_the_filter(self):
+        from pathfinder.senses import claude_code
+        samples = [
+            Signal(sense="mail", kind="new_mail", key="<m1@example.com>", trust="third_party",
+                   summary="Mail from x@example.com: " + HOSTILE,
+                   fields={"from": "x@example.com", "sender_domain": "example.com", "subject": HOSTILE,
+                           "received": "Wed, 30 Sep 2026 09:00:00 +0000"}),
+            Signal(sense="calendar", kind="upcoming_event", key="event:E1:1790000000.0", trust="third_party",
+                   summary="Upcoming: 2026-09-30 14:00 " + HOSTILE,
+                   fields={"title": HOSTILE, "start": "2026-09-30 14:00", "end": None, "all_day": False,
+                           "notes": HOSTILE, "minutes_until": 30}),
+            Signal(sense="catalog", kind="tool_candidate", key="catalog:io.x/y@1.0.0", trust="third_party",
+                   summary="New tool for p: io.x/y - " + HOSTILE,
+                   fields={"candidate": {"name": "io.x/y", "description": HOSTILE,
+                                         "package": {"identifier": HOSTILE}}, "matched_tags": ["x"]}),
+            claude_code.build({"event": "Notification", "cwd": "/work/p", "message": HOSTILE}, now=0),
+        ]
+        for sig in samples:
+            with self.subTest(sense=sig.sense):
+                out = signals.render_block(sig)
+                self.assertEqual(len(out.split("\n")), 5)
+                for bad in ("‮", "​", "\x1b", "[31m", "[0m"):
+                    self.assertNotIn(bad, out)
+                self.assertIn("abcd e", out.split("\n")[4])
+
+
 class DedupeTest(unittest.TestCase):
     def test_signals_dedupe_24h(self):
         now = 1_000_000.0

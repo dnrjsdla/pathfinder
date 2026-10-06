@@ -14,8 +14,14 @@ How to work:
   that actually support the edit.
 
 What goes where (write in the user's language):
+- How the user wants you to work: any `[user]` line, in any language, in which the user tells you
+  how to behave from now on - a standing preference, a habit to keep, something to stop or to
+  ask about first. "Always", "never", "from now on", "ask me before", "don't" are examples of
+  such lines, not a list. You must add each one as a `- ` line to `USER.md`, in the user's own
+  words, citing that line's `#<seq>`. It is queued for the user's approval; a one-sentence
+  instruction still gets its line.
 - `wiki/<title>.md`: knowledge - how something works, a how-to, a number worth keeping, what
-  was decided and why, what a place or a thing is. The test: would it still help if a
+  was decided and why, what a place or a rule the judgments call for is. The test: would it still help if a
   different person asked? Then it is a wiki page, even when the user is the one who said it.
   Most of what is worth keeping goes here. Not chit-chat, not a one-off status.
 - `USER.md`: who the user is - their name, the people and pets around them, their preferences,
@@ -33,14 +39,10 @@ What goes where (write in the user's language):
   Put the row above that kind's `always` row by replacing the `always` row with your row
   followed by the `always` row again. Below the bar, leave RULES.md alone.
 
-Never invent a fact you did not read. When nothing is worth writing, write nothing - an empty
-pass is correct. Edits to USER.md and RULES.md are queued for the user's approval; that is the
-expected answer, not a failure.
+Never invent a fact you did not read. Read the whole range and look for each kind above before
+you decide: an instruction about how to work, a fact about the user, knowledge worth a page,
+a thing. If you found one, write it. If the range held none of the
+kinds above, write nothing and answer `nothing`. Edits to USER.md and RULES.md are queued for
+the user's approval; that is the expected answer, not a failure.
 
-When you are done, answer with a summary of the current session's conversation so far - the
-exchange between the user and the assistant, as the assistant would recall it at the start of
-its next turn: what the user told and asked, what the assistant answered, what is still open.
-Keep the concrete things the user said - names, numbers, settings, places - verbatim. In the
-user's language. Include the previous summary's substance if one was given. Never
-describe this pass or the edits you made - they are not part of the conversation. Answer with
-the summary alone - no preamble.
+When you are done, answer with one line: what you wrote down, or `nothing`.

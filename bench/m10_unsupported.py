@@ -50,7 +50,7 @@ from pathfinder import jobs  # noqa: E402,F401 - registers start_job, as the dae
 from pathfinder import tools as tools_mod  # noqa: E402
 from pathfinder.broker import Broker, Gate  # noqa: E402
 from pathfinder.daemon import PROMPT  # noqa: E402
-from pathfinder.state import State  # noqa: E402
+from pathfinder.state import RECORD_HEADER, State  # noqa: E402
 
 M9 = ROOT / "docs" / "measurements" / "m9-2026-09-29.json"
 CANDIDATE = ROOT / "bench" / "m10" / "system.txt"
@@ -88,7 +88,10 @@ VERIFIER_PROMPT = (
     "- false_incapability: the draft says it cannot do something, or has no tool for it, while a "
     "tool below could do it.\n"
     "A claim a tool result in this turn shows is supported: false. Greeting, explaining, "
-    "recounting what was said earlier in the conversation, and asking the user a question: false.")
+    "recounting what was said earlier in the conversation, and asking the user a question: false. "
+    "What the assistant itself called earlier, and what is waiting for the user's approval, is "
+    "supported by the record given below when it is given there. A recap of this conversation - "
+    "what was said earlier - is answered from the conversation and needs no tool.")
 FLAG_WORDS = {"unsupported_state": "says what the calendar, reminders, memory or registry hold",
               "unsupported_done": "says something was done", "empty_promise": "promises to do something",
               "false_incapability": "says a tool or capability is missing"}
@@ -100,9 +103,12 @@ def redact(text):
     return SECRET.sub("[redacted]", text or "")
 
 
-def read_ledger(home):
+def read_ledger(home, through="2026-09-29"):
+    """Partitions up to `through` (the UTC date m9 read to); the live ledger keeps growing."""
     events = []
     for path in sorted(glob.glob(str(home / "events" / "*.jsonl"))):
+        if Path(path).stem > through:
+            continue
         for raw in open(path, encoding="utf-8"):
             try:
                 events.append(json.loads(raw))
@@ -260,6 +266,13 @@ def verifier_input(specs, messages, history, agenda):
         lines.append("Agenda the system gave this turn:\n" + agenda)
     if before:
         lines.append("The assistant's previous answer: " + redact(before[-1]["content"])[:600])
+    rows = "\n".join(m["content"][len(RECORD_HEADER) + 1:] for m in history[:-1]
+                     if m["role"] == "system" and m["content"].startswith(RECORD_HEADER))
+    tail = rows[-1500:]  # every block of the session (each turn has its own), newest rows last
+    tail = tail[tail.index("\n") + 1:] if len(rows) > 1500 and "\n" in tail else tail  # no partial first row
+    if rows:
+        lines.append("The assistant's tool calls in earlier turns, from the ledger (names, arguments and "
+                     "state - not results):\n" + tail)
     lines += ["The user: " + messages[-2]["content"][:1000], "No tool was called in this turn.",
               "Draft: " + messages[-1]["content"]]
     return "\n\n".join(lines)
@@ -368,9 +381,11 @@ def score(out, result_path):
     variants = {"baseline": ("baseline", False), "prompt": ("prompt", False),
                 "verify": ("baseline", True), "prompt+verify": ("prompt", True)}
     pos, rows, metrics = positives(), {}, {}
-    ran = [n for n in pos + CONTROL + NORMAL
-           if all((out / "traces" / f"T{n}-{v}.json").exists() for v in ("baseline", "prompt"))]
     for name, (base, with_verify) in variants.items():
+        # a variant is scored over the cases its own base trace ran (the exit run has baseline only)
+        ran = [n for n in pos + CONTROL + NORMAL if (out / "traces" / f"T{n}-{base}.json").exists()]
+        if not ran:
+            continue
         m = {"fixed": 0, "controls_bad": 0, "controls_flagged": 0, "controls_needless_tool": 0,
              "normal_broken": 0, "normal_flagged": 0, "model_calls": 0, "extra_calls": 0, "tokens": 0,
              "classes": {}, "run": {"positive": len([n for n in ran if n in pos]),
@@ -413,6 +428,7 @@ def score(out, result_path):
                 **({"fixed": bool(fixed)} if kind == "positive" else {})}
         metrics[name] = m
     result = json.loads(result_path.read_text()) if result_path.exists() else {}
+    ran = [n for n in pos + CONTROL + NORMAL if (out / "traces" / f"T{n}-baseline.json").exists()]
     result.update({"sets": {"positive": pos, "control": CONTROL, "normal": NORMAL,
                             "not_run": [n for n in pos + CONTROL + NORMAL if n not in ran]},
                    "metrics": metrics, "cases": rows})

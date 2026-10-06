@@ -3,18 +3,20 @@ approvals | approve ID | deny ID | interrupt |
 listen | signal SENSE JSON | react up|down [ID] | rules | tools |
 jobs | job stop ID | job steer ID TEXT |
 memory | memory run | memory undo [N] |
-install NAME | uninstall ID | search TEXT |
+install NAME | uninstall ID | search TEXT | secret ID NAME |
 init | service start|stop|restart|status | tui"""
 from __future__ import annotations
 
 import asyncio
+import getpass
 import json
+import shlex
 import socket
 import sys
 import time
 from pathlib import Path
 
-from . import catalog, config, memory, tui
+from . import catalog, config, keychain, memory, mirror, tui
 from . import init as init_mod
 from . import installer as installer_mod
 from .clock import format_local
@@ -23,6 +25,7 @@ from .ledger import Ledger
 from .mcp import servers as mcp_servers
 from .mcp.protocol import qualify
 from .state import State
+from .tools import visible
 
 USAGE = __doc__
 
@@ -57,9 +60,15 @@ def _stream(sock, messages):
             if not started:
                 return 1  # refused before any turn began (unknown approval, nothing to interrupt): no turn.end will come
             failed = True
+        elif msg["type"] == "retract":  # D51: the draft above is withdrawn, the re-run follows
+            print(flush=True)  # the withdrawn draft and the re-run stay on lines of their own
+            print(tui.STRINGS["retract"].format(what=msg["what"]), file=sys.stderr)
+        elif msg["type"] in ("pasted", "secret.ask"):  # D53: a token's handle, or how to enter a secret
+            print("\n" + tui.render(msg), file=sys.stderr)
         elif msg["type"] == "gate":
-            print(f"\npathfinder: waiting for approval on {msg['tool']} {msg['args']} "
-                  f"(run `pathfinder approve {msg['id']}` or `pathfinder deny {msg['id']}`)", file=sys.stderr)
+            args = json.dumps(msg["args"], ensure_ascii=False)  # the same rendering as the screen's and `approvals`'
+            print("\n" + visible(f"pathfinder: waiting for approval on {msg['tool']} {args} "
+                                 f"(run `pathfinder approve {msg['id']}` or `pathfinder deny {msg['id']}`)"), file=sys.stderr)
         elif msg["type"] == "turn.end":
             print()
             return 1 if failed or msg["kind"] == "error" else 0
@@ -86,8 +95,16 @@ def approvals(home):
         for row in state.pending():
             if row["tool"] == "edit_memory":
                 a = row["args"]
-                print(f"{row['id']}  edit_memory  {a['target']} {a['op']}: "
-                      f"{_clip60(a['old'])} -> {_clip60(a['new'])}")
+                if a["target"].startswith("skills/"):  # an instruction: the owner reads all of it before /approve
+                    print(visible(f"{row['id']}  edit_memory  {a['target']} {a['op']}:"))
+                    for label in ("old", "new"):
+                        if a.get(label):
+                            print(f"  {label} text:")
+                            for line in a[label].split("\n"):
+                                print("    " + visible(line))
+                    continue
+                old, new = (json.dumps(_clip60(a.get(k, "")), ensure_ascii=False) for k in ("old", "new"))  # as the args rows
+                print(visible(f"{row['id']}  edit_memory  {a['target']} {a['op']}: {old} -> {new}"))
                 continue
             if row["tool"] == "accept_pins":
                 a = row["args"]
@@ -98,7 +115,7 @@ def approvals(home):
                 print(installer_mod.render_row(row))
                 continue
             job = f"  job: {row['job']}" if row.get("job") else ""
-            print(f"{row['id']}  {row['tool']}  {json.dumps(row['args'], ensure_ascii=False)}{job}")
+            print(visible(f"{row['id']}  {row['tool']}  {json.dumps(row['args'], ensure_ascii=False)}{job}"))
     finally:
         state.close()
     return 0
@@ -124,7 +141,7 @@ def mcp_tools_list(home):
             for tool_name in tool_names:
                 name = qualify(sid, tool_name)
                 label = "held" if name in held_names else grants.get(name, "ask")
-                print(f"  {name}  {label}")
+                print(f"  {visible(name)}  {label}")
         if held_rows:
             print("held:")
             for row in held_rows:
@@ -261,11 +278,47 @@ def uninstall_cmd(home, id):
 
 
 def search_cmd(home, text):
-    """`pathfinder search TEXT`: the registry on the spot - no daemon needed."""
-    for item in catalog.fetch(search=text, pages=1):
-        cand = catalog.candidate(item)
-        pkg = cand["package"]
-        print(f"{cand['name']}  {cand['version']}  {pkg['registry_type']}  {cand['description'][:80]}")
+    """`pathfinder search TEXT`: the registry copy on disk - no daemon needed, and it never syncs or creates it."""
+    if not (Path(home) / "registry.db").exists():
+        senses = config.load(home).get("senses") or {}
+        print("no registry copy yet: the daemon fills it while the catalog sense is on"
+              + (" (it is on: the copy starts with the daemon's next poll)" if "catalog" in senses else
+                 f" - turn it on, keeping the others, with:\npathfinder config set senses "
+                 f"{shlex.quote(json.dumps({**senses, 'catalog': {}}))}"))
+        return 0
+    items, note = mirror.search(home, text)
+    for item in items:
+        print(f"{catalog.listing(item)}  {catalog.oneline(item['server'].get('version', ''), 40)}")
+    if note or not items:
+        print(note or "no server in the registry copy matches; search English words (gmail, brave search, weather)")
+    return 0
+
+
+def secret_cmd(home, id, name=None, handle=None):
+    """`pathfinder secret ID NAME [--from pasted-<seq>]`, or `pathfinder secret mail` (U26): the value
+    read hidden, or a pasted item moved (D53), put straight into the Keychain - no socket, no daemon,
+    no ledger."""
+    try:
+        service, account = keychain.target(home, id, name)
+    except (ValueError, LookupError) as e:
+        print(f"pathfinder: {e}", file=sys.stderr)
+        return 2
+    what = f"{name} for {id}" if name else f"the app password for {account}"
+    try:
+        value = None if handle else getpass.getpass(f"{what} (hidden; stored in the Keychain): ")
+    except (EOFError, KeyboardInterrupt):
+        print("\nnothing stored", file=sys.stderr)
+        return 1
+    try:
+        if handle:
+            keychain.bind(home, handle, service, account)
+        else:
+            keychain.store(service, account, value)
+    except Exception as e:  # store's messages never carry the value
+        print(f"pathfinder: {e}", file=sys.stderr)
+        return 1
+    print(f"{name} stored for {id}; an installed server picks it up at the next `pathfinder service restart`"
+          if name else f"{what} is in the Keychain")
     return 0
 
 
@@ -378,6 +431,7 @@ def main(argv=None):
     if len(args) == 2 and args[0] == "service" and args[1] in ("start", "stop", "restart", "status"):
         return init_mod.service(home, args[1])
     if args == ["daemon"]:
+        config.make_private(home)  # every upgrade, and launchd's daemon.log
         try:
             asyncio.run(Daemon(home).serve())
         except KeyboardInterrupt:
@@ -422,8 +476,10 @@ def main(argv=None):
         return install_cmd(home, args[1])
     if len(args) == 2 and args[0] == "uninstall":
         return uninstall_cmd(home, args[1])
-    if len(args) == 2 and args[0] == "search":
-        return search_cmd(home, args[1])
+    if len(args) >= 2 and args[0] == "search":
+        return search_cmd(home, " ".join(args[1:]))
+    if args[:1] == ["secret"] and (args[1:] == ["mail"] or len(args) in (3, 5) and args[3:4] in ([], ["--from"])):
+        return secret_cmd(home, *args[1:3], *args[4:])
     if args == ["jobs"]:
         return jobs_list(home)
     if len(args) == 3 and args[0] == "job" and args[1] == "stop":

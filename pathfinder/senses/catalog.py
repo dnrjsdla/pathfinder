@@ -10,7 +10,7 @@ import logging
 import re
 from pathlib import Path
 
-from .. import catalog, config
+from .. import catalog, config, mirror
 from .. import installer as installer_mod
 from ..signals import Signal
 from ..state import State
@@ -33,6 +33,7 @@ CADENCE_S = 24 * 3600
 # gets no `options` (a tool handler never does), so it reads the registry from here instead,
 # the way `schedule.py`'s tools read its module-level `HOME`.
 REGISTRY_URL = None
+HOME = None  # `signals.load` binds the home the same way (mirror.search reads <home>/registry.db)
 
 # The chars `config._MCP_SERVER_ID` accepts after the first position - kept in sync by hand,
 # the same alphabet, so a candidate's sanitized id matches what an install would register under.
@@ -49,10 +50,10 @@ def poll(options, now, state=None):
     """`state` is normally opened here from `options["_home"]` (the door `schedule.py`/`mail.py`
     use for `_home`/the mail connection) - tests may pass one in directly instead."""
     home = options.get("_home")
+    if home is None:
+        return []
     owns_state = state is None
     if owns_state:
-        if home is None:
-            return []
         state = State(Path(home) / "state.db")
     try:
         return _poll(options, now, state, home)
@@ -62,6 +63,7 @@ def poll(options, now, state=None):
 
 
 def _poll(options, now, state, home):
+    mirror.refresh(home, options.get("registry", catalog.REGISTRY))  # returns at once; the rows below are the last sync's
     tags = catalog.tags(state, home, now)
     if not tags:
         return []
@@ -77,12 +79,14 @@ def _poll(options, now, state, home):
     since = max(since, now - 7 * 86400)  # never look back further than a week - a deaf sense
 
     out, checks = [], 0
-    for item in catalog.fetch(since=since, registry=options.get("registry", catalog.REGISTRY)):
+    for item in mirror.changed_since(home, since):
         try:
             cand = catalog.candidate(item)
         except (KeyError, TypeError) as exc:
             _log.warning("skipping malformed registry item: %s", exc)
             continue
+        if cand["name"] != catalog.oneline(cand["name"], 200):
+            continue  # a name that cannot be shown as it is is never proposed
         matched = catalog.matches(cand, tags)
         if not matched:
             continue
@@ -95,28 +99,21 @@ def _poll(options, now, state, home):
             continue
         project = next((t for t in matched if t in project_names), matched[0])
         out.append(Signal(
-            sense="catalog", kind="tool_candidate", key=f"catalog:{cand['name']}@{cand['version']}",
-            summary=f"New tool for {project}: {cand['name']} - {cand['description'][:80]}",
+            sense="catalog", kind="tool_candidate", key=f"catalog:{catalog.oneline(cand['name'], 200)}@{catalog.oneline(cand['version'], 40)}",
+            summary=f"New tool for {project}: {catalog.oneline(cand['name'], 80)} - {catalog.oneline(cand['description'], 80)}",
             fields={"candidate": cand, "matched_tags": matched}, trust=TRUST))
     return out
 
 
 def _search_tools(query, control=None):
-    # The registry matches a substring of the server NAME, and names are hyphenated: "web search"
-    # never matches, "web-search" does. It scans until `limit` results or the end - a rare name
-    # took 20-22 s live (2026-09-29), past the old 20 s timeout; ask only for what is shown.
-    query = "-".join(query.split())
-    if not query:
-        raise ValueError("search_tools needs one word of a server name")
-    lines = []
-    for item in catalog.fetch(search=query, pages=1, limit=10, timeout=60,
-                              registry=REGISTRY_URL or catalog.REGISTRY):
-        cand = catalog.candidate(item)
-        pkg = cand["package"]
-        lines.append(f"{cand['name']} - {cand['description'][:100]} ({pkg['registry_type']}, license not checked)")
+    if not query.split():
+        raise ValueError("search_tools needs English words for what the tool does or is called")
+    items, note = mirror.search(HOME, query, REGISTRY_URL or catalog.REGISTRY)
+    lines = [catalog.listing(item) for item in items]
     # live: an empty list read as "the registry has no such server", and the model offered to
     # edit config files by hand instead
-    return lines or f"no server name contains {query!r}; search one word of a name (gmail, brave, weather)"
+    return (lines or [f"no server in the registry copy matches {catalog.oneline(query, 80)!r}; search English words "
+                      "for what it does or is called (gmail, brave search, weather)"]) + ([note] if note else [])
 
 
 def _propose_install(name, control=None):
@@ -127,8 +124,9 @@ def _propose_install(name, control=None):
 TOOLS = {
     "search_tools": ToolSpec(
         name="search_tools",
-        description="Search the public MCP registry for servers by name (the user asks what tools exist for X).",
-        params={"query": {"type": "string", "description": "one word or hyphenated part of a server name: gmail, brave, web-search"}},
+        description="Search the public MCP registry for servers by name and description (the user asks what tools "
+                    "exist for X). The registry is in English: search English words for what the tool does or is called.",
+        params={"query": {"type": "string", "description": "English words for what the tool does or is called (names and descriptions are searched): gmail, brave search, weather"}},
         required=["query"], handler=_search_tools, origins=frozenset({"user"}), network=True,
     ),
     "propose_install": ToolSpec(

@@ -4,8 +4,8 @@
 
 A secret never sits in the config file (D6.1, CLAUDE.md): an `env`/`headers` value
 of the form `keychain:<account>` is resolved through the macOS Keychain service
-`pathfinder-mcp-<server_id>` at load time. A server whose secret is missing is not
-dropped - it is marked `disabled` and stays listed with the reason (Mark.5's rule:
+`pathfinder-mcp-<server_id>` at load time (`_resolve` has the whole grammar). A server
+whose required secret is missing is not dropped - it is marked `disabled` and stays listed with the reason (Mark.5's rule:
 "tools 0" and "never configured" must not look the same).
 
 A server that fails at runtime does not take the others down with it - `entries()`
@@ -23,8 +23,6 @@ from .session import ServerSession
 from .transport import StdioTransport, StreamableHttpTransport, Transport
 
 _log = logging.getLogger("pathfinder.mcp")
-
-_KEYCHAIN_PREFIX = "keychain:"
 
 
 @dataclass(frozen=True)
@@ -58,21 +56,29 @@ class Entry:
 
 
 def _resolve(values: dict[str, str], server_id: str, lookup: Callable[[str, str], str | None]):
-    """Swap `keychain:<account>` values for the Keychain secret. Every other value
-    passes through literally - no `${VAR}` expansion; secrets live in the Keychain
-    and nowhere else. Returns (resolved, reason); reason is set when a secret named
-    was not found."""
+    """Swap `keychain:` values for the Keychain secret (U34): `keychain:<account>` is required,
+    `keychain?:<account>` optional, and `=<default>` after either is the value used when the
+    item is missing - the account ends at the first `=`. Every other value passes through
+    literally - no `${VAR}` expansion; secrets live in the Keychain and nowhere else. Returns
+    (resolved, missing, unset): the required names not found, which keep the server from
+    starting, and the optional ones not found, which are simply not set. The installer's check
+    reads an entry through this too, so the check and the start agree."""
     out: dict[str, str] = {}
+    missing, unset = [], []
     for key, value in values.items():
-        if isinstance(value, str) and value.startswith(_KEYCHAIN_PREFIX):
-            account = value[len(_KEYCHAIN_PREFIX):]
-            secret = lookup(f"pathfinder-mcp-{server_id}", account)
-            if secret is None:
-                return values, f"secret missing: {key}"
+        if not (isinstance(value, str) and value.startswith(("keychain:", "keychain?:"))):
+            out[key] = value
+            continue
+        kind, _, rest = value.partition(":")
+        account, eq, default = rest.partition("=")
+        secret = lookup(f"pathfinder-mcp-{server_id}", account)
+        if secret is None and eq:
+            secret = default
+        if secret is not None:
             out[key] = secret
         else:
-            out[key] = value
-    return out, ""
+            (unset if kind == "keychain?" else missing).append(key)
+    return out, missing, unset
 
 
 def load(cfg: dict, lookup: Callable[[str, str], str | None] = keychain.secret) -> list[ServerConfig]:
@@ -83,15 +89,15 @@ def load(cfg: dict, lookup: Callable[[str, str], str | None] = keychain.secret) 
         kind = spec["transport"]
         timeout = spec.get("timeout", 30)
         lifecycle = Lifecycle(spec["protocol"]) if "protocol" in spec else None
+        values, missing, _ = _resolve(spec.get("env" if kind == "stdio" else "headers") or {}, server_id, lookup)
+        reason = f"secret missing: {', '.join(missing)}" if missing else ""
         if kind == "stdio":
-            env, reason = _resolve(spec.get("env") or {}, server_id, lookup)
             out.append(ServerConfig(server_id=server_id, transport_kind=kind, lifecycle=lifecycle,
-                                    command=tuple(spec["command"]), env=env, timeout=timeout,
+                                    command=tuple(spec["command"]), env=values, timeout=timeout,
                                     disabled=reason))
         else:
-            headers, reason = _resolve(spec.get("headers") or {}, server_id, lookup)
             out.append(ServerConfig(server_id=server_id, transport_kind=kind, lifecycle=lifecycle,
-                                    endpoint=spec["url"], headers=headers, timeout=timeout,
+                                    endpoint=spec["url"], headers=values, timeout=timeout,
                                     disabled=reason))
     return out
 

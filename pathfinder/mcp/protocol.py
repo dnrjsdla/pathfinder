@@ -12,7 +12,8 @@ and the dual-era probe in `session.py`).
 
 The two error kinds matter: a tool that failed (`isError: true`) is a normal
 result, not an exception - the model needs to see it to retry with better
-arguments. An exception here means the *protocol* broke, not the tool call.
+arguments (one layer up, `mcp.tools` raises `McpToolError` for it, so the broker
+records a failed call). An exception here means the *protocol* broke, not the tool call.
 """
 from __future__ import annotations
 
@@ -20,6 +21,8 @@ import base64
 import re
 from enum import Enum
 from typing import Any
+
+from ..tools import clean
 
 # The revision we speak. The `MCP-Protocol-Version` header and the `_meta` value
 # in the body MUST match, or the server rejects the request with 400.
@@ -160,9 +163,9 @@ def read_result(payload: dict[str, Any]) -> dict[str, Any]:
 # --- tool names ---------------------------------------------------------------
 
 def sanitize(text: str) -> str:
-    """Strip control characters, keep newlines. Everything a server writes that a model or a
-    terminal will read passes through here (a description, a held tool's line)."""
-    return "".join(c for c in text if c.isprintable() or c == "\n")
+    """The one character rule, `tools.clean` (D62): newlines and tabs kept. Everything a server writes
+    that a model or a terminal will read passes through here (a description, a held tool's line)."""
+    return clean(text)
 
 
 def qualify(server_id: str, tool_name: str) -> str:

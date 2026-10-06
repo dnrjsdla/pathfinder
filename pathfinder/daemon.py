@@ -16,8 +16,8 @@ import time
 import uuid
 from pathlib import Path
 
-from . import clock, config, jobs, loop, memory, rules as rules_mod, signals, tools
-from .broker import Broker, Gate
+from . import clock, config, jobs, keychain, loop, memory, rules as rules_mod, signals, skills, tools
+from .broker import Broker, Gate, chat_approval
 from .deliver import Notice, Outbox
 from .ledger import Ledger
 from .llm import LLMError, resolve
@@ -31,7 +31,6 @@ SOCKET = "pathfinder.sock"
 PROMPT = Path(__file__).parent / "prompts" / "system.txt"
 LINE_LIMIT = 1 << 20  # one NDJSON line; asyncio's 64 KiB default is too small for a pasted file
 SIGNAL_TURN_BUDGET = 4  # D20: a signal turn is a few tool calls plus a sentence, not a conversation
-PUSH_FIELDS_LIMIT = 4096  # a pushed signal's `fields` text goes verbatim into the envelope
 
 
 def default_step_factory(cfg, control, tools_for_origin):
@@ -98,6 +97,7 @@ class Daemon:
         # line (added separately in turn()/_signal_model_turn) changes turn to turn.
         self.system_prompt = PROMPT.read_text(encoding="utf-8") + "\n\n" + signals.SIGNAL_TURNS_CLAUSE
         self.sessions = {}
+        self.writers = set()  # every open connection, attached or not: close() closes them all
         self.server = None
         self.dispatch = lambda fn: fn()  # direct until start() swaps in the threadsafe version
         self.mcp = mcp_attach.Attach(self.home, self.state, self.record, self.push_signal, self.dispatch)
@@ -114,7 +114,8 @@ class Daemon:
         self.outbox.rebuild()
         self.sense_loop = signals.SenseLoop(list(self.senses.values()), push=self.push_signal,
                                             on_error=self._sense_error)
-        self.jobs_mgr = jobs.Manager(self.home, self._job_record, self.push_signal, self.job_step_factory, self.rules)
+        self.jobs_mgr = jobs.Manager(self.home, self.record, self.push_signal, self.job_step_factory, self.rules,
+                                     send=self._send_all, job_state=self.state.job)
         jobs.bind(self.jobs_mgr)
         self.memory_mgr = memory.Manager(self.home, self.record, self.push_signal, self.pass_step_factory,
                                          self.rules, list(self.senses.values()), is_busy=self._is_busy)
@@ -122,6 +123,7 @@ class Daemon:
         # `record` is loop-thread-only, so marshal through `dispatch` like every other callback.
         self.memory_mgr.on_rules_changed = lambda: self.memory_mgr.dispatch(self.reload_rules)
         memory.bind(self.memory_mgr)
+        skills.bind(self.home)  # D61: copies a missing shipped skill; never touches an existing one
         # A row with empty `messages` is a proposal (Manager.edit's/Attach.register's shape),
         # keyed by tool.
         self.PROPOSALS = {"edit_memory": self.memory_mgr.decide, "accept_pins": self.mcp.accept_pins,
@@ -157,26 +159,21 @@ class Daemon:
         event = self.ledger.append(type, **fields)
         self.state.apply(event)
         if type == "approval_pending" and fields.get("origin") == "user" and not fields.get("messages"):
-            # a proposal from the user's own turn owes a Gate's line (live: "approve" typed into chat)
-            args = installer_mod.brief(fields["args"]) if fields["tool"] == "install_server" else fields["args"]
+            # a proposal from the user's own turn owes a Gate's line (live: "approve" typed into chat);
+            # its args are the recorded ones, so the screen shows what the approval holds (D53)
+            args = installer_mod.brief(event["args"]) if fields["tool"] == "install_server" else event["args"]
             line = {"type": "gate", "id": fields["id"], "tool": fields["tool"], "args": args}
             self.dispatch(lambda: self._send_to_session(fields.get("session"), line))
+        if type == "user" and (pasted := keychain.handles(event)):  # D53: the owner sees where the token went
+            self._send_to_session(fields.get("session"), {"type": "pasted", "handles": pasted})
+        if type == "install_failed" and fields.get("names"):  # D40 stopped on a missing secret: the screens ask
+            self._ask_secret(fields["names"][0], fields.get("server_id", ""), fields["name"])
         return event
 
-    def _job_record(self, type, **fields):
-        """`jobs.Manager`'s door: `record`, plus the `job.start`/`job.gate`/`job.end` lines its
-        session is owed (live: a job's gate was silent - only `approvals` knew)."""
-        event = self.record(type, **fields)
-        if type == "job_start":
-            line = {"type": "job.start", "id": fields["id"], "goal": fields["goal"]}
-        elif type == "approval_pending":
-            line = {"type": "job.gate", "id": fields["job"], "approval": fields["id"], "tool": fields["tool"], "args": fields["args"]}
-        elif type in ("job_done", "job_failed"):  # the row exists: job_start came through this door
-            line = {"type": "job.end", "id": fields["id"], "state": self.state.job(fields["id"])["state"]}
-        else:
-            return event  # a job's tool_call/tool_result/steer: ledger only
-        self._send_to_session(fields.get("session"), line)
-        return event
+    def _ask_secret(self, name, server_id="", server="", writer=None) -> None:
+        """D53: the harness asks every screen (or the one attaching) for a missing secret, typed masked."""
+        for w in [writer] if writer else [w for s in self.sessions.values() for w in s.conns if not w.is_closing()]:
+            _write(w, {"type": "secret.ask", "server_id": server_id, "name": name, "server": server})
 
     # -- socket ------------------------------------------------------------------------
     async def start(self):
@@ -200,6 +197,7 @@ class Daemon:
             if _answers(path):
                 raise RuntimeError(f"a daemon is already serving {path}")
             path.unlink()  # left behind by a crash
+        keychain.sweep(self.ledger.pasted, time.time())  # D53: pasted items older than 24 hours go, once a start
         old = os.umask(0o177)  # the socket is born 0600: no window where another user can connect
         try:
             self.server = await asyncio.start_unix_server(self.handle, path=str(path), limit=LINE_LIMIT)
@@ -233,7 +231,7 @@ class Daemon:
         self.jobs_mgr.dispatch = lambda fn: None  # drop a job's late calls, not race a closing state
         self.memory_mgr.dispatch = lambda fn: None
         self.mcp.dispatch = lambda fn: None
-        self.installer.dispatch = lambda fn: None
+        self.installer.close()  # no late record; a re-proposal in flight is cancelled, not awaited
         self.dispatch = lambda fn: None
         if self.mcp.loaded is not None:
             await self.mcp.loaded
@@ -241,8 +239,8 @@ class Daemon:
         for s in self.sessions.values():
             if s.worker:
                 s.worker.cancel()
-            for w in list(s.conns):
-                w.close()  # wait_closed() below waits for every connection: an attached client would hang shutdown
+        for w in list(self.writers):
+            w.close()  # wait_closed() below waits for every connection, a push sense's too (a hook's `signal`)
         if self.server:
             self.server.close()
             await self.server.wait_closed()
@@ -274,8 +272,13 @@ class Daemon:
         if s is not None:
             self.send(s, msg)
 
+    def _send_all(self, msg) -> None:  # every screen: D41 may have moved one away from the job's session
+        for s in list(self.sessions.values()):
+            self.send(s, msg)
+
     async def handle(self, reader, writer):
         session = None
+        self.writers.add(writer)
         try:
             while True:
                 try:
@@ -324,7 +327,7 @@ class Daemon:
                     decision = "approved" if kind == "approve" else "denied"
                     if row.get("job"):  # a job's own thread (D24), not a session turn
                         self.record("approval", session=row["session"], turn=row["turn"], origin="user",
-                                    id=approval_id, decision=decision)
+                                    id=approval_id, decision=decision, job=row["job"])
                         self.jobs_mgr.resume(approval_id, decision)
                         _write(writer, {"type": "turn.end", "turn": "", "kind": "resumed"})
                         continue
@@ -363,44 +366,16 @@ class Daemon:
                 elif kind == "memory.run":
                     result = await asyncio.to_thread(self.memory_mgr.run_pass, True)
                     _write(writer, {"type": "memory.run", "result": result})
-                elif kind == "install":
-                    name = msg.get("name")
-                    if not isinstance(name, str) or not name:
-                        _write(writer, {"type": "error", "message": "install needs a \"name\""})
-                        continue
-                    try:
-                        result = await asyncio.to_thread(self.installer.propose_by_name, name)
-                    except Exception as e:  # a check that raised must answer, not drop the connection (m5: "no reply")
-                        result = {"error": f"{type(e).__name__}: {e}"[:300]}
-                    if "error" in result:
-                        _write(writer, {"type": "error", "message": result["error"]})
-                    else:
-                        _write(writer, {"type": "install", "id": result["id"], "line": result["line"]})
-                elif kind == "uninstall":
-                    id = msg.get("id")
-                    if not isinstance(id, str) or not id:
-                        _write(writer, {"type": "error", "message": "uninstall needs an \"id\""})
-                        continue
-                    result = await self.installer.uninstall(id)
-                    if "error" in result:
-                        _write(writer, {"type": "error", "message": result["error"]})
-                    else:
-                        _write(writer, {"type": "uninstall", "id": result["id"]})
-                elif kind == "signal":
-                    sense_name, fields = msg.get("sense"), msg.get("fields")
-                    sense = self.senses.get(sense_name)
-                    if sense is None or not sense.push_capable or not isinstance(fields, dict):
-                        _write(writer, {"type": "error", "message": f"unknown or non-push sense: {sense_name!r}"})
-                        continue
-                    if len(json.dumps(fields, ensure_ascii=False)) > PUSH_FIELDS_LIMIT:
-                        _write(writer, {"type": "error", "message": "fields too large (4 KB limit)"})
-                        continue
-                    try:
-                        signal = sense.module.build(fields)
-                    except Exception as e:  # the only untrusted local input - never take the daemon down
-                        _write(writer, {"type": "error", "message": f"bad fields for {sense_name}: {e}"})
-                        continue
-                    self.push_signal(signal)
+                elif kind in ("install", "uninstall"):
+                    _write(writer, await self.installer.handle(msg))
+                elif kind == "secret":  # D53: stored, never recorded
+                    reply = await self.installer.secret(msg, session.id if session else "")
+                    if reply["type"] == "secret.stored":  # every screen hears it, so one that did not answer leaves its entry
+                        self._send_all(reply)
+                    else:  # an error is the sender's alone
+                        _write(writer, reply)
+                elif kind == "signal":  # the push door, checked and built in `signals.pushed` (D67)
+                    signals.pushed(self.senses, msg, self.push_signal, lambda reply: _write(writer, reply))
                 elif kind == "presence":
                     idle_s = msg.get("idle_s")
                     if (not isinstance(idle_s, (int, float)) or isinstance(idle_s, bool)
@@ -425,6 +400,7 @@ class Daemon:
         finally:
             for x in self.sessions.values():  # D41: a move may have put it in another session
                 x.conns.discard(writer)
+            self.writers.discard(writer)
             writer.close()
 
     def _session(self, sid):
@@ -456,6 +432,8 @@ class Daemon:
             s.last_cwd = cwd
         _write(writer, {"type": "attached", "session": sid, "resumed": bool(known),
                         "turns": known["turns"] if known else 0})
+        if "mail" in self.senses and keychain.missing(self.home, "mail"):  # U26: no screen is attached at a start
+            self._ask_secret("mail", writer=writer)
         return s
 
     def send(self, s, msg):
@@ -466,8 +444,8 @@ class Daemon:
                 _write(w, msg)
 
     def steer(self, s, text):
-        self.record("user", session=s.id, turn=s.turn, origin="user", trust="user", text=text, steer=True)
-        s.control.steers.append(text)
+        event = self.record("user", session=s.id, turn=s.turn, origin="user", trust="user", text=text, steer=True)
+        s.control.steers.append(event["text"])  # as recorded: a pasted token rides on as its handle (D53)
         if not s.control.in_tool:  # the daemon does not cut a stream while a tool handler is running
             s.control.steer_cut.set()
 
@@ -485,14 +463,13 @@ class Daemon:
                 await self.run_signal_turn(s, [payload] + s.queue.drain_signals())
                 continue
             if item_kind == "signal_ready":
-                # a `speak` set (notice_id, to_speak) whose rate-limit hold has (or may have)
-                # elapsed - re-check rather than re-triage: already decided and recorded.
-                notice_id, to_speak = payload
+                # a `speak` set (notice_id, to_speak, summaries) whose rate-limit hold has (or may
+                # have) elapsed - re-check rather than re-triage: already decided and recorded.
                 wait = signals.hold_for(self.state, self.rules)
                 if wait > 0:
                     asyncio.get_running_loop().call_later(wait, s.queue.put_nowait, ("signal_ready", payload))
                 else:
-                    await self._signal_model_turn(s, notice_id, to_speak)
+                    await self._signal_model_turn(s, *payload)
                 continue
             turn = uuid.uuid4().hex[:12]
             leftover = []
@@ -523,9 +500,17 @@ class Daemon:
     async def turn(self, s, turn, text, trailing=None):
         """`text` is a new user message; `trailing` is steer text already in the ledger that no
         model call has seen yet (it arrived after the last drain of the previous turn)."""
+        reply = text is not None and chat_approval(  # D52: before this user line is recorded
+            self.state, s.id, text, config.load(self.home)["session_resume_s"])
         if text is not None:
             self.record("user", session=s.id, turn=turn, origin="user", trust="user", text=text)
         self.record("turn_start", session=s.id, turn=turn, origin="user")
+        if reply:  # the harness answers, no model request; the approval stays pending
+            self.send(s, {"type": "turn.start", "turn": turn})
+            self.send(s, {"type": "delta", "text": reply})
+            self.record("assistant", session=s.id, turn=turn, origin="user", text=reply, final=True)
+            self.record("turn_end", session=s.id, turn=turn, origin="user", kind="answer")
+            return "answer"
         messages = [{"role": "system", "content": self.system_prompt},
                    {"role": "system", "content": await self._second_system_message()}] + self.state.history(s.id)
         if trailing:
@@ -570,7 +555,7 @@ class Daemon:
         lists = rules_mod.user_lists(self.home)
         to_speak = []
         for sig in bundle:
-            today = self.state.today(session=s.id, idle_threshold_s=self.rules.idle_threshold_s)
+            today = self.state.today(idle_threshold_s=self.rules.idle_threshold_s)
             action, why = rules_mod.decide(sig, self.rules, lists, today, time.time())
             if action == "ask_model":
                 if today.judgments >= self.rules.judgment_cap:
@@ -598,22 +583,24 @@ class Daemon:
         # but that richer text reaches the ledger through `delivery`/`assistant`, not this row.
         notice_id = uuid.uuid4().hex[:12]
         keys = [sig.key for sig, _why in to_speak]
-        summaries = "\n".join(sig.summary for sig, _why in to_speak)
+        # D62: every sense's summary reaches the screen; cleaned once, so the live notice, the one
+        # rebuilt after a restart (`undelivered`, from this row), and history hold the same text.
+        summaries = tools.clean("\n".join(sig.summary for sig, _why in to_speak))
         for sig, why in to_speak:
             self.record("decision", session=s.id, origin="signal", signal_key=sig.key, action="speak",
                         why=why, notice_id=notice_id, text=summaries, signal_keys=keys)
         wait = signals.hold_for(self.state, self.rules)
         if wait > 0:
             asyncio.get_running_loop().call_later(
-                wait, s.queue.put_nowait, ("signal_ready", (notice_id, to_speak)))
+                wait, s.queue.put_nowait, ("signal_ready", (notice_id, to_speak, summaries)))
         else:
-            await self._signal_model_turn(s, notice_id, to_speak)
+            await self._signal_model_turn(s, notice_id, to_speak, summaries)
 
-    async def _signal_model_turn(self, s, notice_id, to_speak) -> None:
+    async def _signal_model_turn(self, s, notice_id, to_speak, summaries) -> None:
         """D20: origin signal, no history, budget 4. Delivered text is the sense summaries
         joined, plus the model's one or two sentences when it answers - the summaries alone on
-        a gate, an LLMError, or an empty answer. `notice_id` and the `decision speak` rows for
-        `to_speak` were already recorded by the caller, before any rate-limit hold."""
+        a gate, an LLMError, or an empty answer. `notice_id`, the clean `summaries` and the
+        `decision speak` rows for `to_speak` came from the caller, before any rate-limit hold."""
         turn = uuid.uuid4().hex[:12]
         sigs = [sig for sig, _why in to_speak]
         self.record("turn_start", session=s.id, turn=turn, origin="signal")
@@ -674,7 +661,6 @@ class Daemon:
         finally:
             s.control, s.turn, s.origin = None, "", None
 
-        summaries = "\n".join(sig.summary for sig in sigs)
         text = f"{summaries}\n{answer}".strip() if answer and not gated else summaries
         keys = [sig.key for sig in sigs]
         self.record("turn_end", session=s.id, turn=turn, origin="signal", **ending)
@@ -709,7 +695,7 @@ class Daemon:
         def work(step, budget):
             try:
                 return loop.run(step, messages, call_tool=broker.call, emit=emit,
-                                budget=budget, control=control, resume=resume,
+                                budget=budget, control=control, resume=resume, second_look=list(user_tools),
                                 final_step=self.step_factory(cfg, control, {}))  # D30: no tools
             finally:
                 aio.call_soon_threadsafe(out_q.put_nowait, (None, None))
@@ -730,6 +716,10 @@ class Daemon:
                     recorded = {**payload, "result": tools.clip_for_ledger(payload["result"])}
                     self.record("tool_result", session=s.id, turn=turn, origin="user", **recorded)
                     self.send(s, {"type": "tool", "name": payload["name"], "ok": payload["ok"]})
+                elif kind == "retract":  # D51: kept in the ledger as the owner saw it, never in history
+                    self.record("assistant", session=s.id, turn=turn, origin="user", text=payload["draft"],
+                                final=False, withdrawn={"flags": payload["flags"], "why": payload["why"]})
+                    self.send(s, {"type": "retract", "what": payload["what"], "why": payload["why"]})
             out = await running
         except Gate as g:
             # The approval has its own id: the tool-call id is a string the model chose and
@@ -739,17 +729,20 @@ class Daemon:
                 self.record("assistant", session=s.id, turn=turn, origin="user", text=g.said, final=True)
             loop._drain(control, messages, envelope=False)
             approval_id = uuid.uuid4().hex[:12]
-            self.record("approval_pending", session=s.id, turn=turn, origin="user", id=approval_id,
-                        call_id=g.id, tool=g.name, args=g.arguments, messages=messages)
-            self.send(s, {"type": "gate", "id": approval_id, "tool": g.name, "args": g.arguments})
-            self.record("turn_end", session=s.id, turn=turn, origin="user", kind="gated")
+            pending = self.record("approval_pending", session=s.id, turn=turn, origin="user", id=approval_id,
+                                  call_id=g.id, tool=g.name, args=g.arguments, messages=messages)
+            self.send(s, {"type": "gate", "id": approval_id, "tool": g.name, "args": pending["args"]})
+            self.record("turn_end", session=s.id, turn=turn, origin="user", kind="gated", check=g.check)
             return "gated"
         except LLMError as e:
             # Out of credit, rate limited, offline, no model set: the assistant goes quiet,
             # the daemon does not die. Signals keep landing in the ledger.
+            if getattr(e, "said", ""):  # Invariant 2: what streamed before the error reaches the ledger
+                self.record("assistant", session=s.id, turn=turn, origin="user", text=e.said, final=True)
             self.record("error", session=s.id, turn=turn, origin="user", status=e.status, message=str(e)[:300])
             self.send(s, {"type": "error", "message": str(e)[:300]})
-            self.record("turn_end", session=s.id, turn=turn, origin="user", kind="error")
+            self.record("turn_end", session=s.id, turn=turn, origin="user", kind="error",
+                        check=getattr(e, "check", None))
             return "error"
 
         if out.kind == "cancelled":
@@ -757,7 +750,7 @@ class Daemon:
         if out.text:
             self.record("assistant", session=s.id, turn=turn, origin="user", text=out.text, final=True)
         self.record("turn_end", session=s.id, turn=turn, origin="user", kind=out.kind,
-                    steps=out.steps, usage=out.usage)
+                    steps=out.steps, usage=out.usage, check=out.check)
         return out.kind
 
 

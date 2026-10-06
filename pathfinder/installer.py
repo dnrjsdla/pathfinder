@@ -14,7 +14,6 @@ run on a thread, off the daemon's event loop.
 from __future__ import annotations
 
 import asyncio
-import copy
 import hashlib
 import json
 import logging
@@ -27,18 +26,18 @@ import time
 import urllib.request
 import uuid
 from pathlib import Path
-from typing import Callable
 
-from . import catalog, config, keychain
+from . import catalog, config, keychain, mirror
+from .config import _atomic_write_json, backup_file, merge_json_file
 from . import exec as exec_mod
 from .mcp import pins as mcp_pins
 from .mcp.protocol import qualify
-from .mcp.servers import Entry
+from .mcp.servers import Entry, _resolve
 from .mcp.session import ServerSession
-from .mcp.tools import _NAME_OK, read_only
+from .mcp.tools import read_only, refused
 from .mcp.transport import StdioTransport, StreamableHttpTransport
 from .signals import Signal
-from .tools import TOOLS as _TOOLS
+from .tools import TOOLS as _TOOLS, visible
 
 _log = logging.getLogger("pathfinder.installer")
 
@@ -64,6 +63,17 @@ def _bad_runtime_args(pkg: dict, spec: str) -> str:
         if a not in allowed:
             return f"unexpected runtime argument {a}"
     return ""
+
+
+def _keychain_env(pkg: dict) -> dict:
+    """Every secret or required variable (D40 - the registry omits `isSecret` when false, and some
+    required tokens are not marked) as its config entry, U34's grammar for `mcp.servers._resolve`:
+    `keychain:NAME` when required, `keychain?:NAME` when optional, then `=<default>` when the
+    registry gives one (already `oneline`, by `catalog._package`) to a variable not marked secret -
+    a secret's registry default is a placeholder, not a value (D65)."""
+    return {e["name"]: f"keychain{'' if e.get('required') else '?'}:{e['name']}"
+            + (f"={e['default']}" if e.get("default") and not e.get("secret") else "")
+            for e in pkg["env"] if e.get("secret") or e.get("required")}
 
 # The same alphabet as `senses.catalog._server_id` - kept in sync by hand there (a separate
 # copy, not imported: that module imports this one for `propose_install`, so this one must not
@@ -106,14 +116,15 @@ def brief(c: dict) -> str:
     n, k = len(tools), sum(1 for t in tools if t.get("read_only_hint"))
     parts = [f"license {lic['spdx']} {lic['verdict']}", f"integrity {integrity}",
             f"trial ok, {n} tools ({k} read-only)"]
+    if trial.get("skipped"):  # what the loader will refuse, its names escaped where the trial read them
+        parts[-1] += f", {len(trial['skipped'])} skipped ({', '.join(trial['skipped'])[:120]})"
     if install.get("needs"):
         parts.append("needs: " + ", ".join(install["needs"]))
     if lic.get("warning"):
         parts.append("license warning")
     if install.get("runtime"):
         parts.append("command: " + " ".join([install["runtime"], *install.get("args", [])]))
-    line = f"{c['name']}@{c['version']}  " + " · ".join(parts)
-    return "".join(ch for ch in line if ch.isprintable())  # registry text: no escape sequences to a terminal
+    return f"{catalog.oneline(c['name'])}@{catalog.oneline(c['version'])}  " + catalog.oneline(" · ".join(parts))  # registry text: one clean line
 
 
 def _npm_lookup(pkg: dict, run) -> tuple:
@@ -166,6 +177,9 @@ class Installer:
         self.attach = attach
         self.dispatch = dispatch
         self._lock = asyncio.Lock()  # S1: install/uninstall never interleave (id clash, config races)
+        self._again = None  # the background re-proposal after a stored secret (D53)
+        self._asked = {}  # server id -> registry name, for each install stopped on a missing secret
+        self._trialing = None  # the stdio trial's session, so close() can end its process
 
     def record(self, type, **fields):
         self.dispatch(lambda: self._record(type, **fields))
@@ -190,7 +204,7 @@ class Installer:
         def fail(step, reason):
             candidate["outcome"] = "install_failed"
             verification["failed_step"] = step
-            verification["reason"] = reason
+            verification["reason"] = catalog.oneline(reason, 300)  # registry text can ride in a reason
             return candidate
 
         rtype, runtime = pkg["registry_type"], pkg["runtime"]
@@ -241,19 +255,18 @@ class Installer:
                 return fail("license", f"license {spdx or 'unknown'} is excluded")
             verification["license"]["warning"] = True
 
-        # 4. secrets
+        # 4. secrets (D40): every secret or required variable comes from the Keychain, read from the
+        # very entry the install writes (U34) - a missing required one without a default stops here,
+        # before the trial, all names at once (`names`, for the asking); a missing optional one
+        # without a default is listed under `needs`
         sid = self._server_id(candidate["name"])
-        needs, resolved_env = [], {}
-        for e in pkg["env"]:
-            name = e["name"]
-            if e.get("secret"):
-                val = keychain.secret(f"pathfinder-mcp-{sid}", name)
-                if val is None:
-                    needs.append(name)
-                else:
-                    resolved_env[name] = val
-            elif e.get("required"):
-                needs.append(name)
+        resolved_env, missing, needs = _resolve(_keychain_env(pkg), sid, keychain.secret)
+        if missing:
+            verification["names"], verification["server_id"] = missing, sid  # the asking stores under this id
+            one = missing[0] if len(missing) == 1 else ""
+            return fail("secrets", f"needs {', '.join(missing)} - store {'it' if one else 'each'} with /secret {sid} "
+                        f"{one or 'NAME'} in the screen, or pathfinder secret {sid} {one or 'NAME'}, then ask "
+                        "again; the value never goes through the chat")
         candidate["install"] = {"id": sid, "needs": needs}  # S2: decided once, here - never re-picked at install
 
         # 5. trial launch, in the sandbox
@@ -277,9 +290,11 @@ class Installer:
         verification["trust_tier"] = "checked"
         candidate["install"].update({
             "runtime": runtime, "pinned_version": pkg["version"], "integrity": integrity,
-            # every declared secret, found or not (B6): the config references each as `keychain:NAME`,
-            # so adding one to the Keychain later is all it takes - the server stays disabled until then
-            "env_from_keychain": sorted(e["name"] for e in pkg["env"] if e.get("secret")), "args": list(pkg["args"]),
+            # every secret or required variable, found or not (B6): the config references each as
+            # `keychain:NAME` (`keychain?:NAME` when optional, `=<default>` after a non-secret one's, D65),
+            # so adding one later is all it takes - a required one keeps the server disabled until then
+            "env_from_keychain": sorted(_keychain_env(pkg)),
+            "args": list(pkg["args"]),
             "permissions": [{"tool": t["name"], "grant": "allow" if t["read_only_hint"] else "ask"} for t in tools],
         })
         return candidate
@@ -307,7 +322,7 @@ class Installer:
                       if sandboxed else [runtime_bin, *args]
                 env = exec_mod.child_env({"npm_config_cache": f"{tmp}/npm-cache",
                                           "UV_CACHE_DIR": f"{tmp}/uv-cache", **resolved_env})
-                session = ServerSession(sid, StdioTransport(argv, env=env), timeout=timeout)
+                session = self._trialing = ServerSession(sid, StdioTransport(argv, env=env), timeout=timeout)
                 try:
                     session.discover()
                     raw = session.list_tools()
@@ -318,10 +333,10 @@ class Installer:
         out, skipped = [], []
         for t in raw:
             name = t.get("name", "")
-            if not _NAME_OK.match(qualify(sid, name)):
-                skipped.append(name)  # S5: never trialed further, never granted (mcp/tools.py's own rule)
-                continue
             entry = Entry(server_id=sid, tool_name=name, qualified_name=qualify(sid, name), definition=t)
+            if refused(entry):
+                skipped.append(visible(name))  # S5: never trialed further, never granted (the loader's own rule)
+                continue
             prints = mcp_pins.fingerprint(t)
             out.append({"name": entry.tool_name, "description_hash": prints["description"],
                        "schema_hash": prints["inputSchema"], "read_only_hint": read_only(entry),
@@ -332,8 +347,10 @@ class Installer:
     def propose(self, candidate: dict, origin: str, session: str = "") -> str:
         if candidate.get("outcome") == "install_failed":
             vf = candidate["verification"]
-            self.record("install_failed", id="", name=candidate["name"],
-                        step=vf.get("failed_step", ""), reason=vf.get("reason", ""))
+            self.record("install_failed", id="", name=candidate["name"], names=vf.get("names", []),  # D53 asks for them
+                        server_id=vf.get("server_id", ""), step=vf.get("failed_step", ""), reason=vf.get("reason", ""))
+            if vf.get("names"):  # an answer to the ask, or a `/secret` for this id, proposes it again
+                self._asked[vf["server_id"]] = candidate["name"]
             signal = Signal(sense="catalog", kind="install_failed",
                 key=f"install_failed:{candidate['name']}:{int(time.time())}",
                 summary=f"Could not install {candidate['name']}: {vf.get('reason', '')}",
@@ -348,28 +365,78 @@ class Installer:
 
     def propose_by_name(self, name: str, origin: str = "user", session: str = "",
                         registry: str | None = None) -> dict:
+        items = mirror.find(self.home, name)
+        if not items and (item := catalog.latest(name, registry or catalog.REGISTRY)):
+            items = [item]  # newer than the last refresh, or the first sync still running
         matches = []
-        for item in catalog.fetch(search=name, pages=1, registry=registry or catalog.REGISTRY):
+        for item in items:
             try:
-                matches.append(catalog.candidate(item))
+                matches.append((catalog.candidate(item), item))
             except (KeyError, TypeError) as exc:
                 _log.warning("propose_by_name: skipping malformed registry item: %s", exc)
-        exact = [c for c in matches if c["name"] == name]
-        if exact:
-            cand = exact[0]
-        else:
-            suffixed = [c for c in matches if c["name"].endswith(f"/{name}")]
-            if len(suffixed) > 1:
-                return {"error": "ambiguous: " + ", ".join(c["name"] for c in suffixed)}
-            cand = suffixed[0] if suffixed else None
+        exact = [m for m in matches if m[0]["name"] == name]
+        suffixed = [m for m in matches if m[0]["name"].endswith(f"/{name}")]
+        if len(suffixed) > 1 and not exact:
+            more = len(suffixed) - 10
+            return {"error": "ambiguous: " + ", ".join(catalog.oneline(c["name"], 80) for c, _ in suffixed[:10])
+                    + (f"; {more} more, give the full name" if more > 0 else "")}
+        cand, item = (exact or suffixed or [(None, None)])[0]
         if cand is None:
             return {"error": "no such server; try search_tools"}
+        if cand["name"] != catalog.oneline(cand["name"], 200):  # what is shown must be what is installed
+            return {"error": "the registry name holds characters that cannot be shown; not proposed: "
+                    + catalog.oneline(cand["name"], 80)}
         cand = self.check(cand, explicit=True)
         if cand.get("outcome") == "install_failed":
             self.propose(cand, origin, session)
             return {"error": cand["verification"].get("reason", "check failed")}
         aid = self.propose(cand, origin, session)
-        return {"id": aid, "line": render_row({"id": aid, "args": cand})}
+        line = render_row({"id": aid, "args": cand})
+        status = ((item.get("_meta") or {}).get("io.modelcontextprotocol.registry/official") or {}).get("status")
+        return {"id": aid, "line": line + ("  deprecated in the registry" if status == "deprecated" else "")}
+
+    async def handle(self, msg: dict) -> dict:
+        install = msg["type"] == "install"
+        arg = msg.get("name" if install else "id")
+        if not isinstance(arg, str) or not arg:
+            return {"type": "error", "message": "install needs a \"name\"" if install else "uninstall needs an \"id\""}
+        try:
+            result = await (asyncio.to_thread(self.propose_by_name, arg) if install else self.uninstall(arg))
+        except Exception as e:  # a check or an uninstall that raised must answer, not drop the connection (m5: "no reply")
+            result = {"error": f"{type(e).__name__}: {e}"[:300]}
+        if "error" in result:
+            return {"type": "error", "message": result["error"]}
+        if install:
+            return {"type": "install", "id": result["id"], "line": result["line"]}
+        return {"type": "uninstall", "id": result["id"]}
+
+    async def secret(self, msg: dict, session: str = "") -> dict:
+        """D53's main path: a screen's masked value, asked for or typed after `/secret`. It goes to the
+        Keychain on a worker thread and nowhere else - no event holds it - and an install stopped on
+        this id's missing secret is proposed again in the background, so its gate line (or the ask for
+        the next missing name) follows. `mail` with no name is the mail password (U26)."""
+        if not (isinstance(msg.get("server_id"), str) and isinstance(msg.get("value"), str)
+                and isinstance(msg.get("name"), (str, type(None)))):
+            return {"type": "error", "message": "secret needs a \"server_id\" and a \"value\" (and a \"name\" unless mail)"}
+        try:
+            service, account = keychain.target(self.home, msg["server_id"], msg.get("name"))
+            await asyncio.to_thread(keychain.take, self.home, service, account, msg["value"])
+        except Exception as e:  # keychain's messages never carry the value
+            return {"type": "error", "message": f"{type(e).__name__}: {e}"[:300]}
+        server = self._asked.pop(msg["server_id"], None)
+        if server:  # held, so the task is not collected before it runs, and close() can cancel it
+            self._again = asyncio.ensure_future(asyncio.to_thread(self.propose_by_name, server, "user", session))
+        return {"type": "secret.stored", "server_id": msg["server_id"], "name": msg.get("name"), "server": server or ""}
+
+    def close(self) -> None:
+        """At a stop: no late record, and a re-proposal in flight is cancelled rather than awaited - its
+        trial is sandboxed, and the ask comes again at the next check. A stdio trial's process is ended
+        too, so the exit does not wait out its timeout."""
+        self.dispatch = lambda fn: None
+        if self._again is not None:
+            self._again.cancel()
+        if self._trialing is not None:
+            self._trialing.close()
 
     # -- install / rollback --------------------------------------------------------------
     async def decide(self, approval_id: str, decision: str) -> None:
@@ -400,7 +467,7 @@ class Installer:
                 except Exception as e:
                     outcome["ok"], outcome["step"], outcome["reason"] = False, "load", f"{type(e).__name__}: {e}"
                 else:
-                    outcome["ok"], outcome["step"], outcome["reason"] = self._check_loaded(id, candidate)
+                    outcome["ok"], outcome["step"], outcome["reason"] = self._check_loaded(id)
         if outcome["ok"]:
             tools = candidate["verification"]["sandbox_trial"]["tools"]
             names = [t["name"] for t in tools]
@@ -421,18 +488,15 @@ class Installer:
                     summary=f"Could not install {candidate['name']}: {outcome['reason']}",
                     fields={"id": id, "step": outcome["step"]}, trust="self", exempt=True))
 
-    def _check_loaded(self, id: str, candidate: dict) -> tuple:
-        """B5/B6: the load step can fail - `attach.reload` not raising is not enough, a server
-        that dies (or never listed a tool) must not become `install_done`. The one exception is
-        a server whose only problem is a secret the proposal already listed under `needs`
-        (Mark.5's rule): that one stays `disabled` until the user adds it, step `load` records ok."""
+    def _check_loaded(self, id: str) -> tuple:
+        """B5: the load step can fail - `attach.reload` not raising is not enough, a server that
+        dies (or never listed a tool) must not become `install_done`. A missing optional secret
+        does not disable a server (U34), so a `secret missing` here is a required one that left
+        the Keychain after the check: that fails too."""
         if any(name.startswith(f"mcp__{id}__") for name in _TOOLS):
             self.record("install_step", id=id, step="load", ok=True, detail="")
             return True, "", ""
         reason = dict(self.attach.servers.disabled()).get(id, "")
-        if reason.startswith("secret missing") and candidate["install"].get("needs"):
-            self.record("install_step", id=id, step="load", ok=True, detail=f"disabled: {reason}")
-            return True, "", ""
         detail = f"disabled: {reason}" if reason else "no tools registered"
         self.record("install_step", id=id, step="load", ok=False, detail=detail)
         return False, "load", detail
@@ -449,7 +513,7 @@ class Installer:
             self.record("install_step", id=id, step="mcp_servers", ok=False, detail=reason)
             return {**out, "reason": reason, "step": "mcp_servers"}
 
-        env_cfg = {name: f"keychain:{name}" for name in install["env_from_keychain"]}
+        env_cfg = _keychain_env(pkg)
         if pkg["registry_type"] == "remote":
             server_cfg = {"transport": "http", "url": pkg["identifier"], "headers": env_cfg}
         else:
@@ -616,47 +680,6 @@ class Installer:
             raise RuntimeError("claude.json removal changed an unrelated key")
 
 
-def backup_file(path: Path) -> str:
-    """Copies `path` to `<path>.pathfinder-<ts>`, in the original file's own mode (0600 stays
-    0600), and prunes older backups of the same file down to the newest three (S6 - `rollback`'s
-    restore only ever needs the latest, the others are debugging history)."""
-    backup = path.with_name(f"{path.name}.pathfinder-{int(time.time() * 1000)}")
-    backup.write_bytes(path.read_bytes())
-    os.chmod(backup, path.stat().st_mode & 0o777)
-    olds = sorted(path.parent.glob(f"{path.name}.pathfinder-*"))
-    for old in olds[:-3]:
-        old.unlink(missing_ok=True)
-    return str(backup)
-
-
-def _atomic_write_json(path: Path, data: dict) -> None:
-    path = path.resolve()  # a dotfile-repo symlink: replace the target, not the link
-    path.parent.mkdir(parents=True, exist_ok=True)
-    mode = path.stat().st_mode & 0o777 if path.exists() else 0o644
-    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".claudejson-", suffix=".tmp")
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
-    os.chmod(tmp, mode)  # mkstemp makes 0600; keep what the user had
-    os.replace(tmp, path)
-
-
-def merge_json_file(path: Path, mutate: Callable[[dict], dict]) -> str:
-    """One foreign-file helper (D36), generalised from `_merge_claude_json`: backs up `path`
-    (if it exists) before writing, computes `after = mutate(deepcopy(before))`, writes it
-    atomically, and reads back to require the write landed exactly as `after` - a mismatch
-    (the mutate returned something JSON cannot round-trip identically) raises rather than
-    leaving a file nobody can trust. Returns the backup path, or "" when the file did not
-    exist before (nothing to restore to but deletion)."""
-    before = json.loads(path.read_text(encoding="utf-8-sig")) if path.exists() else {}
-    after = mutate(copy.deepcopy(before))  # before the backup: a raising mutate leaves no stray copy
-    backup = backup_file(path) if path.exists() else ""
-    _atomic_write_json(path, after)
-    readback = json.loads(path.read_text(encoding="utf-8-sig"))
-    if readback != after:
-        raise RuntimeError(f"{path.name} merge did not read back as written")
-    return backup
-
-
 # -- the tool (senses/catalog.py's TOOLS, opt-in per the sense being on) ---------------------
 
 _installer: "Installer | None" = None
@@ -671,4 +694,6 @@ def propose_install_by_name(name: str, session: str = "", registry: str | None =
     if _installer is None:
         raise RuntimeError("installer not bound (no daemon)")
     result = _installer.propose_by_name(name, origin="user", session=session, registry=registry)
-    return result.get("error") or f"proposed as {result['id']}: {result['line']}"
+    if result.get("error"):
+        raise LookupError(result["error"])  # a failed proposal is a failed call
+    return f"proposed as {result['id']}: {result['line']}"

@@ -1,6 +1,10 @@
+import json
 import unittest
 
-from pathfinder.loop import STEER_ENVELOPE, TurnControl, run, settle
+from pathfinder.llm import LLMError
+from pathfinder.loop import FLAG_WORDS, RERUN_NOTE, STEER_ENVELOPE, VERIFIER_PROMPT, TurnControl, run, settle, verifier_input
+from pathfinder.state import RECORD_HEADER
+from pathfinder.signals import AGENDA_HEADER
 
 
 def _make_step(steps):
@@ -185,3 +189,167 @@ class TestLoop(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def _verdict(why="", **flags):
+    return json.dumps({**{k: False for k in FLAG_WORDS}, **flags, "why": why})
+
+
+def _looks(*replies):
+    """The verifier's step: records each ask, answers the next scripted reply."""
+    def step(messages):
+        step.asks.append(messages)
+        return iter(replies[len(step.asks) - 1])
+    step.asks = []
+    return step
+
+
+def _turn(user="what's on my list?"):
+    return [{"role": "system", "content": "the resident prompt"},
+            {"role": "system", "content": f"Local time: now\n\n{AGENDA_HEADER}\n- 09:00 standup\n\nwiki map"},
+            {"role": "user", "content": "hi"}, {"role": "assistant", "content": "hello"},
+            {"role": "user", "content": user}]
+
+
+class SecondLookTest(unittest.TestCase):
+    """D51: a final answer that came with no tool result is checked once by the same model."""
+    TOOLS = ["list_reminders", "list_events", "mcp__notes__search"]
+
+    def _run(self, steps, looks, messages=None, **kw):
+        messages = _turn() if messages is None else messages
+        emitted = []
+        out = run(_make_step(steps), messages, call_tool=lambda id, n, a: {"ok": True},
+                  emit=lambda k, p: emitted.append((k, p)), final_step=looks,
+                  second_look=kw.pop("second_look", self.TOOLS), **kw)
+        return out, messages, emitted
+
+    def test_second_look_passes_a_clean_draft(self):
+        looks = _looks([("text", _verdict())])
+        out, messages, emitted = self._run([[("text", "Hi there!")]], looks)
+        self.assertEqual((out.kind, out.text, out.check, out.steps), ("answer", "Hi there!", "passed", 1))
+        self.assertEqual(messages[-1], {"role": "assistant", "content": "Hi there!"})
+        self.assertEqual(len(looks.asks), 1)
+        self.assertNotIn("retract", [k for k, _ in emitted])
+
+    def test_flagged_draft_is_withdrawn_and_rerun_once(self):
+        looks = _looks([("text", "ok: " + _verdict("no list_reminders result", unsupported_state=True))])
+        out, messages, emitted = self._run([[("text", "Your list is empty.")], [("text", "It holds two.")]], looks)
+        self.assertEqual(emitted[1], ("retract", {"draft": "Your list is empty.", "flags": ["unsupported_state"],
+                                                  "what": FLAG_WORDS["unsupported_state"],
+                                                  "why": "no list_reminders result"}))
+        self.assertEqual([p for k, p in emitted if k == "delta"], ["Your list is empty.", "It holds two."])
+        self.assertEqual((out.kind, out.text, out.check, out.steps), ("answer", "It holds two.", "flagged", 2))
+        note = RERUN_NOTE.format(what=FLAG_WORDS["unsupported_state"], why="no list_reminders result")
+        self.assertEqual(messages[5:], [{"role": "system", "content": note},
+                                        {"role": "assistant", "content": "It holds two."}])
+        self.assertEqual(len(looks.asks), 1)  # the re-run is not checked again
+
+    def test_second_look_skipped_after_a_tool_or_on_a_resume(self):
+        call = {"id": "c1", "name": "list_reminders", "arguments": {}}
+        looks = _looks()
+        out, _, _ = self._run([[("tool_calls", [call])], [("text", "It is empty.")]], looks)
+        pending = _turn() + [{"role": "assistant", "content": "", "tool_calls": [
+            {"id": "c1", "type": "function", "function": {"name": "list_reminders", "arguments": "{}"}}]}]
+        resumed, _, _ = self._run([[("text", "It is empty.")]], looks, messages=pending, resume=True)
+        self.assertEqual((out.check, resumed.check, looks.asks), (None, None, []))
+
+    def test_second_look_runs_when_every_call_was_refused_but_not_after_a_real_one(self):
+        refused = {"ok": False, "refused": True, "error": "no such tool: x"}
+        denied = {"ok": False, "refused": True, "denied": True, "error": "policy"}
+        call = lambda i: {"id": i, "name": "x", "arguments": {}}  # noqa: E731
+        steps = [[("tool_calls", [call("c1")])], [("text", "It is empty.")]]
+        looks = _looks([("text", _verdict())])
+        messages = _turn()
+        out = run(_make_step(steps), messages, call_tool=lambda i, n, a: refused, emit=lambda k, p: None,
+                  final_step=looks, second_look=self.TOOLS)
+        self.assertEqual((out.check, len(looks.asks)), ("passed", 1))
+        mixed = {"c1": refused, "c2": {"ok": True, "result": 1}}
+        steps = [[("tool_calls", [call("c1"), call("c2")])], [("text", "It is empty.")]]
+        looks = _looks()
+        out = run(_make_step(steps), _turn(), call_tool=lambda i, n, a: mixed[i], emit=lambda k, p: None,
+                  final_step=looks, second_look=self.TOOLS)
+        self.assertEqual((out.check, looks.asks), (None, []))
+        looks = _looks()  # a policy deny counts as a call: the verifier does not see this turn's refusals
+        out = run(_make_step([[("tool_calls", [call("c1")])], [("text", "Your settings block it.")]]), _turn(),
+                  call_tool=lambda i, n, a: denied, emit=lambda k, p: None, final_step=looks, second_look=self.TOOLS)
+        self.assertEqual((out.check, looks.asks), (None, []))
+
+    def test_second_look_needs_a_step_left(self):
+        looks = _looks()
+        out, _, _ = self._run([[("text", "It is empty.")]], looks, budget=1)
+        self.assertEqual((out.kind, out.text, out.check, looks.asks), ("answer", "It is empty.", None, []))
+
+    def test_bad_json_or_llm_error_or_cancel_leaves_the_draft(self):
+        def raising(messages):
+            yield ("text", "{")
+            raise LLMError(500, "upstream")
+        for look in (_looks([("text", "The draft looks fine.")]), raising, _looks([("cancelled", None)])):
+            out, messages, emitted = self._run([[("text", "It is empty.")]], look)
+            self.assertEqual((out.kind, out.text, out.check, out.steps), ("answer", "It is empty.", "failed", 1))
+            self.assertEqual(messages[-1], {"role": "assistant", "content": "It is empty."})
+            self.assertNotIn("retract", [k for k, _ in emitted])
+
+    def test_verifier_input_names_every_tool_and_carries_the_agenda(self):
+        looks = _looks([("text", _verdict())])
+        messages = _turn("q" * 1100)
+        messages[3]["content"] = "p" * 700
+        self._run([[("text", "Nothing today.")]], looks, messages=messages)
+        self.assertEqual(looks.asks[0][0], {"role": "system", "content": VERIFIER_PROMPT})
+        self.assertEqual(looks.asks[0][1], {"role": "user", "content": "\n\n".join([
+            "Tools: list_reminders, list_events, mcp__notes__search",
+            f"Agenda the system gave this turn:\n{AGENDA_HEADER}\n- 09:00 standup",
+            "The assistant's previous answer: " + "p" * 600, "The user: " + "q" * 1000,
+            "No tool was called in this turn.", "Draft: Nothing today."])})
+
+    def test_verifier_input_carries_the_latest_record_when_there_is_one(self):
+        record = RECORD_HEADER + '\nsearch_tools {"query":"gmail"} ok'
+        with_old = _turn()
+        with_old.insert(2, {"role": "system", "content": RECORD_HEADER + "\nold_call {} (approval p1) waiting for approval"})
+        with_old.insert(4, {"role": "system", "content": record})
+        asked = verifier_input(self.TOOLS, with_old + [{"role": "assistant", "content": "d"}])
+        self.assertIn('state - not results):\nold_call {} (approval p1) waiting for approval\n'
+                      'search_tools {"query":"gmail"} ok\n\nThe user:', asked)  # an older block's gate survives
+        long = list(with_old)
+        long.insert(4, {"role": "system", "content": RECORD_HEADER + "\n" + "x" * 1600 + "\nlast {} ok"})
+        tail = verifier_input(self.TOOLS, long + [{"role": "assistant", "content": "d"}]).split("not results):\n")[1]
+        self.assertTrue(tail.startswith("last {} ok\n"))  # cut at a row boundary, newest rows kept
+        self.assertNotIn(RECORD_HEADER, asked)
+        bare = verifier_input(self.TOOLS, _turn() + [{"role": "assistant", "content": "d"}])
+        self.assertNotIn("tool calls in earlier turns", bare)
+
+    def test_verifier_usage_counts_but_not_as_a_step(self):
+        looks = _looks([("text", _verdict()), ("usage", {"prompt_tokens": 100, "completion_tokens": 9})])
+        out, _, _ = self._run([[("text", "Hi."), ("usage", {"prompt_tokens": 10, "completion_tokens": 2})]], looks)
+        self.assertEqual((out.steps, out.usage), (1, {"prompt_tokens": 110, "completion_tokens": 11}))
+
+    def test_why_is_one_line_and_cut(self):
+        why = ("the agenda says so\n" * 300)[:5000]
+        looks = _looks([("text", _verdict(why, unsupported_state=True))])
+        out, messages, emitted = self._run([[("text", "Empty.")], [("text", "Two.")]], looks)
+        cut = ("the agenda says so " * 12)[:200]
+        self.assertEqual(emitted[1][1]["why"], cut)
+        self.assertEqual(messages[5]["content"], RERUN_NOTE.format(what=FLAG_WORDS["unsupported_state"], why=cut))
+
+    def test_interrupt_during_the_look_still_cuts_it(self):
+        """The look runs as a tool does: a steer waits for it (the daemon reads `in_tool`), an
+        interrupt still cancels it - the draft stands, check failed."""
+        control = TurnControl()
+
+        def look(messages):
+            look.in_tool = control.in_tool
+            control.interrupt.set()
+            yield ("cancelled", None)
+        out, messages, _ = self._run([[("text", "Empty.")]], look, control=control)
+        self.assertEqual((look.in_tool, control.in_tool), (True, False))
+        self.assertEqual((out.kind, out.text, out.check), ("answer", "Empty.", "failed"))
+
+    def test_llm_error_mid_stream_carries_what_was_streamed(self):
+        """Invariant 2: text already on the screen rides the error to the ledger."""
+        def failing(messages):
+            yield ("text", "half an ans")
+            raise LLMError(500, "upstream")
+        call = {"id": "c1", "name": "noop", "arguments": {}}
+        steps = iter([iter([("text", "looking. "), ("tool_calls", [call])]), failing([])])
+        with self.assertRaises(LLMError) as caught:
+            run(lambda messages: next(steps), _turn(), call_tool=lambda id, n, a: {"ok": True}, emit=lambda k, p: None)
+        self.assertEqual(caught.exception.said, "looking. half an ans")

@@ -8,6 +8,7 @@ from __future__ import annotations
 import time
 
 from ..signals import Signal
+from ..tools import oneline
 
 OPTIONS: dict = {}
 TRUST = "self"
@@ -29,7 +30,7 @@ CONDITIONS = {"exit_nonzero": _exit_nonzero, "duration_over": _duration_over}
 
 
 def _clip(cmd: str, n: int = 60) -> str:
-    return cmd if len(cmd) <= n else cmd[:n] + "..."
+    return oneline(cmd if len(cmd) <= n else cmd[:n] + "...")  # len(): a non-string cmd stays an error
 
 
 def build(fields: dict, now: float | None = None) -> Signal:

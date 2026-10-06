@@ -7,6 +7,7 @@ import threading
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from pathfinder import jobs
 from pathfinder import rules as rules_mod
@@ -149,9 +150,29 @@ class JobBudgetTest(JobsHarness):
     def test_job_refuses_over_budget(self):
         rules = dataclasses.replace(rules_mod.Rules(), jobs_per_day=0)
         mgr = self.manager(_steps([[("text", "x")]]), rules=rules)
-        result = mgr.start("goal", "s1")
-        self.assertIn("budget", result)
+        with self.assertRaisesRegex(ValueError, "budget"):
+            mgr.start("goal", "s1")
         self.assertEqual(len(self.events("job_start")), 0)
+
+    def test_start_job_refusal_is_a_failed_call(self):
+        """U23: a refused start raises, so the model gets `ok: false` and the tool record says
+        `failed`, not `ok` for a job that never started."""
+        from pathfinder.broker import Broker
+        from pathfinder.state import RECORD_HEADER
+        self.addCleanup(jobs.bind, jobs._manager)
+        jobs.bind(self.manager(_steps([[("text", "x")]]), rules=dataclasses.replace(rules_mod.Rules(), jobs_per_day=0)))
+        emitted = []
+        broker = Broker(jobs.TOOLS, "user", {"start_job": "allow"}, control=None,
+                        emit=lambda kind, payload: emitted.append((kind, payload)))
+        out = broker.call("c1", "start_job", {"goal": "research"})
+        self.assertFalse(out["ok"])
+        self.assertIn("the day's job budget is spent", out["error"])
+        self.record("session_start", session="s1")
+        for kind, payload in emitted:
+            self.record(kind, session="s1", turn="t1", origin="user", **payload)
+        record = self.state.history("s1")[-1]["content"]
+        self.assertTrue(record.startswith(RECORD_HEADER))
+        self.assertEqual(record.splitlines()[-1], 'start_job {"goal":"research"} failed')
 
     def test_job_one_at_a_time(self):
         block = threading.Event()
@@ -166,12 +187,57 @@ class JobBudgetTest(JobsHarness):
         mgr = self.manager(factory)
         r1 = mgr.start("goal 1", "s1")
         self.assertTrue(r1.startswith("started"))
-        r2 = mgr.start("goal 2", "s1")
-        self.assertIn("already running", r2)
+        with self.assertRaisesRegex(ValueError, "already running"):
+            mgr.start("goal 2", "s1")
 
         block.set()
         job_id = r1.split()[-1]
         self.assertTrue(_wait_until(lambda: mgr.jobs[job_id].state == "done"))
+
+
+class JobLinesTest(JobsHarness):
+    def test_record_builds_the_three_job_lines(self):
+        """U4: `record` records, then sends the line a screen is owed; a steer is ledger only."""
+        lines = []
+        mgr = jobs.Manager(self.home, self.record, self.push, None, rules_mod.Rules(), send=lines.append)
+        self._managers.append(mgr)
+        mgr.record("job_start", session="s1", origin="job", id="j1", goal="research")
+        mgr.record("user", session="s1", origin="user", job="j1", trust="user", text="faster", steer=True)
+        mgr.record("approval_pending", session="s1", origin="job", id="a1", call_id="c1", tool="search",
+                   args={"q": "x"}, messages=[], job="j1")
+        mgr.record("job_done", session="s1", origin="job", id="j1", summary="found", steps=1, usage={})
+        self.assertEqual(lines, [
+            {"type": "job.start", "id": "j1", "goal": "research"},
+            {"type": "job.gate", "id": "j1", "approval": "a1", "tool": "search", "args": {"q": "x"}},
+            {"type": "job.end", "id": "j1", "state": "done"}])
+        self.assertEqual([e["type"] for e in self.events()], ["job_start", "user", "approval_pending", "job_done"])
+
+    def test_job_lines_show_what_was_recorded(self):
+        """D53: the screen shows what the approval row holds, never the token; a job's goal and
+        call are not the owner's text, so the token is redacted (D66)."""
+        token = "ntn_" + "j" * 40  # built by concatenation, so the scanner never flags this file
+        lines = []
+        mgr = jobs.Manager(self.home, self.record, self.push, None, rules_mod.Rules(), send=lines.append)
+        self._managers.append(mgr)
+        with mock.patch("pathfinder.keychain.store"), mock.patch("pathfinder.keychain.delete"), \
+                mock.patch("pathfinder.keychain.secret", return_value=None):
+            mgr.record("job_start", session="s1", origin="job", id="j1", goal=f"post with {token}")
+            mgr.record("approval_pending", session="s1", origin="job", id="a1", call_id="c1", tool="post",
+                       args={"key": token}, messages=[], job="j1")
+        self.assertEqual(lines[0]["goal"], "post with [redacted]")
+        self.assertEqual(lines[1]["args"], {"key": "[redacted]"})
+        self.assertEqual(self.state.approval("a1")["args"], lines[1]["args"])
+
+    def test_job_end_reads_the_passed_state(self):
+        """U4 review: job.end's state comes from the writer's getter, not this Manager's own
+        connection (shared with turn threads, its snapshot went stale under load)."""
+        lines = []
+        mgr = jobs.Manager(self.home, self.record, self.push, None, rules_mod.Rules(), send=lines.append,
+                           job_state=lambda id: {"state": "from-the-writer"})
+        self._managers.append(mgr)
+        mgr.record("job_start", session="s1", origin="job", id="j1", goal="research")
+        mgr.record("job_failed", session="s1", origin="job", id="j1", reason="stopped")
+        self.assertEqual(lines[-1], {"type": "job.end", "id": "j1", "state": "from-the-writer"})
 
 
 class JobControlTest(JobsHarness):
@@ -245,6 +311,44 @@ class JobControlTest(JobsHarness):
         self.assertEqual(len(steer_events), 1)
         self.assertEqual((steer_events[0]["origin"], steer_events[0]["job"]), ("user", job_id))
 
+    def test_a_pasted_token_never_reaches_the_job(self):
+        """D53: the job keeps a masked goal and masked steers for its model and its notice; in the
+        ledger the owner's steer gets a handle and the goal, the model's words, is redacted (D66)."""
+        token = "ntn_" + "g" * 40  # built by concatenation, so the scanner never flags this file
+        for name, fake in (("store", None), ("delete", None), ("secret", lambda s, a: None), ("_gone", lambda a: True)):
+            patch = mock.patch(f"pathfinder.keychain.{name}", side_effect=fake)
+            patch.start()
+            self.addCleanup(patch.stop)
+        seen = []
+        proceed = threading.Event()
+        self.addCleanup(proceed.set)
+        tools_mod.TOOLS["job_mask_tool"] = ToolSpec(
+            name="job_mask_tool", description="", params={}, required=[], handler=lambda control=None: proceed.wait(2) and {})
+        self.addCleanup(tools_mod.TOOLS.pop, "job_mask_tool", None)
+
+        def factory(cfg, control, tools):
+            def step(messages):
+                seen.append([dict(m) for m in messages])
+                if len(seen) == 1:
+                    yield ("tool_calls", [{"id": "c1", "name": "job_mask_tool", "arguments": {}}])
+                else:
+                    yield ("text", "done")
+            return step
+
+        mgr = self.manager(factory)
+        job_id = mgr.start(f"post with {token}", "s1").split()[-1]
+        self.assertTrue(_wait_until(lambda: mgr.jobs[job_id].control.in_tool))
+        mgr.steer(job_id, f"use {token}")
+        proceed.set()
+        self.assertTrue(_wait_until(lambda: mgr.jobs[job_id].state == "done"))
+
+        self.assertIn("Goal: post with [redacted]", repr(seen[0]))
+        self.assertIn("use [redacted]", repr(seen[1]))
+        self.assertNotIn(token, repr(seen) + repr(self.pushed) + repr(self.events()))
+        self.assertEqual(self.events("job_start")[0]["goal"], "post with [redacted]")  # the model's words (D66)
+        (steer,) = [e for e in self.events("user") if e.get("steer")]  # the owner's words: a handle
+        self.assertEqual(steer["text"], f"use [secret:pasted-{steer['seq']}]")
+
 
 class JobGateTest(JobsHarness):
     def test_job_gate_pauses_and_resumes_approve(self):
@@ -315,6 +419,7 @@ class JobGateTest(JobsHarness):
         mgr.stop(job_id)
         self.assertEqual(mgr.jobs[job_id].state, "cancelled")
         self.assertEqual(self.state.pending(), [])  # the row is closed (denied), not left pending
+        self.assertEqual([e["job"] for e in self.ledger.read() if e["type"] == "approval"], [job_id])  # D63
         self.assertEqual(self.state.job(job_id)["state"], "cancelled")
         self.assertEqual([s.kind for s in self.pushed], ["job_failed"])
         mgr.resume(approval_id, "approved")  # a stale approve does nothing

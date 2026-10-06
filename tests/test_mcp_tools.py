@@ -9,13 +9,18 @@
 No network: entries are built by hand, and `servers.call` is a recording fake."""
 from __future__ import annotations
 
+import tempfile
 import unittest
+from pathlib import Path
 
 from pathfinder import policy
+from pathfinder.broker import Broker
+from pathfinder.ledger import Ledger
 from pathfinder.mcp import pins as mcp_pins
 from pathfinder.mcp import tools as mcp_tools
 from pathfinder.mcp.protocol import qualify
 from pathfinder.mcp.servers import Entry
+from pathfinder.state import RECORD_HEADER, State
 
 
 class FakeServers:
@@ -127,9 +132,34 @@ class FlattenTest(unittest.TestCase):
         result = {"content": [{"type": "image", "data": "..."}]}
         self.assertEqual(mcp_tools.flatten(result), "[image content omitted]")
 
-    def test_is_error_is_prefixed(self):
+    def test_is_error_raises(self):
         result = {"content": [{"type": "text", "text": "bad date"}], "isError": True}
-        self.assertEqual(mcp_tools.flatten(result), "tool error: bad date")
+        with self.assertRaisesRegex(mcp_tools.McpToolError, "^bad date$"):
+            mcp_tools.flatten(result)
+        with self.assertRaisesRegex(mcp_tools.McpToolError, "^tool call failed$"):
+            mcp_tools.flatten({"isError": True})  # never an empty error
+
+    def test_mcp_is_error_is_a_failed_call(self):
+        """U22: a 401 the server reports as `isError` reaches the broker as an exception, so the
+        model gets `ok: false` and the owner's tool record says `failed`, not `ok`."""
+        entry = _entry()
+        name = entry.qualified_name
+        spec = _spec_for(entry, results={name: {"content": [{"type": "text", "text": "401 unauthorized"}],
+                                                "isError": True}})
+        emitted = []
+        broker = Broker({name: spec}, "user", {name: "allow"}, control=None,
+                        emit=lambda kind, payload: emitted.append((kind, payload)))
+        self.assertEqual(broker.call("c1", name, {}), {"ok": False, "error": "401 unauthorized"})
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        ledger, state = Ledger(Path(tmp.name)), State(Path(tmp.name) / "state.db")
+        self.addCleanup(state.close)
+        state.apply(ledger.append("session_start", session="s1"))
+        for kind, payload in emitted:
+            state.apply(ledger.append(kind, session="s1", turn="t1", origin="user", **payload))
+        record = state.history("s1")[-1]["content"]
+        self.assertTrue(record.startswith(RECORD_HEADER))
+        self.assertEqual(record.splitlines()[-1], f"{name} {{}} failed")
 
 
 class HandlerTest(unittest.TestCase):
@@ -147,6 +177,41 @@ class HandlerTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SchemaFilterTest(unittest.TestCase):
+    def test_mcp_parameter_schema_passes_the_filter(self):
+        """U33: a parameter's description and enum values are the server's words and pass `clean`; a
+        name the filter would change refuses the tool - the model sends back the name it was shown."""
+        schema = {"type": "object", "required": ["q"], "properties": {"q": {
+            "type": "string", "description": "the \x1b[31mquery\u202e\nsecond\tline", "enum": ["a\u200bb", "c"]}}}
+        spec = _spec_for(_entry(schema=schema))
+        self.assertEqual(spec.params, {"q": {"type": "string", "description": "the query\nsecond\tline",
+                                             "enum": ["ab", "c"]}})
+        self.assertEqual(spec.required, ["q"])
+        bad = _entry(tool="other", schema={"type": "object", "properties": {"q\u202e": {"type": "string"}}})
+        report = mcp_pins.PinReport(passed={bad.qualified_name})
+        with self.assertLogs("pathfinder.mcp", level="WARNING"):
+            self.assertEqual(mcp_tools.specs([bad], FakeServers([bad]), report), {})
+
+    def test_every_schema_string_is_capped(self):
+        """F4/F10: a 100 kB parameter description would ride every turn - every schema string is cut at
+        MAX_DESCRIPTION after the filter, and a name the cut would change refuses the tool."""
+        big = "D" * 100_000
+        spec = _spec_for(_entry(schema={"type": "object", "properties": {"x": {"type": "string", "description": big}}}))
+        self.assertEqual(spec.params["x"]["description"], "D" * mcp_tools.MAX_DESCRIPTION)
+        long = _entry(tool="long", schema={"type": "object", "properties": {"n" * 5000: {"type": "string"}}})
+        self.assertIn("length cap", mcp_tools.refused(long))
+        with self.assertLogs("pathfinder.mcp", level="WARNING"):
+            self.assertEqual(mcp_tools.specs([long], FakeServers([long]), mcp_pins.PinReport(passed={long.qualified_name})), {})
+
+    def test_sanitize_is_the_one_rule(self):
+        """U33: `sanitize` was a second rule (it dropped tabs and left ANSI remnants) - now `clean`."""
+        from pathfinder.mcp.protocol import sanitize
+        from pathfinder.tools import clean
+        for text in ("plain\nlines", "a\tb", "\x1b[31mred\x1b[0m", "bidi\u202e\x9b", "crlf\r\n", "nb\xa0sp"):
+            self.assertEqual(sanitize(text), clean(text))
+        self.assertEqual(sanitize("x\x1b[2Ky\tz\n"), "xy\tz\n")
 
 
 class CheckedListTest(unittest.TestCase):

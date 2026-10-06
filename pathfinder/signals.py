@@ -70,13 +70,19 @@ class Signal:
     exempt: bool = False
 
 
+def _clean(value):
+    """Every string inside a signal's `fields`, keys too, however deep, through `tools.oneline`."""
+    return tools.map_strings(value, lambda text: tools.oneline(text, 300))
+
+
 def render_block(signal: Signal) -> str:
-    # One line per field: a summary carrying newlines (a job's result, model-written from what it
-    # read) could otherwise forge a whole extra block with its own `trust:` line. Single-line
-    # summaries stay byte-identical to the m3-measured shape.
-    summary = signal.summary.replace("\n", "\\n")
-    return (f"kind: {signal.kind}\ntrust: {signal.trust}\nkey: {signal.key}\n"
-            f"summary: {summary}\nfields: {json.dumps(signal.fields, ensure_ascii=False)}")
+    # Someone else's text (a mail subject, a calendar title, a registry description, a hook
+    # message) reaches the model here, so every string passes `oneline` and a clip: one line per
+    # field (a newline could otherwise forge a whole extra block with its own `trust:` line), no
+    # bidi, zero-width or ANSI. A clean single-line summary stays byte-identical to the m3 shape.
+    fields = json.dumps(_clean(signal.fields), ensure_ascii=False)[:2000]
+    return (f"kind: {signal.kind}\ntrust: {signal.trust}\nkey: {tools.oneline(signal.key, 200)}\n"
+            f"summary: {tools.oneline(signal.summary, 2200)}\nfields: {fields}")
 
 
 def render_envelope(signals: list) -> str:
@@ -133,6 +139,26 @@ def load(cfg: dict, home=None) -> list:
                             conditions=dict(getattr(mod, "CONDITIONS", {}) or {}), options=resolved,
                             module=mod, poll=getattr(mod, "poll", None), cadence_s=getattr(mod, "CADENCE_S", None)))
     return senses
+
+
+PUSH_FIELDS_LIMIT = 4096  # a pushed signal's `fields` text goes verbatim into the envelope
+
+
+def pushed(senses: dict, msg: dict, push: Callable, reply: Callable) -> None:
+    """The socket's push door, `signal {sense, fields}` (D67, moved from the daemon): a loaded,
+    push-capable sense builds a Signal from `fields` and it goes to `push`; anything else is one
+    `error` line through `reply`, and the connection stays open."""
+    name, fields = msg.get("sense"), msg.get("fields")
+    sense = senses.get(name)
+    if sense is None or not sense.push_capable or not isinstance(fields, dict):
+        return reply({"type": "error", "message": f"unknown or non-push sense: {name!r}"})
+    if len(json.dumps(fields, ensure_ascii=False)) > PUSH_FIELDS_LIMIT:
+        return reply({"type": "error", "message": "fields too large (4 KB limit)"})
+    try:
+        signal = sense.module.build(fields)
+    except Exception as e:  # the only untrusted local input - never take the daemon down
+        return reply({"type": "error", "message": f"bad fields for {name}: {e}"})
+    push(signal)
 
 
 class SenseLoop:

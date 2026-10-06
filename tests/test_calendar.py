@@ -133,6 +133,59 @@ class AccessGrantTest(unittest.TestCase):
             ek.ensure_access("event")
             self.assertIsNot(ek._get_store(), before)
 
+    def test_reset_waits_for_a_build_in_flight(self):
+        import threading
+        from pathfinder.senses import _eventkit as ek
+
+        class FakeStore:
+            @classmethod
+            def alloc(cls):
+                return cls()
+
+            def init(self):
+                return self
+
+            def requestFullAccessToEventsWithCompletion_(self, handler):
+                handler(True, None)
+
+        FakeStore.authorizationStatusForEntityType_ = staticmethod(lambda t: 0)
+        fake = mock.Mock(EKEventStore=FakeStore)
+        with mock.patch.dict(sys.modules, {"EventKit": fake}), mock.patch.object(ek, "_store", None):
+            t = threading.Thread(target=ek.ensure_access, args=("event",))
+            with ek._store_lock:  # a build in flight holds it
+                t.start()
+                t.join(0.3)
+                self.assertTrue(t.is_alive(), "the reset ran while the lock was held")
+            t.join(5)
+            self.assertFalse(t.is_alive())
+
+    def test_threads_asking_at_once_share_one_store(self):
+        import threading
+        import time
+        from pathfinder.senses import _eventkit as ek
+        made = []
+
+        class FakeStore:
+            @classmethod
+            def alloc(cls):
+                return cls()
+
+            def init(self):
+                time.sleep(0.05)  # a slow constructor: without the lock every thread gets in
+                made.append(self)
+                return self
+
+        got = []
+        fake = mock.Mock(EKEventStore=FakeStore)
+        with mock.patch.dict(sys.modules, {"EventKit": fake}), mock.patch.object(ek, "_store", None):
+            threads = [threading.Thread(target=lambda: got.append(ek._get_store())) for _ in range(8)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+        self.assertEqual(len(made), 1)
+        self.assertEqual(len({id(s) for s in got}), 1)
+
     def test_timed_out_prompt_leaves_no_store_behind(self):
         """Allowed after the prompt timed out (or later in System Settings): the next call sees
         status 3 and returns early, so no pre-grant store may exist by then."""
@@ -250,6 +303,27 @@ class AgendaContextTest(unittest.TestCase):
         with mock.patch.object(calendar_sense.ek, "list_events", return_value=[]), \
                 mock.patch.object(calendar_sense.ek, "authorized", return_value=True):
             self.assertEqual(calendar_sense.context(now), ["- calendar, next 24 h: nothing"])
+
+    def test_agenda_lines_pass_the_filter(self):
+        """U33: an invitation's title rides in every turn's second system message - ANSI, bidi,
+        zero-width and tag characters go before the clip, not only the whitespace."""
+        from pathfinder import clock
+        now, _ = clock.parse_local("2026-09-29 01:13")
+        start, _ = clock.parse_local("2026-09-29 09:00")
+        bad = "\x1b[2J회의\u202e \u200b\U000E0041" + "x" * 100
+        events = [{"id": "e", "title": bad, "start": start, "end": None, "all_day": False, "notes": None}]
+        with mock.patch.object(calendar_sense.ek, "list_events", return_value=events), \
+                mock.patch.object(reminders_sense.ek, "list_reminders", return_value=[{"id": "r", "title": bad, "due": start}]), \
+                mock.patch.object(calendar_sense.ek, "authorized", return_value=True):
+            lines = calendar_sense.context(now) + reminders_sense.context(now)
+        title = ("회의 " + "x" * 100)[:80]
+        self.assertEqual(lines, [f"- event 2026-09-29 09:00: {title}", f"- reminder 2026-09-29 09:00: {title}"])
+        events[0]["title"] = "\u200b\u202e"  # nothing left after the filter: said so, not an empty line
+        with mock.patch.object(calendar_sense.ek, "list_events", return_value=events), \
+                mock.patch.object(reminders_sense.ek, "list_reminders", return_value=[{"id": "r", "title": "", "due": start}]), \
+                mock.patch.object(calendar_sense.ek, "authorized", return_value=True):
+            lines = calendar_sense.context(now) + reminders_sense.context(now)
+        self.assertEqual(lines, ["- event 2026-09-29 09:00: (untitled)", "- reminder 2026-09-29 09:00: (untitled)"])
 
     def test_agenda_never_prompts_for_access(self):
         """Review: an undetermined permission would make every turn wait for the prompt (2 x 60 s)."""

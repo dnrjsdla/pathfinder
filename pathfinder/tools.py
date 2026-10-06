@@ -5,6 +5,8 @@ which Python treats as truthy) must not sail past the gate as an escalation."""
 from __future__ import annotations
 
 import json
+import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -100,6 +102,8 @@ def coerce(spec: ToolSpec, args: dict) -> tuple:
     """(cast args, error string). An undeclared key is dropped, not an error -
     the model gets the same result either way (the key is unusable), but a
     dropped key is silent while a missing required one is not."""
+    if args and not isinstance(args, dict):
+        return {}, f"{spec.name}: arguments must be an object"
     out = {}
     for key, value in (args or {}).items():
         if key not in spec.params:
@@ -127,6 +131,44 @@ def clip(text: str, limit: int = READ_CLIP) -> str:
     return f"{text[:head]}\n...({dropped} characters omitted)...\n{text[-tail:]}"
 
 
+_ANSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
+
+
+def clean(text) -> str:
+    """The one character rule for someone else's text (D62): whole ANSI sequences out, every non-printable
+    character (controls, bidi marks, zero-width) dropped, a newline and a tab kept (a CRLF pair becomes a
+    newline), any other whitespace one space. Nothing is collapsed, so code and a page keep their shape."""
+    text = _ANSI_RE.sub("", str(text)).replace("\r\n", "\n")
+    return "".join(ch if ch in "\n\t" or not ch.isspace() else " "
+                   for ch in text if ch.isspace() or ch.isprintable())
+
+
+def oneline(text, n=None) -> str:
+    """Someone else's text (a registry name, a mail subject, a calendar title) on one line: `clean`,
+    whitespace to one space, at most `n` characters. Everything such text hands the model or the screen
+    outside a tool result goes through this."""
+    return " ".join(clean(text).split())[:n]
+
+
+def visible(text) -> str:
+    """An approval line shows exactly what runs: every character `clean` would drop or change is
+    written as an escape (`\\n`, `\\t`, `\\u200b`, `\\U000e0041`) instead, so a hidden character is
+    seen, not removed; printable text, Korean too, stays as it is, and the line stays one line."""
+    return "".join(ch if ch.isprintable() else {"\n": "\\n", "\t": "\\t"}.get(ch) or
+                   (f"\\u{ord(ch):04x}" if ord(ch) <= 0xFFFF else f"\\U{ord(ch):08x}") for ch in str(text))
+
+
+def map_strings(value, fn):
+    """Every string in `value`, dict keys too, however deep, through `fn`; a tuple comes back a list."""
+    if isinstance(value, str):
+        return fn(value)
+    if isinstance(value, dict):
+        return {map_strings(k, fn): map_strings(v, fn) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [map_strings(v, fn) for v in value]
+    return value
+
+
 def clip_for_ledger(value, limit: int = LEDGER_CLIP):
     """Shorter and head-only, unlike `clip()` above - what the daemon and a job keep of a tool
     call's args/result in the ledger, not what the model itself is shown."""
@@ -152,11 +194,12 @@ def normalize_local_datetime(*keys):
 
 def _absolute_path(args):
     """`~` expands; a relative path lands in the workspace, like the shell's cwd - never in
-    the daemon's own cwd. The gate shows the result, so the user sees where it really goes."""
+    the daemon's own cwd; a symlink is followed. The gate shows the result, so the user sees
+    where it really goes, not a link's name."""
     p = Path(args["path"]).expanduser()
     if not p.is_absolute():
         p = _exec.workspace() / p
-    return {**args, "path": str(p)}
+    return {**args, "path": str(p.resolve())}
 
 
 def _read_file(path, control=None):
@@ -170,6 +213,10 @@ def _write_file(path, content, control=None):
     p = Path(path)
     if _exec.is_secret(p):  # a shell rc or a key file is code execution on the next login
         raise ValueError(f"refused: {path} is a secret path")
+    from . import skills  # here: skills.py imports this module
+    folder, parent = skills._home and skills._home / "skills", p.resolve().parent  # through any symlink
+    if folder and folder.is_dir() and parent.is_dir() and os.path.samefile(parent, folder):  # by inode: case too
+        raise ValueError(f"refused: {path} - a skill is written only by the owner, the seed copy or an approved edit_memory")
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(content, encoding="utf-8")
     return {"path": str(p), "bytes": len(content.encode("utf-8"))}

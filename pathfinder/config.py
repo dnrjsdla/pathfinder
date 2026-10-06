@@ -1,11 +1,15 @@
 """Configuration: one file (config.json), one writer (set()). A model name is
 data, never code - DEFAULTS keeps it empty so nothing ships a hardcoded model."""
+import copy
 import importlib
 import json
 import os
 import re
+import sys
 import tempfile
+import time
 from pathlib import Path
+from typing import Callable
 
 from . import clock
 
@@ -139,6 +143,22 @@ def home() -> Path:
     return path
 
 
+def make_private(home: Path) -> None:
+    """Drop group and other bits from everything under the home (`mode & 0o700`, so the owner's
+    x stays). A symlink is skipped, never followed, and `workspace/` is not entered: the owner's
+    working files keep their modes. Called once, at daemon start - not in `home()`, which runs on
+    every tool call. An entry that cannot be changed is logged and left: it never stops the daemon."""
+    for root, dirs, files in os.walk(home):
+        if root == str(home) and "workspace" in dirs:
+            dirs.remove("workspace")
+        for path in (os.path.join(root, name) for name in dirs + files):
+            try:
+                if not os.path.islink(path):
+                    os.chmod(path, os.stat(path).st_mode & 0o700)
+            except OSError as e:  # vanished mid-walk (a -wal file), not the owner's, immutable
+                print(f"pathfinder: could not make {path} private: {e}", file=sys.stderr)
+
+
 def load(home: Path) -> dict:
     cfg = dict(DEFAULTS)
     config_path = Path(home) / "config.json"
@@ -167,3 +187,46 @@ def set(home: Path, key: str, value, ledger=None) -> dict:
         # record that a change happened, never the value - see config_set in DECISIONS/blueprint
         ledger.append("config_set", key=key)
     return cfg
+
+
+# -- the foreign-file helper (D36, D60): other programs' files only; config.json's writer is set()
+
+def backup_file(path: Path) -> str:
+    """Copies `path` to `<path>.pathfinder-<ts>`, in the original file's own mode (0600 stays
+    0600), and prunes older backups of the same file down to the newest three (S6 - `rollback`'s
+    restore only ever needs the latest, the others are debugging history)."""
+    backup = path.with_name(f"{path.name}.pathfinder-{int(time.time() * 1000)}")
+    backup.write_bytes(path.read_bytes())
+    os.chmod(backup, path.stat().st_mode & 0o777)
+    olds = sorted(path.parent.glob(f"{path.name}.pathfinder-*"))
+    for old in olds[:-3]:
+        old.unlink(missing_ok=True)
+    return str(backup)
+
+
+def _atomic_write_json(path: Path, data: dict) -> None:
+    path = path.resolve()  # a dotfile-repo symlink: replace the target, not the link
+    path.parent.mkdir(parents=True, exist_ok=True)
+    mode = path.stat().st_mode & 0o777 if path.exists() else 0o644
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".claudejson-", suffix=".tmp")
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+    os.chmod(tmp, mode)  # mkstemp makes 0600; keep what the user had
+    os.replace(tmp, path)
+
+
+def merge_json_file(path: Path, mutate: Callable[[dict], dict]) -> str:
+    """One foreign-file helper (D36), generalised from `_merge_claude_json`: backs up `path`
+    (if it exists) before writing, computes `after = mutate(deepcopy(before))`, writes it
+    atomically, and reads back to require the write landed exactly as `after` - a mismatch
+    (the mutate returned something JSON cannot round-trip identically) raises rather than
+    leaving a file nobody can trust. Returns the backup path, or "" when the file did not
+    exist before (nothing to restore to but deletion)."""
+    before = json.loads(path.read_text(encoding="utf-8-sig")) if path.exists() else {}
+    after = mutate(copy.deepcopy(before))  # before the backup: a raising mutate leaves no stray copy
+    backup = backup_file(path) if path.exists() else ""
+    _atomic_write_json(path, after)
+    readback = json.loads(path.read_text(encoding="utf-8-sig"))
+    if readback != after:
+        raise RuntimeError(f"{path.name} merge did not read back as written")
+    return backup

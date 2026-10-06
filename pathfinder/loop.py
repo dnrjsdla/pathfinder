@@ -151,7 +151,7 @@ def verifier_input(tools, messages):
                 and m["content"].startswith(RECORD_HEADER)), "")
     if rec:
         lines.append("The assistant's tool calls in earlier turns, from the ledger (names, arguments and "
-                     "state - not results):\n" + rec[len(RECORD_HEADER) + 1:][:1500])
+                     "state - not results):\n" + rec[len(RECORD_HEADER) + 1:][-1500:])  # the tail: the newest rows (a waiting gate) matter most
     lines += ["The user: " + messages[u]["content"][:1000], "No tool was called in this turn.",
               "Draft: " + messages[-1]["content"]]
     return "\n\n".join(lines)

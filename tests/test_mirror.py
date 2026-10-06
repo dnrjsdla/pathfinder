@@ -68,6 +68,8 @@ class MirrorTest(unittest.TestCase):
         self.httpd, self.H, self.url = _serve(self.items)
         self.addCleanup(self.httpd.server_close)
         self.addCleanup(self.httpd.shutdown)
+        # D70: a failing sync arms a real 600 s retry timer; none may outlive its test
+        self.addCleanup(lambda: [t.cancel() for t in threading.enumerate() if isinstance(t, threading.Timer)])
         patcher = mock.patch.object(mirror, "RETRY_DELAYS", (0, 0))
         patcher.start()
         self.addCleanup(patcher.stop)

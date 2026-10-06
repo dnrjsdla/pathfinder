@@ -49,19 +49,26 @@ class Broker:
         self.approved = dict(approved or {})
         self.denied = set(denied)
 
+    def _refuse(self, id, name, args, error, **extra) -> dict:
+        """A call turned away at the door still reaches the ledger (D69): the record shows the miss,
+        and `refused` tells the loop it was not a tool call, so the second look still runs."""
+        self.emit("tool_call", {"id": id, "name": name, "args": args or {}})
+        self.emit("tool_result", {"id": id, "name": name, "ok": False, "result": error, "refused": True, **extra})
+        return {"ok": False, "refused": True, "error": error, **extra}
+
     def call(self, id, name, args) -> dict:
         spec = self.tools.get(name)
         if spec is None:
-            return {"ok": False, "error": f"no such tool: {name}"}
+            return self._refuse(id, str(name)[:64], args, f"no such tool: {str(name)[:64]}")  # model text: bounded
 
         coerced, error = coerce(spec, args)
         if error:
-            return {"ok": False, "error": error}
+            return self._refuse(id, name, args, error)
         if spec.normalize:
             try:
                 coerced = spec.normalize(coerced)  # before the gate: the user approves what will run
             except ValueError as e:
-                return {"ok": False, "error": str(e)}
+                return self._refuse(id, name, coerced, str(e))
 
         if id in self.denied:
             self.denied.discard(id)
@@ -71,7 +78,7 @@ class Broker:
         else:
             decision = policy.decide(spec, self.origin, coerced, self.grants)
             if decision == "deny":
-                return {"ok": False, "denied": True, "error": policy.DENIED_TEXT}
+                return self._refuse(id, name, coerced, policy.DENIED_TEXT, denied=True)
             if decision == "ask":
                 raise Gate(id, name, coerced)
 

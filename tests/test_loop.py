@@ -2,7 +2,8 @@ import json
 import unittest
 
 from pathfinder.llm import LLMError
-from pathfinder.loop import FLAG_WORDS, RERUN_NOTE, STEER_ENVELOPE, VERIFIER_PROMPT, TurnControl, run, settle
+from pathfinder.loop import FLAG_WORDS, RERUN_NOTE, STEER_ENVELOPE, VERIFIER_PROMPT, TurnControl, run, settle, verifier_input
+from pathfinder.state import RECORD_HEADER
 from pathfinder.signals import AGENDA_HEADER
 
 
@@ -252,6 +253,27 @@ class SecondLookTest(unittest.TestCase):
         resumed, _, _ = self._run([[("text", "It is empty.")]], looks, messages=pending, resume=True)
         self.assertEqual((out.check, resumed.check, looks.asks), (None, None, []))
 
+    def test_second_look_runs_when_every_call_was_refused_but_not_after_a_real_one(self):
+        refused = {"ok": False, "refused": True, "error": "no such tool: x"}
+        denied = {"ok": False, "refused": True, "denied": True, "error": "policy"}
+        call = lambda i: {"id": i, "name": "x", "arguments": {}}  # noqa: E731
+        steps = [[("tool_calls", [call("c1")])], [("text", "It is empty.")]]
+        looks = _looks([("text", _verdict())])
+        messages = _turn()
+        out = run(_make_step(steps), messages, call_tool=lambda i, n, a: refused, emit=lambda k, p: None,
+                  final_step=looks, second_look=self.TOOLS)
+        self.assertEqual((out.check, len(looks.asks)), ("passed", 1))
+        mixed = {"c1": refused, "c2": {"ok": True, "result": 1}}
+        steps = [[("tool_calls", [call("c1"), call("c2")])], [("text", "It is empty.")]]
+        looks = _looks()
+        out = run(_make_step(steps), _turn(), call_tool=lambda i, n, a: mixed[i], emit=lambda k, p: None,
+                  final_step=looks, second_look=self.TOOLS)
+        self.assertEqual((out.check, looks.asks), (None, []))
+        looks = _looks()  # a policy deny counts as a call: the verifier does not see this turn's refusals
+        out = run(_make_step([[("tool_calls", [call("c1")])], [("text", "Your settings block it.")]]), _turn(),
+                  call_tool=lambda i, n, a: denied, emit=lambda k, p: None, final_step=looks, second_look=self.TOOLS)
+        self.assertEqual((out.check, looks.asks), (None, []))
+
     def test_second_look_needs_a_step_left(self):
         looks = _looks()
         out, _, _ = self._run([[("text", "It is empty.")]], looks, budget=1)
@@ -278,6 +300,22 @@ class SecondLookTest(unittest.TestCase):
             f"Agenda the system gave this turn:\n{AGENDA_HEADER}\n- 09:00 standup",
             "The assistant's previous answer: " + "p" * 600, "The user: " + "q" * 1000,
             "No tool was called in this turn.", "Draft: Nothing today."])})
+
+    def test_verifier_input_carries_the_latest_record_when_there_is_one(self):
+        record = RECORD_HEADER + '\nsearch_tools {"query":"gmail"} ok'
+        with_old = _turn()
+        with_old.insert(2, {"role": "system", "content": RECORD_HEADER + "\nold_call {} (approval p1) waiting for approval"})
+        with_old.insert(4, {"role": "system", "content": record})
+        asked = verifier_input(self.TOOLS, with_old + [{"role": "assistant", "content": "d"}])
+        self.assertIn('state - not results):\nold_call {} (approval p1) waiting for approval\n'
+                      'search_tools {"query":"gmail"} ok\n\nThe user:', asked)  # an older block's gate survives
+        long = list(with_old)
+        long.insert(4, {"role": "system", "content": RECORD_HEADER + "\n" + "x" * 1600 + "\nlast {} ok"})
+        tail = verifier_input(self.TOOLS, long + [{"role": "assistant", "content": "d"}]).split("not results):\n")[1]
+        self.assertTrue(tail.startswith("last {} ok\n"))  # cut at a row boundary, newest rows kept
+        self.assertNotIn(RECORD_HEADER, asked)
+        bare = verifier_input(self.TOOLS, _turn() + [{"role": "assistant", "content": "d"}])
+        self.assertNotIn("tool calls in earlier turns", bare)
 
     def test_verifier_usage_counts_but_not_as_a_step(self):
         looks = _looks([("text", _verdict()), ("usage", {"prompt_tokens": 100, "completion_tokens": 9})])

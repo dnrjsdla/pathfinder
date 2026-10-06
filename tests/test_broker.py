@@ -27,7 +27,8 @@ class BrokerTest(unittest.TestCase):
 
     def test_broker_unknown_deny_ask_allow(self):
         b, emitted = self._broker()
-        self.assertEqual(b.call("c0", "nope", {}), {"ok": False, "error": "no such tool: nope"})
+        self.assertEqual(b.call("c0", "nope", {}),
+                         {"ok": False, "refused": True, "error": "no such tool: nope"})
 
         b, emitted = self._broker()
         result = b.call("c1", "read_thing", {})  # allow
@@ -42,12 +43,42 @@ class BrokerTest(unittest.TestCase):
 
         b, emitted = self._broker(origin="system")
         result = b.call("c3", "write_thing", {})  # deny
-        self.assertEqual(result, {"ok": False, "denied": True, "error": policy.DENIED_TEXT})
+        self.assertEqual(result, {"ok": False, "refused": True, "denied": True, "error": policy.DENIED_TEXT})
 
-    def test_refused_call_emits_nothing(self):
+    def _assert_refused(self, b, emitted, id, name, args, error, **extra):
+        result = b.call(id, name, args)
+        self.assertEqual(result, {"ok": False, "refused": True, "error": error, **extra})
+        self.assertEqual(emitted, [("tool_call", {"id": id, "name": name, "args": args}),
+                                   ("tool_result", {"id": id, "name": name, "ok": False, "result": error,
+                                                    "refused": True, **extra})])
+
+    def test_a_call_refused_at_the_door_is_recorded_as_refused(self):
+        """D69: the four early returns emit tool_call then tool_result with `refused`."""
+        b, emitted = self._broker()
+        self._assert_refused(b, emitted, "c1", "nope", {"x": 1}, "no such tool: nope")
+        bad = _spec("typed_thing", params={"n": {"type": "integer"}}, required=["n"])
+        b, emitted = self._broker()
+        b.tools = {**TOOLS, "typed_thing": bad}
+        result = b.call("c2", "typed_thing", {"n": "not a number"})
+        self.assertEqual([k for k, _ in emitted], ["tool_call", "tool_result"])
+        self.assertTrue(result["refused"] and emitted[1][1]["refused"] and emitted[0][1]["args"] == {"n": "not a number"})
+        def no(args):
+            raise ValueError("bad time")
+        b, emitted = self._broker()
+        b.tools = {**TOOLS, "norm_thing": _spec("norm_thing", normalize=no)}
+        self._assert_refused(b, emitted, "c3", "norm_thing", {}, "bad time")
         b, emitted = self._broker(origin="system")
-        self.assertTrue(b.call("c1", "write_thing", {})["denied"])  # policy refuses a write here
-        self.assertEqual(emitted, [])  # no tool_call: the record can never show a call that did not run
+        self._assert_refused(b, emitted, "c4", "write_thing", {}, policy.DENIED_TEXT, denied=True)
+
+    def test_an_unknown_tool_name_is_bounded_in_events_and_error(self):
+        b, emitted = self._broker()
+        result = b.call("c1", "n" * 3000, {})
+        self.assertTrue(all(len(p["name"]) <= 64 for _, p in emitted) and len(result["error"]) < 100)
+
+    def test_an_allowed_call_is_not_marked_refused(self):
+        b, emitted = self._broker()
+        self.assertNotIn("refused", b.call("c1", "read_thing", {}))
+        self.assertTrue(all("refused" not in p for _, p in emitted))
 
     def test_broker_approved_skips_policy(self):
         b, emitted = self._broker(approved={"c1": ("write_thing", {})})
@@ -77,7 +108,6 @@ class BrokerTest(unittest.TestCase):
         b.tools = {**TOOLS, "typed_thing": bad_spec}
         result = b.call("c1", "typed_thing", {"n": "not a number"})
         self.assertFalse(result["ok"])
-        self.assertEqual(emitted, [])
 
     def test_broker_handler_exception_is_ok_false(self):
         def boom(control=None):

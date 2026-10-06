@@ -177,7 +177,8 @@ class State:
             self.db.execute(  # the call's own row, by the id both events carry
                 "UPDATE messages SET content = content || ? WHERE seq = "
                 "(SELECT MAX(seq) FROM messages WHERE session = ? AND role = 'calls' AND ref = ?)",
-                (" ok" if event.get("ok") else " failed", session, event["id"]))
+                (" denied" if event.get("denied") else " refused" if event.get("refused")  # D69: turned away at the door
+                 else " ok" if event.get("ok") else " failed", session, event["id"]))
         if event["type"] == "turn_end" and session:
             if event.get("kind") != "gated":  # a gate is a pause, not an exchange
                 self.db.execute("UPDATE sessions SET turns = turns + 1 WHERE id = ?", (session,))

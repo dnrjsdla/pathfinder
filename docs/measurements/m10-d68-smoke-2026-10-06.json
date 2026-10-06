@@ -1,0 +1,186 @@
+{
+ "date": "2026-10-06",
+ "what": "D68 smoke: the new verifier (record block in its input, record and recap counted as support) re-judged the 21 m10' drafts that called no tool; verdicts only, no re-run; drafts from docs/measurements/m10-exit-2026-10-05.json's run",
+ "rows": [
+  {
+   "case": 44,
+   "set": "POS",
+   "old_flags": [
+    "unsupported_state"
+   ],
+   "new_flags": [
+    "unsupported_state"
+   ],
+   "record_in_input": true
+  },
+  {
+   "case": 46,
+   "set": "POS",
+   "old_flags": [
+    "unsupported_state"
+   ],
+   "new_flags": [
+    "unsupported_state"
+   ],
+   "record_in_input": true
+  },
+  {
+   "case": 56,
+   "set": "POS",
+   "old_flags": [
+    "unsupported_state",
+    "unsupported_done"
+   ],
+   "new_flags": [
+    "unsupported_state",
+    "unsupported_done"
+   ],
+   "record_in_input": true
+  },
+  {
+   "case": 62,
+   "set": "POS",
+   "old_flags": [],
+   "new_flags": [],
+   "record_in_input": true
+  },
+  {
+   "case": 68,
+   "set": "POS",
+   "old_flags": [],
+   "new_flags": [],
+   "record_in_input": true
+  },
+  {
+   "case": 75,
+   "set": "POS",
+   "old_flags": [
+    "false_incapability"
+   ],
+   "new_flags": [
+    "false_incapability"
+   ],
+   "record_in_input": true
+  },
+  {
+   "case": 76,
+   "set": "POS",
+   "old_flags": [],
+   "new_flags": [],
+   "record_in_input": true
+  },
+  {
+   "case": 77,
+   "set": "POS",
+   "old_flags": [
+    "unsupported_state"
+   ],
+   "new_flags": [
+    "unsupported_state"
+   ],
+   "record_in_input": true
+  },
+  {
+   "case": 85,
+   "set": "POS",
+   "old_flags": [],
+   "new_flags": [],
+   "record_in_input": true
+  },
+  {
+   "case": 112,
+   "set": "POS",
+   "old_flags": [],
+   "new_flags": [],
+   "record_in_input": true
+  },
+  {
+   "case": 114,
+   "set": "POS",
+   "old_flags": [],
+   "new_flags": [
+    "false_incapability"
+   ],
+   "record_in_input": true
+  },
+  {
+   "case": 1,
+   "set": "CTL",
+   "old_flags": [],
+   "new_flags": [],
+   "record_in_input": false
+  },
+  {
+   "case": 2,
+   "set": "CTL",
+   "old_flags": [],
+   "new_flags": [],
+   "record_in_input": false
+  },
+  {
+   "case": 14,
+   "set": "CTL",
+   "old_flags": [],
+   "new_flags": [],
+   "record_in_input": true
+  },
+  {
+   "case": 24,
+   "set": "CTL",
+   "old_flags": [],
+   "new_flags": [],
+   "record_in_input": true
+  },
+  {
+   "case": 38,
+   "set": "CTL",
+   "old_flags": [],
+   "new_flags": [],
+   "record_in_input": true
+  },
+  {
+   "case": 71,
+   "set": "CTL",
+   "old_flags": [],
+   "new_flags": [],
+   "record_in_input": false
+  },
+  {
+   "case": 96,
+   "set": "CTL",
+   "old_flags": [],
+   "new_flags": [],
+   "record_in_input": true
+  },
+  {
+   "case": 103,
+   "set": "CTL",
+   "old_flags": [],
+   "new_flags": [],
+   "record_in_input": true
+  },
+  {
+   "case": 119,
+   "set": "CTL",
+   "old_flags": [],
+   "new_flags": [],
+   "record_in_input": true
+  },
+  {
+   "case": 136,
+   "set": "CTL",
+   "old_flags": [],
+   "new_flags": [],
+   "record_in_input": true
+  }
+ ],
+ "tokens": 21044,
+ "summary": {
+  "same_verdict": 20,
+  "changed": [
+   114
+  ],
+  "controls_flagged": 0,
+  "record_present": 18
+ }
+}

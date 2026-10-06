@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from .broker import Gate
 from .llm import LLMError
 from .signals import AGENDA_HEADER
+from .state import RECORD_HEADER
 from .tools import oneline
 
 
@@ -61,7 +62,10 @@ VERIFIER_PROMPT = (
     "- false_incapability: the draft says it cannot do something, or has no tool for it, while a "
     "tool below could do it.\n"
     "A claim a tool result in this turn shows is supported: false. Greeting, explaining, "
-    "recounting what was said earlier in the conversation, and asking the user a question: false.")
+    "recounting what was said earlier in the conversation, and asking the user a question: false. "
+    "What the assistant itself called earlier, and what is waiting for the user's approval, is "
+    "supported by the record given below when it is given there. A recap of this conversation - "
+    "what was said earlier - is answered from the conversation and needs no tool.")
 FLAG_WORDS = {"unsupported_state": "says what the calendar, reminders, memory or registry hold",
               "unsupported_done": "says something was done", "empty_promise": "promises to do something",
               "false_incapability": "says a tool or capability is missing"}
@@ -104,11 +108,12 @@ def settle(messages, call_tool, control=None):
         if messages[idx].get("role") == "assistant":
             assistant_idx = idx
             break
+    results = []  # what this call appended: the caller tells a refused call (D69) from a tool that ran
     if assistant_idx is None:
-        return
+        return results
     tool_calls = messages[assistant_idx].get("tool_calls") or []
     if not tool_calls:
-        return
+        return results
     answered = {m["tool_call_id"] for m in messages[assistant_idx:] if m.get("role") == "tool"}
     for tc in tool_calls:
         tc_id = tc["id"]
@@ -127,11 +132,13 @@ def settle(messages, call_tool, control=None):
             if control is not None:
                 control.in_tool = False
         messages.append({"role": "tool", "tool_call_id": tc_id, "content": json.dumps(result, ensure_ascii=False)})
+        results.append(result)
+    return results
 
 
 def verifier_input(tools, messages):
     """What the second look sees, as bench m10 built it: the tool names, the agenda, the answer
-    before the turn's user message, that message, and the draft (`messages[-1]`)."""
+    before the turn's user message, the latest tool-call record (D68), that message, and the draft (`messages[-1]`)."""
     u = max(k for k, m in enumerate(messages) if m["role"] == "user")
     before = [m for m in messages[:u] if m["role"] == "assistant"]
     agenda = next((p for p in messages[1]["content"].split("\n\n") if p.startswith(AGENDA_HEADER)), "")
@@ -140,6 +147,13 @@ def verifier_input(tools, messages):
         lines.append("Agenda the system gave this turn:\n" + agenda)
     if before:
         lines.append("The assistant's previous answer: " + before[-1]["content"][:600])
+    rows = "\n".join(m["content"][len(RECORD_HEADER) + 1:] for m in messages[:u]
+                     if m["role"] == "system" and m["content"].startswith(RECORD_HEADER))
+    tail = rows[-1500:]  # every block of the session (each turn has its own), newest rows last
+    tail = tail[tail.index("\n") + 1:] if len(rows) > 1500 and "\n" in tail else tail  # no partial first row
+    if rows:
+        lines.append("The assistant's tool calls in earlier turns, from the ledger (names, arguments and "
+                     "state - not results):\n" + tail)
     lines += ["The user: " + messages[u]["content"][:1000], "No tool was called in this turn.",
               "Draft: " + messages[-1]["content"]]
     return "\n\n".join(lines)
@@ -171,7 +185,7 @@ def run(step, messages, *, call_tool, emit, budget=8, control=None, resume=False
     """`second_look`: the tool names offered this turn; when given, a final answer that came with
     no tool result is checked once by `final_step` (D51)."""
     usage, check = None, None
-    called = resume  # a tool ran in this turn: the second look never reads a tool-backed answer
+    called = resume  # a tool ran in this turn (a call refused at the door is not one, a policy deny is, D69): no second look
     said = []  # everything streamed this turn reaches the ledger; only a withdrawn draft leaves it
 
     def with_said(e, parts=()):
@@ -263,11 +277,11 @@ def run(step, messages, *, call_tool, emit, budget=8, control=None, resume=False
                     continue
             return Outcome("answer", text="".join(said), steps=i, usage=usage, check=check)
 
-        called = True
         try:
-            settle(messages, call_tool, control)  # a Gate propagates out of here
+            results = settle(messages, call_tool, control)  # a Gate propagates out of here
         except Gate as g:
             raise with_said(g)
+        called = called or any(not r.get("refused") or r.get("denied") for r in results)
 
     if final_step is not None:
         # D30: the budget is spent and the last reply was still a tool call. One more request

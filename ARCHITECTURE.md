@@ -135,14 +135,14 @@ thread cannot count a turn twice. A `gated` turn end does not count as an exchan
 the messages a turn is built from, holds exactly two things: what the user and the assistant
 said - a `user` event with origin `user` (a steer included, a job's steer not) and an `assistant`
 event with `final` set - and, for each tool call the assistant made in a user turn, the tool's
-name, its arguments and one state of four: ` ok`, ` failed`, ` denied` or ` waiting for
+name, its arguments and one state of five: ` ok`, ` failed`, ` refused`, ` denied` or ` waiting for
 approval`. It never holds a tool's result text, a signal envelope or a draft the second look
 withdrew. The record is projected only from the ledger's own events about the call -
 `tool_call`, `tool_result`, `approval_pending` (a broker gate, the one that carries messages) and
-`approval` - never from anything the model wrote, so a call that never ran, a call policy
-refused, or a call the model only claims cannot appear in it. `apply` writes a `messages` row
+`approval` - never from anything the model wrote, so a call the model only claims cannot appear in it; a call turned away at the broker's door
+(unknown tool, bad arguments, policy) does, as ` refused` (` denied` for policy, D69). `apply` writes a `messages` row
 with role `calls` and the call's id in its `ref` column (`approval:<id>` for a gate); the
-`tool_result` appends ` ok` or ` failed`, a gate's row names its approval id (` (approval <id>) waiting for approval`, so the model never has to invent one), an approve deletes the waiting row (the resumed call
+`tool_result` appends ` ok`, ` failed`, ` refused` or ` denied`, a gate's row names its approval id (` (approval <id>) waiting for approval`, so the model never has to invent one), an approve deletes the waiting row (the resumed call
 writes its own) and a deny turns it ` denied`. Arguments are compact JSON cut to 120 characters
 (`CALL_ARGS_CLIP`), as the ledger door wrote them, so a pasted token shows only as its handle.
 `history()` folds consecutive `calls` rows into one `system` message (`RECORD_HEADER`: names and
@@ -296,10 +296,12 @@ words and leaves no dangling `user` message (D30).
   have no result yet, in order, with `in_tool` set around each; `resume=True` settles first.
   A `Gate` out of `settle` carries `said` (the text streamed before it) and propagates.
 - **The second look** (D51). A user turn passes `second_look` (the tool names it offers). A
-  final answer that came with no tool call in the turn - never after a tool ran, never on a
+  final answer that came with no tool call in the turn - never after a tool ran (a call the broker refused at the door, `refused`, is not a tool
+  call, D69), never on a
   resume, and only with a step left in the budget - is checked once through `final_step`, with no
   tools: `VERIFIER_PROMPT` and `verifier_input` (the tool names, the agenda, the previous answer,
-  the user's message and the draft). Both, with `FLAG_WORDS` and `RERUN_NOTE`, are held
+  the latest tool-call record (D68; names, arguments and state, never results), the user's message
+  and the draft). Both, with `FLAG_WORDS` and `RERUN_NOTE`, are held
   byte-identical to `bench/m10_unsupported.py`, which measured them
   (`test_second_look_matches_the_bench`). A JSON reply with any of the four flags
   (`unsupported_state`, `unsupported_done`, `empty_promise`, `false_incapability`) withdraws the

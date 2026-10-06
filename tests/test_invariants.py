@@ -236,7 +236,10 @@ class SecondLookInvariants(unittest.TestCase):
         for name in ("VERIFIER_PROMPT", "RERUN_NOTE", "FLAG_WORDS"):
             self.assertEqual(getattr(loop, name), getattr(bench, name), f"loop.{name} drifted from the bench")
         agenda = loop.AGENDA_HEADER + "\n- 09:00 dentist"
-        history = [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "Hello."},
+        record = {"role": "system", "content": loop.RECORD_HEADER + '\nsearch_tools {"query":"gmail"} ok'}
+        old = {"role": "system", "content": loop.RECORD_HEADER + "\nsend_mail {} (approval p1) waiting for approval"}
+        history = [{"role": "user", "content": "hi"}, old, {"role": "assistant", "content": "Hi."}, record,
+                   {"role": "assistant", "content": "Hello."},
                    {"role": "user", "content": "what is on today?"}]
         messages = ([{"role": "system", "content": "prompt"}, {"role": "system", "content": "Now: x\n\n" + agenda}]
                     + history + [{"role": "assistant", "content": "Nothing today."}])

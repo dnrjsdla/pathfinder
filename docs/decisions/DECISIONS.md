@@ -594,3 +594,15 @@ ledger events per refused attempt; the record shows the model's misses. *Reverse
 rows crowd the record (`CALL_ARGS_CLIP` already bounds each).
 A policy deny still counts as a tool call for the second look, because the verifier does not see
 this turn's refusals and would flag a truthful "your settings block it" as `false_incapability`.
+
+**D70. A stopped registry sync tries once more after ten minutes, and a run that has begun clears
+the failure note** (decided 2026-10-06, from live check (1)). A page that fails after its own
+retries stops the run (`failed_at`, `error`); before, the next attempt came only with a
+`search_tools` call or the catalog sense's 24 h poll, so a registry timeout at 339 s would have
+left the copy at 700 rows for a day without a search. Now `_sync` schedules one `refresh` after
+`RETRY_AFTER_FAILURE_S` (600 s) on a daemon timer, and a retry that fails schedules nothing more -
+the search or the poll takes over. `_run` clears `failed_at` and `error` as it starts, so
+`search`'s note says "still syncing (N so far)" while a resumed run fills, not "failed at HH:MM".
+Cost: one more request ten minutes after a failure; `mirror.py` 196/200. — *Reversed if* a
+registry outage makes the retry itself a cost (it is one page), or if live use shows the copy
+still stale for hours: then the poll's cadence shortens after a failure instead.

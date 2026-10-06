@@ -737,7 +737,9 @@ the next turn calls `mcp__<server>__<tool>`. Every hop is an event; `state.db` d
   first sync pages the whole registry through `catalog.page` and stores each page with its cursor
   in one transaction, so a restart resumes from the cursor; a stored cursor the registry refuses
   restarts the first sync once; a failing page is retried after 10 s and 60 s (a network error or
-  a 5xx), then the run stops and the error is kept for `search`'s note. After a complete sync,
+  a 5xx), then the run stops and the error is kept for `search`'s note; a stopped run tries once
+  more by itself after `RETRY_AFTER_FAILURE_S` (10 min), and a run that has begun clears the
+  failure first, so the note says syncing while it fills (D70). After a complete sync,
   each run asks only for what changed since the last one (`updated_since`); a row that arrives
   `deleted` is dropped, and another registry URL empties the copy (D45). Readers:
   `search(home, query)` (active servers whose name or description has a word starting like a

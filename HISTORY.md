@@ -1389,3 +1389,6 @@ Nothing the old verifier caught is lost and no control is pushed, so m10' (24 of
 second look) stands; a full re-run was not spent. The two live defects D68 answers (the pending
 id, "did you call X") are not in m10's cases - the record did not exist when they were collected -
 so live use is their measurement.
+
+**Q5 → D70 (2026-10-06).** The failed-sync item above is closed: a stopped sync retries once after
+ten minutes, and a run that has begun clears the failure note. `mirror.py` 196/200.

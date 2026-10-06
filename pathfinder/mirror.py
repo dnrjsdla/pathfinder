@@ -15,6 +15,7 @@ from pathfinder import catalog, clock
 
 _log = logging.getLogger("pathfinder.mirror")
 RETRY_DELAYS = (10, 60)  # a failing page is retried after 10 s, then 60 s; then the sync stops
+RETRY_AFTER_FAILURE_S = 600  # D70: a stopped sync tries once more after this; then the next search or poll
 MAX_PAGES = 1000  # a last guard per run; the registry is 372 pages of 100 today
 MAX_TERMS = 8
 
@@ -74,7 +75,7 @@ def _run(db, registry) -> None:
     cursor = m.get("cursor") or None
     resumed = cursor is not None  # only a cursor stored by an earlier run may be stale
     started = float(m.get("started_at") or time.time()) if cursor else time.time()
-    _put(db, started_at=started)
+    _put(db, started_at=started, failed_at="", error="")  # a run has begun: the note says syncing, not failed
     since = float(m["since"]) if m.get("complete") == "1" else None
     delays = list(RETRY_DELAYS)
     pages = 0
@@ -109,7 +110,7 @@ def _run(db, registry) -> None:
     raise RuntimeError(f"the registry gave more than {MAX_PAGES} pages")
 
 
-def _sync(home, registry) -> None:
+def _sync(home, registry, retry=False) -> None:
     db = None
     try:
         db = _open(home)
@@ -123,12 +124,16 @@ def _sync(home, registry) -> None:
             _put(db, failed_at=time.time(), error=catalog.oneline(e, 200) or type(e).__name__)
         except Exception:
             pass  # nowhere to store it: the warning is all there is
+        if not retry:  # a registry timeout is usually transient (live: three in a row at 339 s, fine 27 s later)
+            t = threading.Timer(RETRY_AFTER_FAILURE_S, refresh, (home, registry, True))
+            t.daemon = True
+            t.start()
     finally:
         if db is not None:
             db.close()
 
 
-def refresh(home, registry) -> None:
+def refresh(home, registry, retry=False) -> None:
     """Start the sync on a daemon thread unless one is alive; nothing waits for it (the first sync
     takes minutes)."""
     with _lock:
@@ -139,7 +144,7 @@ def refresh(home, registry) -> None:
                 db.executescript("DELETE FROM servers; DELETE FROM meta; INSERT INTO servers_fts (servers_fts) VALUES ('delete-all')")
                 _put(db, registry=registry)
             db.close()
-            _threads[str(home)] = threading.Thread(target=_sync, args=(home, registry), daemon=True)
+            _threads[str(home)] = threading.Thread(target=_sync, args=(home, registry, retry), daemon=True)
             _threads[str(home)].start()
 
 

@@ -5,6 +5,7 @@ import os
 import sqlite3
 import tempfile
 import threading
+import time
 import unittest
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -206,6 +207,42 @@ class MirrorTest(unittest.TestCase):
         self.H.fail_after = None
         self.sync()
         self.assertEqual((self.count(), self.meta()["failed_at"]), (5, ""))
+
+    def test_a_stopped_sync_retries_once_after_a_pause_and_the_note_says_syncing(self):
+        """D70: the retry comes by itself; a run that has begun clears the failure note; a retry that
+        fails too schedules nothing more (the next search or the 24 h poll takes over)."""
+        self.H.fail_after = 1
+        timers = []
+        real_timer = threading.Timer
+        def timer(interval, fn, args):
+            timers.append(interval)
+            return real_timer(0.05, fn, args)
+        with mock.patch.object(threading, "Timer", timer), self.assertLogs("pathfinder.mirror", "WARNING"):
+            self.sync()
+            self.assertEqual(timers, [mirror.RETRY_AFTER_FAILURE_S])
+            self.H.fail_after = None
+            for _ in range(100):  # the retry's own thread replaces the finished one
+                time.sleep(0.02)
+                th = mirror._threads.get(str(self.home))
+                if th is not None and th.is_alive():
+                    break
+            mirror._threads[str(self.home)].join(10)
+        self.assertEqual((self.count(), self.meta()["failed_at"]), (5, ""))
+        # a failing retry schedules no second retry
+        self.H.fail_after = 0
+        timers.clear()
+        with mock.patch.object(threading, "Timer", timer), self.assertLogs("pathfinder.mirror", "WARNING"):
+            mirror.refresh(self.home, self.url, True)
+            mirror._threads[str(self.home)].join(10)
+        self.assertEqual(timers, [])
+        self.assertTrue(self.meta()["failed_at"])
+        # a run that has begun clears the failure before its first page: the note says syncing, not failed
+        puts, real_put = [], mirror._put
+        with mock.patch.object(mirror, "_put", lambda db, **kv: (puts.append(kv), real_put(db, **kv))), \
+                self.assertLogs("pathfinder.mirror", "WARNING"):
+            mirror._sync(self.home, self.url, True)
+        self.assertEqual(puts[0].get("failed_at"), "")
+        self.assertTrue(puts[-1]["failed_at"])
 
     def test_bad_cursor_restarts_the_first_sync(self):
         db = mirror._open(self.home)

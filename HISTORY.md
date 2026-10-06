@@ -1300,7 +1300,7 @@ The first sync took 462 s (m9), 517 s (U0) and 1,076 s (U1's review, under load)
 37,200 rows, 54 MB; a search in the copy takes 1-6 ms. The duration depends on the registry and
 the machine, so no single figure is a fact to design against.
 
-## 2026-10-06 — Partition 8's live checks: thirteen of sixteen pass, two wait for the owner's hand
+## 2026-10-06 — Partition 8's live checks: fourteen of sixteen pass, two wait for the owner's hand
 
 Run in temp homes (`/tmp/pf8a`..`/tmp/pf8d`) against `partition-8` at `89cea92` with the owner's
 model, by four reviewer agents over about 60 model turns; the owner's daemon was not touched. The

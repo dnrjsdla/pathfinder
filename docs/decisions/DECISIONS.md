@@ -563,3 +563,18 @@ a pushed signal must satisfy is the senses' rule, not the socket's. The move tak
 of the daemon; `signals.py` and `rules.py` stay inside their shared 585. Moving the `react` branch
 to `loop.py` was rejected: it does not belong there, and it would free 6 lines. Raising the
 ceiling was rejected: it ignores the pressure D34's per-module line exists to apply.
+
+## 2026-10-06 — The second look and the record (owner's choice)
+
+**D68. The second look sees the record (amends D51)** (decided 2026-10-06). `verifier_input`
+carries the most recent record block of the history (D52: names, arguments and state, never
+results, clipped to 1,500 characters) after the previous answer, and `VERIFIER_PROMPT` counts that
+record, and a recap of the conversation, as support. Live on 2026-10-06 the model answered "the
+pending call is write_file, id ..." and "yes, I called run_command with ..." correctly from the
+record, but the verifier, which saw only the previous answer, the user line and "No tool was
+called in this turn.", flagged both `unsupported_state`: the drafts were withdrawn and the re-runs
+answered worse. "What did I just send you? quote it" was flagged too - a recap the main prompt
+exempts and the verifier prompt did not. The cost: the verifier input m10 measured changes (the
+prompt gains two sentences, the input up to 1,500 characters); m10' stays as measured and a smoke
+of the affected cases follows. *Reversed if* the smoke or live use shows the record making the
+verifier pass an unsupported answer.

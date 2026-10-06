@@ -277,7 +277,7 @@ dict 를 키 튜플로 바꿔 버린다.
 - **두 번째 확인**(D51). 사용자 턴은 `second_look`(그 턴이 내놓는 툴 이름들)을 넘긴다. 그 턴에
   툴 호출 없이 나온 최종 답 - 툴이 돈 뒤에는 절대, 재개에서도 절대 아니고, 예산에 스텝이 남았을
   때만 - 은 툴 없이 `final_step` 으로 한 번 확인된다: `VERIFIER_PROMPT` 와 `verifier_input`(툴
-  이름 · 일정 · 이전 답 · 사용자의 말 · 초안). 둘은 `FLAG_WORDS` · `RERUN_NOTE` 와 함께 그것을 잰
+  이름 · 일정 · 이전 답 · 가장 최근의 툴 호출 기록(D68; 이름 · 인자 · 상태, 결과는 없다) · 사용자의 말 · 초안). 둘은 `FLAG_WORDS` · `RERUN_NOTE` 와 함께 그것을 잰
   `bench/m10_unsupported.py` 와 바이트 단위로 같게 붙들린다(`test_second_look_matches_the_bench`).
   JSON 답에 네 표시(`unsupported_state`, `unsupported_done`, `empty_promise`,
   `false_incapability`) 중 하나라도 서면 초안은 철회된다: `said` 와 `messages` 에서 빠지고,

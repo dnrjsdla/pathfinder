@@ -299,7 +299,8 @@ words and leaves no dangling `user` message (D30).
   final answer that came with no tool call in the turn - never after a tool ran, never on a
   resume, and only with a step left in the budget - is checked once through `final_step`, with no
   tools: `VERIFIER_PROMPT` and `verifier_input` (the tool names, the agenda, the previous answer,
-  the user's message and the draft). Both, with `FLAG_WORDS` and `RERUN_NOTE`, are held
+  the latest tool-call record (D68; names, arguments and state, never results), the user's message
+  and the draft). Both, with `FLAG_WORDS` and `RERUN_NOTE`, are held
   byte-identical to `bench/m10_unsupported.py`, which measured them
   (`test_second_look_matches_the_bench`). A JSON reply with any of the four flags
   (`unsupported_state`, `unsupported_done`, `empty_promise`, `false_incapability`) withdraws the

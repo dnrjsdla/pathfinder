@@ -2,7 +2,8 @@ import json
 import unittest
 
 from pathfinder.llm import LLMError
-from pathfinder.loop import FLAG_WORDS, RERUN_NOTE, STEER_ENVELOPE, VERIFIER_PROMPT, TurnControl, run, settle
+from pathfinder.loop import FLAG_WORDS, RERUN_NOTE, STEER_ENVELOPE, VERIFIER_PROMPT, TurnControl, run, settle, verifier_input
+from pathfinder.state import RECORD_HEADER
 from pathfinder.signals import AGENDA_HEADER
 
 
@@ -278,6 +279,18 @@ class SecondLookTest(unittest.TestCase):
             f"Agenda the system gave this turn:\n{AGENDA_HEADER}\n- 09:00 standup",
             "The assistant's previous answer: " + "p" * 600, "The user: " + "q" * 1000,
             "No tool was called in this turn.", "Draft: Nothing today."])})
+
+    def test_verifier_input_carries_the_latest_record_when_there_is_one(self):
+        record = RECORD_HEADER + '\nsearch_tools {"query":"gmail"} ok'
+        with_old = _turn()
+        with_old.insert(2, {"role": "system", "content": RECORD_HEADER + "\nold_call {} ok"})
+        with_old.insert(4, {"role": "system", "content": record})
+        asked = verifier_input(self.TOOLS, with_old + [{"role": "assistant", "content": "d"}])
+        self.assertIn('state - not results):\nsearch_tools {"query":"gmail"} ok\n\nThe user:', asked)
+        self.assertNotIn("old_call", asked)
+        self.assertNotIn(RECORD_HEADER, asked)
+        bare = verifier_input(self.TOOLS, _turn() + [{"role": "assistant", "content": "d"}])
+        self.assertNotIn("tool calls in earlier turns", bare)
 
     def test_verifier_usage_counts_but_not_as_a_step(self):
         looks = _looks([("text", _verdict()), ("usage", {"prompt_tokens": 100, "completion_tokens": 9})])

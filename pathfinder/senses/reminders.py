@@ -36,7 +36,6 @@ def poll(options, now):
         key = f"reminder:{r['id']}:{r['due']}"
         if r["due"] is None or key in _announced:
             continue
-        _announced.add(key)
         kind = "overdue_reminder" if r["due"] < now else "due_reminder"
         title = oneline(r["title"])
         out.append(Signal(
@@ -45,6 +44,7 @@ def poll(options, now):
             fields={"title": title, "due": clock.format_local(r["due"]),
                     "minutes_until": clock.minutes_until(r["due"], now)},
             trust=TRUST))
+        _announced.add(key)  # after the append: a Signal that failed to build is retried next poll
     return out
 
 

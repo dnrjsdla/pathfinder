@@ -9,9 +9,7 @@ keeping. `Manager` is bound once (`memory.bind`), the same pattern as `jobs.bind
 from __future__ import annotations
 
 import difflib
-import importlib
 import os
-import pkgutil
 import tempfile
 import threading
 import time
@@ -21,13 +19,12 @@ from pathlib import Path
 from . import clock, config, ledger, loop
 from . import rules as rules_mod
 from . import skills as skills_mod
-from . import senses as senses_pkg
 from . import tools as tools_mod
 from .broker import Broker, Gate
 from .jobs import default_job_step_factory as default_pass_step_factory  # identical: worker_model/model, priority "job"
 from .llm import LLMError, openai_compat, resolve
 from .loop import TurnControl
-from .signals import Signal
+from .signals import Signal, sense_modules
 from .state import State
 from .tools import ToolSpec
 
@@ -337,13 +334,7 @@ class Manager:
         on): a RULES.md row for a sense not yet enabled must still parse."""
         conditions = dict(rules_mod.CORE_CONDITIONS)
         kinds = set()
-        for _finder, name, _is_pkg in pkgutil.iter_modules(senses_pkg.__path__):
-            if name.startswith("_"):
-                continue
-            try:
-                mod = importlib.import_module(f"pathfinder.senses.{name}")
-            except ImportError:  # one broken sense (live: imaplib) must not kill every memory pass; SenseLoop logs it
-                continue
+        for _name, mod in sense_modules():  # a broken sense must not kill every memory pass
             conditions.update(getattr(mod, "CONDITIONS", {}) or {})
             kinds.update((getattr(mod, "KINDS", {}) or {}).keys())
         return conditions, kinds

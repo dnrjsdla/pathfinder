@@ -143,19 +143,25 @@ def load(cfg: dict, home=None) -> list:
     return senses
 
 
-def _map_off_tools(on) -> None:
-    """Fill `tools.OFF_TOOLS` (tool name -> sense) for every sense module not turned on, so a call
-    to `list_events` with the calendar off is refused with the reason, not as a name that never was.
-    A module that fails to import is skipped - it is off either way."""
-    tools.OFF_TOOLS.clear()
+def sense_modules():
+    """Yield (name, module) for every sense module in `pathfinder/senses/`, on or off - the one scan
+    (D61). A module that fails to import is skipped (live: imaplib); SenseLoop logs it if it is on."""
     for _finder, name, _is_pkg in pkgutil.iter_modules(senses_pkg.__path__):
-        if name.startswith("_") or name in on:
+        if name.startswith("_"):
             continue
         try:
-            mod = importlib.import_module(f"pathfinder.senses.{name}")
+            yield name, importlib.import_module(f"pathfinder.senses.{name}")
         except Exception:  # noqa: BLE001
             continue
-        tools.OFF_TOOLS.update(dict.fromkeys(getattr(mod, "TOOLS", {}) or {}, name))
+
+
+def _map_off_tools(on) -> None:
+    """Fill `tools.OFF_TOOLS` (tool name -> sense) for every sense module not turned on, so a call
+    to `list_events` with the calendar off is refused with the reason, not as a name that never was."""
+    tools.OFF_TOOLS.clear()
+    for name, mod in sense_modules():
+        if name not in on:
+            tools.OFF_TOOLS.update(dict.fromkeys(getattr(mod, "TOOLS", {}) or {}, name))
 
 
 PUSH_FIELDS_LIMIT = 4096  # a pushed signal's `fields` text goes verbatim into the envelope

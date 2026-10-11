@@ -231,7 +231,7 @@ def _command_check(args):
     a command that would only fail or end the turn."""
     command = args["command"]
     first = (command.split() or [""])[0]
-    if first in TOOLS:
+    if first in TOOLS or first in OFF_TOOLS:  # live: list_mail run as a shell command, mail off
         raise ValueError(f"`{first}` is a tool, not a shell command: call it directly")
     if _SELF_RESTART.search(command):
         raise ValueError("refused: restarting PATHFINDER ends this turn without an answer - "

@@ -12,7 +12,7 @@ from unittest import mock
 from pathlib import Path
 
 from pathfinder import __main__ as cli
-from pathfinder import clock, config, memory, skills
+from pathfinder import clock, config, memory, signals, skills
 from pathfinder import rules as rules_mod
 from pathfinder import tools as tools_mod
 from pathfinder.ledger import Ledger
@@ -392,13 +392,13 @@ class ApplyTest(MemoryHarness):
 
     def test_rule_vocab_skips_a_sense_that_fails_to_import(self):
         mgr = self.manager()
-        real = memory.importlib.import_module
+        real = signals.importlib.import_module
 
         def broken_calendar(name):
             if name == "pathfinder.senses.calendar":
                 raise ImportError("broken")
             return real(name)
-        with mock.patch.object(memory.importlib, "import_module", broken_calendar):
+        with mock.patch.object(signals.importlib, "import_module", broken_calendar):
             conditions, kinds = mgr._rule_vocab()
         self.assertNotIn("upcoming_event", kinds)
         self.assertIn("job_done", kinds)  # the other senses still count

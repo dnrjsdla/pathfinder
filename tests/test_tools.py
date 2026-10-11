@@ -1,4 +1,5 @@
 import unittest
+from unittest import mock
 
 from pathfinder import jobs  # noqa: F401 - import side effect: registers start_job into tools.TOOLS
 from pathfinder import tools as tools_mod
@@ -100,11 +101,14 @@ class RunCommandCheckTest(unittest.TestCase):
     def test_run_command_refuses_a_tool_name_as_a_command(self):
         with self.assertRaisesRegex(ValueError, "`read_file` is a tool, not a shell command: call it directly"):
             self._check("read_file ~/notes.txt")
+        with mock.patch.dict(tools_mod.OFF_TOOLS, {"list_mail": "mail"}):
+            with self.assertRaisesRegex(ValueError, "`list_mail` is a tool"):
+                self._check("list_mail --limit 5")
         self.assertEqual(self._check("ls -la"), {"command": "ls -la"})
 
     def test_run_command_refuses_restarting_the_daemon(self):
         for command in ("pathfinder service restart", "python3 -m pathfinder service stop",
-                        "launchctl kickstart -k gui/501/pathfinder.daemon", "launchctl bootout gui/501/pathfinder.daemon",
+                        "launchctl kickstart -k gui/1000/pathfinder.daemon", "launchctl bootout gui/1000/pathfinder.daemon",
                         "launchctl unload ~/Library/LaunchAgents/pathfinder.daemon.plist",
                         "launchctl load -w ~/Library/LaunchAgents/pathfinder.daemon.plist"):
             with self.assertRaisesRegex(ValueError, "restarting PATHFINDER ends this turn", msg=command):

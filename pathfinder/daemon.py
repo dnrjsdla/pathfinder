@@ -531,6 +531,9 @@ class Daemon:
             self.record("decision", origin="signal", signal_key=signal.key, action="silence", why="seen")
             return
         target = self._target_session()
+        if signal.sense == "schedule":  # the owner's own note runs as their turn: its Gate resumes like any other
+            target.queue.put_nowait(("say", f"[scheduled] {signal.fields['text']}"))
+            return
         target.queue.put_nowait(("signal", signal))
 
     def _target_session(self) -> Session:

@@ -108,6 +108,20 @@ class ToolResultTimesTest(unittest.TestCase):
             sigs = reminders_sense.poll({}, 1000.0)
         self.assertEqual(sigs[0].key, "reminder:r1:5000.0")
 
+    def test_overdue_reminder_signals_once_per_process(self):
+        """Live: one overdue reminder re-signalled 98 times a day - it never leaves the window."""
+        reminders_sense._announced.clear()
+        with mock.patch.object(reminders_sense.ek, "list_reminders",
+                               return_value=[{"id": "r1", "title": "버스", "due": 500.0}]):
+            first = reminders_sense.poll({}, 1000.0)
+            again = reminders_sense.poll({}, 1300.0)
+        with mock.patch.object(reminders_sense.ek, "list_reminders",
+                               return_value=[{"id": "r1", "title": "버스", "due": 900.0}]):
+            moved = reminders_sense.poll({}, 1600.0)  # rescheduled: a new key speaks once more
+        self.assertEqual([s.kind for s in first], ["overdue_reminder"])
+        self.assertEqual(again, [])
+        self.assertEqual([s.key for s in moved], ["reminder:r1:900.0"])
+
 
 class AccessGrantTest(unittest.TestCase):
     def test_store_made_before_the_grant_is_dropped(self):

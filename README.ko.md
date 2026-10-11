@@ -60,10 +60,11 @@ pathfinder say "안녕"                    # 또는 한 번에 한 마디
 ## 감각 더 켜기
 
 `init`은 비밀이 필요 없는 감각을 켜고, 필요한 둘에 대해서는 나중에 붙여 넣을 정확한 줄을 찍어 준다.
-`config set senses` 는 값 전체를 바꾸므로 이미 켜진 것을 같이 적는다:
+한 줄에 감각 하나씩이고, 다른 감각은 켜진 채로 남는다:
 
 ```bash
-pathfinder config set senses '{"attach": {}, "catalog": {}, "schedule": {}, "reminders": {}, "shell": {}, "claude_code": {}, "calendar": {}, "mail": {"host": "imap.example.com", "user": "you@example.com"}}'
+pathfinder config set senses.calendar '{}'
+pathfinder config set senses.mail '{"host": "imap.example.com", "user": "you@example.com"}'
 pathfinder secret mail                   # IMAP 비밀번호, 가려 쳐서 키체인에 (화면에서는 /secret mail)
 ```
 

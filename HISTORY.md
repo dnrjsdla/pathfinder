@@ -1440,7 +1440,7 @@ spent on the analysis. Decisions: D71-D74.
 - **Sandboxed `say` exits 0 and is silent.** Audio, GUI and Apple Events do nothing inside the
   sandbox, and exit 0 reads as done.
 
-### Fixes by package (merged on `build`; the live measurements are still to come)
+### Fixes by package (merged on `build`, deployed 2026-10-11 16:20 with `pipx install --force .`)
 
 | package | fix | expected measurement |
 |---|---|---|
@@ -1463,6 +1463,20 @@ spent on the analysis. Decisions: D71-D74.
   reaches `rules.decide`.
 - **`daemon.py` is at 778/780.** The next daemon change needs a module-split decision first
   (D34; D67 was the last move out).
-- **The owner's seeded `connect-gmail` skill is not updated.** Skills seed with `O_EXCL` (D61),
-  so the home keeps the old step 4 (the whole-senses line) and step 6 (restart it yourself); the
-  owner's copy must be re-seeded (delete it, restart) to get the new text.
+- **A seeded skill is never updated by a deploy.** Skills seed with `O_EXCL` (D61), so the home
+  kept the old `connect-gmail` step 4 until the file was deleted and the daemon restarted at this
+  deploy. Any later change to a shipped skill needs the same hand step.
+
+### Live checks (2026-10-11, after the deploy)
+
+| check | result |
+|---|---|
+| a clean user turn "this week's events" | `list_events` and `list_reminders` called, no refusal, `answer` in 3 s |
+| a one-shot schedule two minutes ahead, no screen attached | `schedule_due` → `user` "[scheduled] …" → `answer` → one `delivery` via banner; the row removed itself |
+| mail sense offline (the machine went to sleep) | one `error` at 16:29, one `Recovered` at 17:56, nothing in between (was one record per poll) |
+| `config get senses` | the eight senses, the restored seven and mail |
+| overdue reminder re-signal | nothing to measure yet: no overdue reminder in the window since the deploy |
+
+One observation, not a defect of this work: the scheduled turn's answer stated a wrong time
+(a quarter past the clock line it was given) - a model error on a one-line question, the kind
+the second look does not cover because it concerns no tool.

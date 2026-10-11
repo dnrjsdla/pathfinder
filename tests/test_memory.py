@@ -8,10 +8,11 @@ import threading
 import time
 import types
 import unittest
+from unittest import mock
 from pathlib import Path
 
 from pathfinder import __main__ as cli
-from pathfinder import clock, config, memory, skills
+from pathfinder import clock, config, memory, signals, skills
 from pathfinder import rules as rules_mod
 from pathfinder import tools as tools_mod
 from pathfinder.ledger import Ledger
@@ -381,6 +382,27 @@ class ApplyTest(MemoryHarness):
         self.assertEqual(reason, "")
         self.assertEqual(called, [True])
         self.assertIn("count_over", (self.home / "RULES.md").read_text(encoding="utf-8"))
+
+    def test_read_memory_matches_space_and_underscore_names(self):
+        mgr = self.manager()
+        mgr.apply({"target": "wiki/Weekly_Plan.md", "op": "add", "old": "", "new": "# Weekly Plan\nGym.", "evidence": []})
+        for asked in ("wiki/Weekly Plan.md", "wiki/weekly plan.md", "wiki/Weekly_Plan.md"):
+            self.assertIn("Gym.", memory._read_memory(asked))
+        self.assertTrue(memory._read_memory("wiki/Monthly Plan.md").startswith("no such page"))
+
+    def test_rule_vocab_skips_a_sense_that_fails_to_import(self):
+        mgr = self.manager()
+        real = signals.importlib.import_module
+
+        def broken_calendar(name):
+            if name == "pathfinder.senses.calendar":
+                raise ImportError("broken")
+            return real(name)
+        with mock.patch.object(signals.importlib, "import_module", broken_calendar):
+            conditions, kinds = mgr._rule_vocab()
+        self.assertNotIn("upcoming_event", kinds)
+        self.assertIn("job_done", kinds)  # the other senses still count
+        self.assertTrue(set(rules_mod.CORE_CONDITIONS) <= set(conditions))
 
     def test_undo_is_the_inverse_op(self):
         mgr = self.manager()

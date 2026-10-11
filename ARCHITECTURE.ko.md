@@ -202,10 +202,19 @@ sandboxed, reversible, origins, normalize)`; `schema()` 는 OpenAI 툴 dict; `co
 상대경로는 `<workspace>/경로` 가 되고 `~` 는 펼쳐지며, 경로는 심볼릭 링크를 따라 풀려서 승인 줄에 실제로 건드릴 파일이 보인다(U27); `"format": "local_datetime"` 을 선언한
 인자는 `normalize_local_datetime(*keys)` 가 `clock.parse_local` 로 정규화하고, 그 `ValueError`
 (`Z` 나 오프셋)는 모델이 손볼 수 있는 툴 오류가 된다. 핵심 툴: `run_command(command,
-escalate)`(write, sandboxed) · `read_file(path)` · `write_file(path, content)`(write) — 파일 툴
-둘은 `exec.SECRET_PATHS` 를 거부한다. 감각이 툴을 더 얹을 수 있고(schedule 의
+escalate)`(write, sandboxed; 설명에 소리 · GUI · Apple Events 는 샌드박스 안에서 아무 효과가 없다 -
+종료 코드 0 - 그러니 그런 일은 escalate 하라고 적혀 있다) · `read_file(path)` · `write_file(path,
+content)`(write) — 파일 툴 둘은 `exec.SECRET_PATHS` 를 거부한다. `run_command` 의 `normalize`
+(`_command_check`, D74)는 게이트 앞에서, 첫 낱말이 툴 이름(`TOOLS` 나 `OFF_TOOLS` 에 있는)인
+명령(`` `list_events` is a tool, not a shell command: call it directly``)과 PATHFINDER 자신의
+데몬을 재시작하거나 멈추는 명령(`_SELF_RESTART`: `pathfinder service restart|stop`, pathfinder 를
+가리키는 `launchctl kickstart|bootout|load|unload`)을 거부한다: 그것은 답 없이 턴을 끝내므로
+주인이 턴이 끝난 뒤 셸에서 돌린다. 편의일 뿐 보안 경계가 아니다 - 다른 방법으로 프로세스를 죽이는
+명령은 지나간다. 감각이 툴을 더 얹을 수 있고(schedule 의
 `add_schedule`/`list_schedules`/`remove_schedule` — §8), `jobs.py` 도 임포트되는 순간 `start_job`
-을 같은 식으로 더하고(§9), `skills.py` 는 `read_skill` 을 더한다(§10). `origins`(기본값: 넷 다 — `ledger.ORIGINS`)는 어느 origin 의 턴이
+을 같은 식으로 더하고(§9), `skills.py` 는 `read_skill` 을 더한다(§10). `OFF_TOOLS` 는 켜지지 않은
+감각 모듈의 툴마다 그 감각을 짝지어 둔다(`signals.load` 가 `pathfinder/senses/` 를 훑는 단 하나의
+자리 `signals.sense_modules()` 로 채운다) - 브로커가 이름이 왜 없는지 말할 수 있게. `origins`(기본값: 넷 다 — `ledger.ORIGINS`)는 어느 origin 의 턴이
 그 툴의 스키마를 볼 수 있는지 이름 붙인다; `for_origin(origin)` 이 `TOOLS` 를 그것으로 거른다 -
 `start_job` 은 `origins={"user"}` 를 선언해서, 작업자 자신의 레지스트리와 신호 턴의 레지스트리에는
 아예 없다 — "작업자는 작업자를 못 만든다"는 정책이 아니라 구조다. `origins` 는 `memory` 에
@@ -232,8 +241,10 @@ limit=2000)` 은 장부에 적히는 `tool_call`/`tool_result`(작업자 자신�
 샌드박스 툴(escalate, 샌드박스 없음)에는 절대 적용되지 않으며, 세 낱말 중 하나일 때만 먹는다 —
 config 가 다른 값을 거부하고 policy 도 무시한다. 오타가 게이트를 끄면 안 된다. `DENIED_TEXT` 는
 실패가 아니라 정책이라고 말해 모델이 우회로를 찾지 않게 한다. `reversible` 은 자기가 만든 줄을
-지워 되돌릴 수 있는 write(`add_schedule`, `remove_schedule`)를 뜻한다 — 사용자에게는 그 자체로
+지워 되돌릴 수 있는 write(`remove_schedule`)를 뜻한다 — 사용자에게는 그 자체로
 돌지만, 신호가 연 턴(그런 줄을 심으려는 메일)은 다른 write 와 똑같이 여전히 묻는다.
+`add_schedule` 은 D71 부터 보통 write 다: 때가 된 일정은 주인 자신의 턴으로 돌므로(§7), 남의 글을
+읽던 턴이 등록한 줄이 나중에 주인의 신뢰로 돌면 안 된다.
 
 **`exec.py`** — Mark.5 의 Seatbelt 프로파일(실측은 HISTORY): `(deny default)`, 프로세스
 exec/fork, HOME 아래 `SECRET_PATHS`(`.ssh .aws .gnupg .config/gh .docker Library/Keychains
@@ -245,7 +256,9 @@ timeout=60)`: 자기 세션의 `Popen`, `control.interrupt` 가 서는 순간 �
 샌드박스가 막았다는 힌트가 붙는다. `available()` 은 darwin + `/usr/bin/sandbox-exec`.
 
 **`broker.py`** — `Broker(tools, origin, grants, control, emit, approved, denied)`;
-`call(id, name, args)` 가 루프의 `call_tool` 이다: 모르는 툴 → 오류(거부와 다른 문구); coerce →
+`call(id, name, args)` 가 루프의 `call_tool` 이다: 모르는 툴 → 오류(거부와 다른 문구; 꺼진
+감각의 툴이면 그렇다고 말한다, `no such tool: list_events (the calendar sense is off)`,
+`tools.OFF_TOOLS` 에서, D74); coerce →
 오류; 거부된 id → `USER_DENIED_TEXT`; 승인된 id 는 `(name, args)` 가 사용자가 승인한 것과 같을 때
 한 번만 돌고 소비된다; 그 밖에는 `policy.decide`: deny → `DENIED_TEXT`, ask → `Gate(id, name,
 arguments)` 예외, allow → `emit("tool_call")`, `control` 을 들고 핸들러 실행, `emit("tool_result")`.
@@ -285,6 +298,12 @@ dict 를 키 튜플로 바꿔 버린다.
   확인하지는 않는다. 깨진 JSON · `LLMError` · 취소는 초안을 그대로 둔다. 확인의 사용량은 세지만
   스텝은 아니다; 그동안 친 steer 는 기다리고(`in_tool`), interrupt 는 여전히 끊는다.
   `Outcome.check` 는 `passed`, `flagged`, `failed`, 또는 `None`(확인 안 함).
+- **위조된 기록**(D72). 모든 최종 초안은 - 재실행 것까지 - 두 번째 확인 앞에서 `RECORD_HEADER`
+  가 있는지 검사된다: 기록은 하네스만 쓰므로(§3) 그것을 써 내는 초안은 흉내다. 첫 번째는, 스텝이
+  남았으면, 표시된 초안과 같은 `withdraw` 로 드러내 놓고 철회되고(표시 `["forged_record"]`;
+  m10 의 `FLAG_WORDS` 밖의 따로 둔 상수 `FORGED_WHAT`/`FORGED_WHY`) 그 스텝이 한 번 다시 돈다;
+  두 번째는 머리말에서 잘리고 여느 초안처럼 두 번째 확인으로 간다. 잘린 것은 장부와 돌려주는 답에
+  닿지만 이미 흘러간 글은 화면에 남는다: 두 번째 `retract` 는 없다.
 - 어떤 결말이든 그 턴에 흘려보낸 텍스트를 전부 싣는다 - 두 번째 확인이 철회한 초안만 빼고;
   게이트(`Gate.said`)와 스트림 도중의 모델 오류(`LLMError.said`)도 그것을 실어 데몬이 적을 수
   있게 한다(불변조건 2, §2). reasoning 은 이력에 되돌리지 않는다.
@@ -309,7 +328,13 @@ dict 를 키 튜플로 바꿔 버린다.
   연결은 안 끊는다.
 - 세션 = 큐 + 워커 하나(`_Lane`, deque 로 만든 큐 — 보통 `asyncio.Queue` 에는 미리보기가 없다).
   큐 항목: `("say", text)` · `("resume", approval_id)` · `("continue", steer_text)` ·
-  `("signal", Signal)`. `attach` 는 `session_resume_s` 안의 최근 세션을 잇는다.
+  `("signal", Signal)`. 때가 된 일정은 `signal` 항목이 되지 않는다(D71): `push_signal` 은 여느
+  감각처럼 `signal` 을 적고 24시간 중복을 본 뒤, 대상 세션에 `("say", "[scheduled] <text>")` 를
+  넣는다 - 주인 자신의 메모가 주인의 턴으로 돈다: user origin 과 trust, 이력에 남고, 게이트는
+  승인으로 저장되어 여느 것처럼 재개된다 - 그리고 RULES.md(조용한 시간, 예산, 그 `##
+  schedule_due` 줄)는 보지 않는다. 붙은 화면이 없으면 턴의 결과는 outbox 를 거쳐 알림(배너)
+  `[scheduled] <note> (answer|gated)` 로 나가고, 답은 세션 이력에서 기다린다(D41: 열리는 화면이
+  알림을 따라간다). `attach` 는 `session_resume_s` 안의 최근 세션을 잇는다.
   **D41: 세션은 그 대화다** - `sessions.last_ts` 는 세션의 모든 사건에 움직이되 화면의 `presence`
   심장박동, 기억 패스 자신의 사건, 신호의 분류(신호 턴에서는 배달된 알림, 곧 그 `assistant` 사건만
   센다), 그리고 작업(D63) - 작업 자신의 사건, 작업에 보낸 steer, 작업 게이트의 승인 - 에는 움직이지
@@ -364,6 +389,9 @@ dict 를 키 튜플로 바꿔 버린다.
   `close()` 에 닿지 않아 npx 자식이 전부 고아가 됐다.
 - 모델이 막혀도 데몬은 산다: `LLMError` 는 `error` 사건 · `error` 줄 · `turn.end {kind: "error"}`.
   소켓은 0600 으로 태어나고, 살아 있는 소켓이면 거부한다.
+- 폴링 감각의 실패는 `SenseLoop.on_error`(`_sense_error`)를 거쳐 `error` 사건 `sense <name>:
+  <Type>: <message>` 로 데몬에 닿는다, 서로 다른 오류마다 한 번(§8); 회복도 같은 길로 `sense
+  <name>: Recovered: polling again` 이 된다 - 그래서 `error` 사건의 수에는 회복이 들어 있다.
 - `jobs.Manager` 는 `__init__` 에서 만들어지고(`self.jobs_mgr`, `jobs.bind` 로 묶임) `self._job_record`
   (적은 뒤 그 작업의 세션에 `job.start`/`job.gate`/`job.end` 를 보냄), `push_signal`, step factory 를
   받는다 — 이미 로드된 `self.rules` 를 그대로 넘기지 두 번 로드하지 않는다. 작업은 제 스레드에서
@@ -385,6 +413,7 @@ Daemon.push_signal ── "signal" 기록 ── state.seen(key, 24h)? ── �
         │ 아니오                                                    (버려짐, 큐에 안 들어감)
         ▼
 세션 lane: ("signal", Signal) — 바로 뒤에 연달아 있는 것들이 한 다발로 모인다
+             (일정은 대신 ("say", "[scheduled] <text>") 로 들어간다: §7, D71)
         │
         ▼
 Daemon.run_signal_turn ── 신호마다 rules.decide 를 먼저(절대 안 들려 있고 안 잠든다):
@@ -424,9 +453,13 @@ Daemon.run_signal_turn ── 신호마다 rules.decide 를 먼저(절대 안 �
   fields 의 JSON 2,000자)를 지나, bidi · 폭 없는 문자 · ANSI 가 신호를 타고 모델에 닿지
   않는다(U21). `load(cfg, home)` 은 설정된 `pathfinder.senses.<name>` 을 하나씩 임포트해서
   `OPTIONS`, 올바른 `TRUST`, 모든 줄이 `silence` 인 `KINDS`(침묵할 길이 없는 감각은 거부됨)를
-  갖췄는지 보고, `TOOLS` 를 공용 레지스트리에 합치고, `home` 을 옵션에 `_home` 으로 심는다.
+  갖췄는지 보고, `TOOLS` 를 공용 레지스트리에 합치고, `home` 을 옵션에 `_home` 으로 심는다;
+  그다음 설정되지 않은 모든 감각 모듈로 `tools.OFF_TOOLS` 를 채운다(`pathfinder/senses/` 를 훑는
+  단 하나의 자리 `sense_modules()`, 임포트에 실패한 모듈은 건너뛴다).
   `SenseLoop` 는 로드된 폴링 감각마다 자기 `CADENCE_S` 로 스레드에서 돌리고, 예외를 낸 감각은
-  죽이지 않고 로그만 남긴다. `seen_recently`/`hold_for` 는 state 에서 읽는 중복 제거와 속도
+  죽이지 않고 로그만 남긴다; 같은 오류 문구가 또 나오면 `on_error` 에 다시 넘기지 않고, 실패
+  뒤 처음 깨끗한 폴링이 `signals.Recovered` 를 한 번 넘긴다(D74; 실제로 메일 `gaierror` 하나가
+  똑같은 기록 144건을 썼다). `seen_recently`/`hold_for` 는 state 에서 읽는 중복 제거와 속도
   제한이다.
 - **`rules.py`** — Mark.5 `brain/rules.py` 를 옮겨왔다(`prepare` 는 뺐고 `model` 은 `ask_model`
   로 이름을 바꿨다). `RULES.md`: 앞머리(`quiet_hours, daily_budget, min_interval_s, burst_limit,
@@ -434,7 +467,7 @@ Daemon.run_signal_turn ── 신호마다 rules.decide 를 먼저(절대 안 �
   닫혀 있다: 핵심 `always, count_over, minutes_until_under, minutes_over` 에 로드된 감각들이
   등록한 것을 더한 것(`all_day`, `sender_in`/`sender_domain_in`/`subject_has`, `away`); 로드된
   감각이 없는 종류의 절은 파싱은 되지만 검사는 안 한다. `decide(signal, rules, user_lists,
-  today, now)`: 조용한 시간 -> defer, 하루 예산 소진 -> defer(`trust: user` 신호 - 일정이나
+  today, now)`: 조용한 시간 -> defer, 하루 예산 소진 -> defer(`trust: user` 신호 - 미리 알림이나
   claude_code 종류 자신의 인스턴스 - 는 **둘 다** 예외다: 사용자가 새벽 3시로 정한 알람은
   새벽 3시에도 사용자의 것이다); 그다음 표; 매치 없음 -> `ask_model`. `judge(signal, cfg,
   today)`(D13)는 `worker_model`(있으면) 아니면 `model` 로 요청 하나, 툴 없음, 이력 없음,
@@ -453,21 +486,23 @@ Daemon.run_signal_turn ── 신호마다 rules.decide 를 먼저(절대 안 �
 - **`senses/`** — 파일마다 150줄 천장(밑줄로 시작하는 파일은 여럿이 나눠 쓰는 어댑터라 이
   배분 밖이다). `schedule.py`: `cfg["schedules"]` 를 읽고(폴링, 30초), 때가 된 줄을 한 번만
   울리고, 반복이면 `config.set` 으로 `at` 을 미루고, 1회성이면 줄을 지운다;
-  `add_schedule`/`list_schedules`/`remove_schedule` 을 내놓는다(첫째와 셋째는 `write=True,
-  reversible=True`). `shell.py`: push 전용(`build(fields, now)`), `command_failed`(exit != 0) /
+  `add_schedule`/`list_schedules`/`remove_schedule` 을 내놓는다(`add_schedule` 은 `write=True`
+  라 묻는다, D71; `remove_schedule` 은 `write=True, reversible=True`); 때가 된 줄은 신호 턴이
+  아니라 주인의 `[scheduled]` 턴으로 돈다(§7). `shell.py`: push 전용(`build(fields, now)`), `command_failed`(exit != 0) /
   `command_finished`(exit == 0), `exit_nonzero` 와 `duration_over` 를 등록한다; 중복 제거 열쇠에
   도착 시각이 들어가는데, 반복 자체가 `count_over` 가 보려는 것이기 때문이다.
   `calendar.py`/`reminders.py`(캘린더 `poll` 은 아직 시작하지 않은 일정만 신호로 낸다 - 종일 일정이
-  폴링마다 다시 울려 하루 92번): 어댑터 하나(`_eventkit.py`, `senses/_*.py` 의 250줄 상한 아래 공유 어댑터, PyObjC 의
+  폴링마다 다시 울려 하루 92번; `reminders.py` 는 열쇠마다 프로세스당 한 번만 신호를 낸다,
+  `_announced` - 지난 미리 알림은 끝낼 때까지 창 안에 머물러 하루 98번 다시 울렸다): 어댑터 하나(`_eventkit.py`, `senses/_*.py` 의 250줄 상한 아래 공유 어댑터, PyObjC 의
   `EventKit`/`Foundation` 을 함수 안에서 그때그때 임포트 - Mark.5 의 `eventkit_bridge.py` 를
   목록/추가만 남기고 잘랐고, 미리 알림에는 완료/삭제를 더했다(D38: 둘 다 `write=True` 라 묻고
   나서 하며, 미리 알림이 아닌 id 는 `LookupError`), 시각은 평범한 epoch 부동소수라 `clock.py` 와 맞출 두 번째 날짜
   형식이 없다; 도구 결과는 `for_model()` 을 거쳐 로컬 `YYYY-MM-DD HH:MM` 으로 나간다 - 모델이
   epoch 를 잘못 읽었기 때문이다)를 감각 둘이 나눠 쓴다; 나눈 이유는 `TRUST` 가 다르기 때문이다(일정은 남의
   초대일 수 있어 `third_party`, 미리 알림은 사용자 자신의 메모라 `user`) - 감각 모듈 하나에
-  `TRUST` 문자열 하나뿐이라 한 파일에 같이 못 둔다. PyObjC 없이는 꺼짐: `poll` 이 한 번
-  예외를 내면(`SenseLoop.on_error` 가 `error` 사건으로 적는다) 그다음부터는 조용히 `[]` 를
-  돌려주고, 툴들도 같은 문구를 내는데 브로커가 다른 핸들러 예외와 똑같이 받는다. `mail.py`(D57, D59: 읽기만)는 공유 IMAP 어댑터 `_imap.py` 위에 선다: 읽기 전용 `SELECT`, 모든
+  `TRUST` 문자열 하나뿐이라 한 파일에 같이 못 둔다. PyObjC 없이는 꺼짐: `poll` 은 폴링마다
+  예외를 내고 `SenseLoop` 가 그것을 `error` 사건으로 한 번만 적으며(자기 `_off_logged` 깃발은
+  없다), 툴들도 같은 문구를 내는데 브로커가 다른 핸들러 예외와 똑같이 받는다. `mail.py`(D57, D59: 읽기만)는 공유 IMAP 어댑터 `_imap.py` 위에 선다: 읽기 전용 `SELECT`, 모든
   fetch 는 `BODY.PEEK` 라 아무것도 읽음 표시되지 않고, 비밀번호는 호출마다 키체인에서
   읽고(`keychain_service`/`user`, `/secret mail` 이나 `pathfinder secret mail` 로 저장) 쥐고
   있지 않는다 - config 나 환경변수가 아니다. `poll` 은 헤더만(`FROM SUBJECT DATE MESSAGE-ID`)
@@ -560,15 +595,18 @@ Daemon.run_signal_turn ── 신호마다 rules.decide 를 먼저(절대 안 �
 `..`, 절대경로, 그 밖의 무엇이든 거부한다.
 
 - **툴**, `jobs.py` 처럼 임포트 시점에 등록됨: `search_memory(query)`(하이브리드
-  `state.search`, `embed_model` 이 비어 있거나 임베딩이 실패하면 FTS 만), `read_memory(path)`,
-  `read_ledger(after, limit=80)`(패스가 페이지로 넘겨 읽는 번호 매긴 조각, 읽을 수 있는 사건마다
+  `state.search`, `embed_model` 이 비어 있거나 임베딩이 실패하면 FTS 만), `read_memory(path)`(없는
+  경로는 공백과 밑줄을 같게, 대소문자를 무시하고 이름이 맞는 `wiki/` 페이지로 넘어가고, 그것도
+  없을 때 `no such page` 목록), `read_ledger(after, limit=80)`(패스가 페이지로 넘겨 읽는 번호 매긴 조각, 읽을 수 있는 사건마다
   `render_line` 한 줄, 툴 잡담은 건너뜀), `edit_memory(target, op, old, new, evidence)`
   (`reversible=True`, D22). `search_memory`/`read_memory` 는 다섯 origin 모두에 열려 있고;
   `read_ledger` 는 `memory` 전용; `edit_memory` 는 `{user, memory}` - 사용자 턴 자신의 호출은
   그 자체로 돈다(정책: user/reversible = allow), 패스도 마찬가지, 그 밖엔 아무도 못 본다.
 - **게이트(`Manager.vet`, 모델 없음)**: 대상이 볼트 안; `op` 는 `add|replace|remove` 중 하나이고
   `new`/`old` 는 필요에 따라 비어 있으면 안 됨; `old` 는 지금 파일의 정확히 한 줄과 맞아야 함;
-  수정 후 파일이 여전히 파싱됨(`RULES.md` 는 로드된 감각들의 어휘로 `rules.parse` 를 지남;
+  수정 후 파일이 여전히 파싱됨(`RULES.md` 는 감각들의 어휘로 `rules.parse` 를 지남 -
+  `_rule_vocab` 이 `signals.sense_modules()` 를 쓰고, 임포트에 실패한 모듈은 건너뛰어 감각 하나가
+  깨져도 기억 패스가 죽지 않는다;
   `USER.md` 의 앞머리는 세 목록을 유지해야 함); `evidence` 는 부르는 쪽이 실제로 읽은 seq
   들이다(패스라면 `read_ledger` 가 쌓은 자기 `allowed` 집합, 사용자 턴이라면 - 인용할 것이 없어
   - 그 세션의 최신 `user` 메시지가 자동으로 채워짐); 패스가 하는 `USER.md` 수정은 origin 이
@@ -832,14 +870,19 @@ through /secret, never the chat.]` 와 `tools.READ_CLIP` 에서 자른 본문이
 | 기억 패스는 쓰기 호출, 그다음 따로 요약 호출 - 새 메시지가 없으면 요약 호출은 없음 | `test_memory.test_pass_makes_a_write_call_then_a_summary_call`, `test_no_summary_call_without_new_messages` |
 | 메일 검색은 질의를 UTF-8 리터럴로 보냄; 프로세스의 첫 poll 은 워터마크만 잡고 아무것도 알리지 않음 | `test_mail.test_query_goes_as_a_literal_utf8`, `test_first_poll_takes_the_watermark_silently` |
 | 스킬을 쓰는 것은 주인, 시드 복사, 사용자 턴에서 제안되어 승인된 `edit_memory` 뿐(기억 패스·`grants` 는 안 됨): `write_file` 은 `<홈>/skills/` 를 거부함; 시드는 있는 스킬을 절대 덮어쓰지 않음; 토큰을 품은 스킬은 로드되지 않음; `skills.py` ≤ 120 | `test_skills.test_write_file_cannot_write_a_skill`, `test_bind_copies_missing_seeds_and_leaves_edited_ones`, `test_a_skill_with_a_token_is_not_loaded`, `test_invariants.test_skills_module_under_120_lines`, `test_memory.test_skill_edit_from_user_turn_always_waits_for_approval`, `test_skill_edit_from_pass_signal_or_job_is_refused`, `test_third_party_text_cannot_become_a_skill`, `test_approvals_prints_a_skill_proposal_whole` |
+| D73: `config set senses.<name>` 은 감각 하나를 켜거나 끄고 나머지는 남긴다; `config get [key]` 는 지금 값을 찍는다; `ConfigError` 는 한 줄, 종료 코드 1 | `test_init.test_config_set_sense_merges_not_replaces`, `test_config_set_sense_off_removes_one`, `test_config_get_prints_current_value`, `test_config_error_is_one_line_not_a_traceback` |
+| D74: 꺼진 감각의 툴은 그 감각의 이름과 함께 거부된다; `run_command` 는 명령으로 쓴 툴 이름과 PATHFINDER 자신의 데몬 재시작을 게이트 앞에서 거부한다; 감각의 같은 오류는 한 번, 회복도 한 번 적힌다 | `test_broker.test_unknown_tool_of_an_off_sense_names_the_sense`, `test_tools.test_run_command_refuses_a_tool_name_as_a_command`, `test_run_command_refuses_restarting_the_daemon`, `test_signals.test_repeated_sense_error_is_logged_once_then_recovery_once` |
+| D72: 툴 호출 기록을 써 낸 초안은 철회되고 한 번 다시 돈다; 두 번째 것은 머리말에서 잘린다 | `test_loop.test_forged_record_is_withdrawn_and_rerun_once`, `test_forged_record_on_the_rerun_is_cut` |
+| D71: 때가 된 일정은 주인 자신의 턴으로 돈다(user origin, 게이트는 저장되어 승인으로 재개, 신호 알림 없음; 화면이 붙어 있으면 배너 없음); 사용자 턴에서 `add_schedule` 은 묻는다 | `test_daemon.test_schedule_due_runs_as_a_user_turn_and_can_gate`, `test_schedule_turn_with_a_screen_attached_sends_no_banner`, `test_policy.test_add_schedule_asks_in_a_user_turn` |
+| 지난 미리 알림은 프로세스당 한 번 신호를 낸다; `read_memory` 는 공백과 밑줄을 가리지 않고 위키 페이지를 찾는다; 임포트에 실패한 감각이 있어도 규칙 어휘는 나머지로 만들어진다 | `test_calendar.test_overdue_reminder_signals_once_per_process`, `test_memory.test_read_memory_matches_space_and_underscore_names`, `test_rule_vocab_skips_a_sense_that_fails_to_import` |
 | D49 의 상한(§13): 자기 테스트가 없던 코어 줄마다 §6 배분의 1.3배, `mirror.py` 는 D56 의 200, `llm/` 과 `mcp/` 는 §6 의 배분, 공유 감각 어댑터는 250; 코어 열세 줄의 합은 5,500 아래; 장부의 종류는 고정(구획 8 은 칸만 더했고 종류는 없음); `config.json` 은 `config.set` 만 씀 | `test_invariants.test_module_ceilings`, `test_core_under_5500_lines`, `test_sense_files_under_150_lines`, `test_no_new_ledger_type`, `test_config_json_written_only_by_config_set` |
 
 ## 13. 세는 법
 
 ```bash
-python3 -m unittest discover -s tests            # 전체 테스트, 네트워크 없음 (이 체크아웃에서 722)
+python3 -m unittest discover -s tests            # 전체 테스트, 네트워크 없음 (이 체크아웃에서 738)
 wc -l pathfinder/{ledger,state,daemon,loop,broker,policy,exec,tools,signals,rules,deliver,jobs,memory}.py
-                                                  # 코어(D49: 청사진 §6 의 줄들), 오늘 4,129줄; 합쳐서 많아야
+                                                  # 코어(D49: 청사진 §6 의 줄들), 오늘 4,202줄; 합쳐서 많아야
                                                   # 5,500(test_core_under_5500_lines), 줄마다 제 상한 아래:
                                                   # ledger 520 · state 780 · daemon 780 · loop 520 ·
                                                   # broker+policy 455 · exec 390 · tools 390 ·
@@ -867,9 +910,11 @@ python3 -m pathfinder approvals                   # 승인 대기 목록, state.
 python3 -m pathfinder approve ID | deny ID        # 게이트에 걸린 턴을 재개하고 답을 출력
 python3 -m pathfinder interrupt                   # 최근 세션의 도는 턴을 멈춤
 python3 -m pathfinder config set grants '{"write_file": "allow"}'
-python3 -m pathfinder config set senses '{"schedule": {}, "shell": {}, "calendar": {}, "reminders": {}}'
+python3 -m pathfinder config get senses           # 지금 값 (아무 키나; 없으면 config 전체)
+python3 -m pathfinder config set senses.calendar '{}'   # 감각 하나 켜기, 나머지는 그대로 (D73)
+python3 -m pathfinder config set senses.calendar off    # 감각 하나 끄기
 python3 -m pathfinder signal shell '{"cmd": "make test", "exit": 1, "seconds": 3, "cwd": "/tmp"}'
-python3 -m pathfinder config set senses '{"mail": {"host": "imap.example.com", "user": "you@example.com"}}'
+python3 -m pathfinder config set senses.mail '{"host": "imap.example.com", "user": "you@example.com"}'
 pathfinder secret mail                            # mail 을 켠 뒤 한 번 (화면에서는 /secret mail)
 pathfinder secret ID NAME [--from pasted-<seq>]   # 서버의 토큰을 가려 쳐서 키체인에; --from 은 붙여 넣은 토큰을 묶는다
 python3 -m pathfinder search "weather"           # 디스크의 레지스트리 사본, 데몬 불필요
@@ -892,8 +937,8 @@ python3 -m pathfinder memory undo                  # 최근 memory_apply 를 그
   매겨 보이고, 선택은 `config.set("model", "ollama:<id>")` 을 거친다; 목록에 임베딩 모델이 있으면
   `embed_model` 로 제안; 코드에도 README 에도 모델 이름은 없다 — 목록은 기계에서 온다); `npx`(경고만);
   홈 디렉터리(0700; `RULES.md`/`USER.md` 는 데몬의 첫 시작 몫); 비밀 없는 감각을 하나씩 예/아니오로
-  묻고 `config.set` 한 번으로 `senses` 에 병합(mail · calendar 는 묻지 않고 안내만 — 비밀번호나 권한
-  창이 필요하고 `init` 은 어느 쪽에도 막히면 안 된다); 셸 훅(스니펫을 `<home>/hooks/pathfinder.zsh`
+  묻고 `config.set` 한 번으로 `senses` 에 병합(mail · calendar 는 묻지 않고 하나에 `pathfinder config set
+  senses.<name>` 한 줄씩 안내만 — 비밀번호나 권한 창이 필요하고 `init` 은 어느 쪽에도 막히면 안 된다); 셸 훅(스니펫을 `<home>/hooks/pathfinder.zsh`
   에, 백업 뒤 `~/.zshrc` 에 가드된 한 줄 덧붙임 — 파일 끝에 줄바꿈이 없으면 먼저 하나; 스니펫은
   `zsh/datetime` 을 싣고 `add-zsh-hook` 으로 사용자 훅 옆에 붙는다); Claude Code 훅(`config.merge_json_file`, D60 으로
   `~/.claude/settings.json` 에 두 항목 병합); launchd 에이전트(`plistlib` 로 쓰고 `launchctl bootstrap

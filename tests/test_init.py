@@ -1,13 +1,17 @@
+import contextlib
 import http.server
+import io
 import json
 import os
 import plistlib
+import shlex
 import tempfile
 import threading
 import unittest
 from pathlib import Path
 from unittest import mock
 
+from pathfinder import __main__ as cli
 from pathfinder import config, init
 
 # "bge" is excluded on purpose: init.py's embed_model heuristic (`"bge" in id.lower()`) has to
@@ -117,10 +121,58 @@ class InitChecksTest(InitTestBase):
         config.set(self.home, "senses", {"mail": {}})
         # no embed candidate here (no "embed"/"bge" id) - straight to senses: attach y, rest n
         answers = ["1", "y", "n", "n", "n", "n", "n", "n"]
-        self.assertEqual(self.run_init(answers=answers, models_url=url), 0)
+        lines = []
+        self.assertEqual(self.run_init(answers=answers, models_url=url, say=lines.append), 0)
         senses = config.load(self.home)["senses"]
         self.assertIn("mail", senses)
         self.assertIn("attach", senses)
+        # the announced lines, pasted into a shell, change one sense each and keep the rest
+        announced = [line for line in lines if line.startswith("pathfinder config set senses.")]
+        self.assertEqual(len(announced), 2)
+        for line in announced:
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(cli.main(shlex.split(line)[1:]), 0)
+        self.assertEqual(set(config.load(self.home)["senses"]), {"mail", "attach", "calendar"})
+
+
+class ConfigCommandTest(InitTestBase):
+    """`pathfinder config get|set`: a sense is set or switched off on its own (A1: a whole-senses
+    `config set` switched seven senses off), and a refusal is one line, not a traceback."""
+
+    def setUp(self):
+        super().setUp()
+        self.home.mkdir(parents=True)
+        config.set(self.home, "senses", {"calendar": {}, "shell": {}})
+
+    def run_cli(self, *argv):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = cli.main(list(argv))
+        return rc, out.getvalue(), err.getvalue()
+
+    def test_config_set_sense_merges_not_replaces(self):
+        mail = {"host": "imap.example.com", "user": "you@example.com"}
+        self.assertEqual(self.run_cli("config", "set", "senses.mail", json.dumps(mail))[0], 0)
+        self.assertEqual(config.load(self.home)["senses"], {"calendar": {}, "shell": {}, "mail": mail})
+
+    def test_config_set_sense_off_removes_one(self):
+        self.assertEqual(self.run_cli("config", "set", "senses.shell", "off")[0], 0)
+        self.assertEqual(config.load(self.home)["senses"], {"calendar": {}})
+
+    def test_config_get_prints_current_value(self):
+        rc, out, _ = self.run_cli("config", "get", "senses")
+        self.assertEqual((rc, json.loads(out)), (0, {"calendar": {}, "shell": {}}))
+        rc, out, _ = self.run_cli("config", "get")
+        self.assertEqual(json.loads(out)["senses"], {"calendar": {}, "shell": {}})
+
+    def test_config_error_is_one_line_not_a_traceback(self):
+        for argv in (("config", "set", "senses.nosuch", "{}"), ("config", "set", "senses.mail", "[]"),
+                     ("config", "set", "nosuch", "1"), ("config", "get", "nosuch")):
+            rc, out, err = self.run_cli(*argv)
+            self.assertEqual((rc, out), (1, ""), argv)
+            self.assertEqual(len(err.splitlines()), 1, argv)
+            self.assertTrue(err.startswith("pathfinder: "), argv)
+        self.assertEqual(config.load(self.home)["senses"], {"calendar": {}, "shell": {}})
 
 
 class InitShellHookTest(InitTestBase):

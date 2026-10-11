@@ -190,5 +190,25 @@ class SenseLoopStopTest(unittest.TestCase):
         self.assertEqual(done, [True])
 
 
+class SenseLoopErrorTest(unittest.TestCase):
+    def test_repeated_sense_error_is_logged_once_then_recovery_once(self):
+        """B4: the same error three polls running is one record; the next clean poll is one `Recovered`."""
+        results = [OSError("login failed")] * 3 + [[], []]
+
+        def poll(options, now):
+            r = results.pop(0)
+            if isinstance(r, Exception):
+                raise r
+            return r
+
+        sense = Sense(name="mail", trust="third_party", kinds={}, conditions={}, options={},
+                      module=None, poll=poll, cadence_s=60)
+        errors = []
+        loop = signals.SenseLoop([sense], push=lambda sig: None, on_error=lambda n, e: errors.append((n, e)))
+        for _ in range(5):
+            asyncio.run(loop._poll_one(sense))
+        self.assertEqual([(n, type(e).__name__) for n, e in errors], [("mail", "OSError"), ("mail", "Recovered")])
+
+
 if __name__ == "__main__":
     unittest.main()

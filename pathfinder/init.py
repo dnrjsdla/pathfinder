@@ -30,12 +30,11 @@ LAUNCH_LABEL = "pathfinder.daemon"
 # The secret-free senses offered one yes/no each (D15); mail and calendar need a password or a
 # system permission prompt, so they are only announced (see _announce_lines), never asked.
 _ASKED_SENSES = ("attach", "catalog", "schedule", "reminders", "shell", "claude_code")
-def _announce_lines(senses):
-    """`config set senses` replaces the whole value, so the lines a person will paste must carry
-    what is already on (the review caught the bare `{"calendar": {}}` switching the rest off)."""
+def _announce_lines():
+    """One sense per line: `config set senses.NAME` keeps the others on."""
     mail = {"host": "imap.example.com", "user": "you@example.com"}
-    return (f"pathfinder config set senses '{json.dumps({**senses, 'calendar': {}})}'",
-            f"pathfinder config set senses '{json.dumps({**senses, 'mail': mail})}'")
+    return ("pathfinder config set senses.calendar '{}'",
+            f"pathfinder config set senses.mail '{json.dumps(mail)}'")
 
 # Copied verbatim from docs/senses.md's "Add to ~/.zshrc" block.
 _ZSHRC_SNIPPET = '''zmodload zsh/datetime          # $EPOCHSECONDS is empty without it
@@ -238,7 +237,7 @@ def run(home, *, ask=input, say=print, launchctl=_launchctl, models_url=None) ->
             senses.setdefault(name, {})
     config.set(home_path, "senses", senses, ledger=ledger)
     say("senses: " + ", ".join(sorted(senses)) + " - mail and calendar need one step each:")
-    for line in _announce_lines(senses):
+    for line in _announce_lines():
         say(line)
 
     # 6. Shell hook.

@@ -75,6 +75,14 @@ class BrokerTest(unittest.TestCase):
         result = b.call("c1", "n" * 3000, {})
         self.assertTrue(all(len(p["name"]) <= 64 for _, p in emitted) and len(result["error"]) < 100)
 
+    def test_unknown_tool_of_an_off_sense_names_the_sense(self):
+        """B2: with the calendar off, `list_events` is refused with the reason, not as a name that never was."""
+        from pathfinder import signals, tools
+        self.addCleanup(tools.OFF_TOOLS.clear)
+        signals.load({"senses": {}})
+        b, emitted = self._broker()
+        self._assert_refused(b, emitted, "c1", "list_events", {}, "no such tool: list_events (the calendar sense is off)")
+
     def test_an_allowed_call_is_not_marked_refused(self):
         b, emitted = self._broker()
         self.assertNotIn("refused", b.call("c1", "read_thing", {}))

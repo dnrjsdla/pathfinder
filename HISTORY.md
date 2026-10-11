@@ -1392,3 +1392,91 @@ so live use is their measurement.
 
 **Q5 → D70 (2026-10-06).** The failed-sync item above is closed: a stopped sync retries once after
 ten minutes, and a run that has begun clears the failure note. `mirror.py` 196/200.
+
+## 2026-10-11 — Seventeen days of real use (2026-09-25..10-11): what the ledger showed
+
+The owner's installed daemon, read from its ledger and `daemon.log`; no live model turns were
+spent on the analysis. Decisions: D71-D74.
+
+| days | events | `error` events |
+|---|---|---|
+| 12 days, 09-25..10-06 | 17,366 | 9 |
+| 10-07 | 636 | 0 |
+| 10-08 | 1,037 | 0 |
+| 10-09 | 1,806 | 97 |
+| 10-10 | 887 | 50 |
+| 10-11 | 691 | 2 |
+
+- `presence` is 46.5% of the ledger's bytes; `approval_pending` is 16.7%, from 45 rows of about
+  22 KB each - each copies the whole prompt.
+- 144 of the 158 errors are the same mail `gaierror`, one record per poll while the network
+  was down.
+
+### A1: seven senses switched off for two days
+
+- **10-09 15:50.** While connecting Gmail, the model ran `config set senses` with a whole object
+  holding mail alone. calendar, reminders, schedule, claude_code, shell, catalog and attach went
+  silent: `config set senses` replaces the value, and the skill told the model to carry what was
+  on, which it did not.
+- **10-10 and 10-11.** No `schedule_due` signal on either day; the two daily rows stayed at their
+  10-10 time, since the sense that advances `at` was off. 16 `no such tool` refusals (calendar
+  and reminder tools); asked about the week, the model answered "nothing registered this week"
+  and called it a permissions problem. Nothing told the owner a sense was off.
+- **10-11.** Restored through `config.set` (mail's options kept), the daemon restarted, the stuck
+  daily schedule fired once.
+
+### The other findings
+
+- **Reminder re-signal: 98 a day.** An overdue reminder stays in the poll window until done, and
+  each poll signalled it again (the 24 h dedupe silenced the copies, but every one is a `signal`
+  and a `decision` line). Four memory passes read mostly those lines, applied 0 changes and spent
+  18,556 tokens.
+- **Schedule turns ended `gated` in 2 s, twice.** A schedule was a signal turn: its network or
+  sandboxed call asked, and a signal turn's Gate is dropped, so only the bare note went out.
+- **Forged records: 5 drafts, 1 delivered.** The model wrote out the record header (D52) as its
+  own text; one of the five reached the owner as the answer (m10' saw this once in 40).
+- **2 turns cut by an in-turn restart.** A restart of the daemon run from inside a turn (the old
+  skill's step 6 named the command) ended the turn with no answer.
+- **Sandboxed `say` exits 0 and is silent.** Audio, GUI and Apple Events do nothing inside the
+  sandbox, and exit 0 reads as done.
+
+### Fixes by package (merged on `build`, deployed 2026-10-11 16:20 with `pipx install --force .`)
+
+| package | fix | expected measurement |
+|---|---|---|
+| WP1 (D73) | `config set senses.<name> '<json>'\|off`, `config get [key]`, a one-line `ConfigError`; the skill, `init` and `docs/senses.md` use the per-sense form | `config get senses` keeps the others after a one-sense set |
+| WP2, WP2b (D74) | an off sense's tool is refused with its name; `run_command` refuses a tool name as a command and a self-restart; a repeated sense error is logged once, then `Recovered` once; one `sense_modules()` scan; calendar/reminders without their own off flag | mail errors 144 → 1 + 1 `Recovered` per outage |
+| WP2b (D71) | `add_schedule` asks in a user turn | an `add_schedule` gate in the next schedule request |
+| WP3 (D72) | a forged record is withdrawn and re-run once, then cut | no record header in a delivered answer |
+| WP4 | each reminder key signals once per process | reminder re-signal 98/day → 1 per process |
+| WP5 | `read_memory` matches a wiki name across spaces and underscores; `_rule_vocab` skips a sense that fails to import | - |
+| WP6, WP6b (D71) | a due schedule queues `("say", "[scheduled] <text>")`; with no screen attached the outcome goes out as a banner | the next daily schedule produces a `[scheduled]` user turn |
+
+### Left open, for the owner
+
+- **The second look flagged 13 of 30 checked turns (43%)**, with at least 2 correct drafts
+  withdrawn. The verifier is a measured prompt (m10', D68); changing it is a re-measurement.
+- **`approval_pending` copies the whole prompt**: about 22 KB a row, 1 MB in total.
+- **The self-restart guard is a convenience, not a security boundary**: `kill $(pgrep -f
+  pathfinder)` passes it.
+- **The `## schedule_due` row in the owner's RULES.md is now dead** (D71): a schedule no longer
+  reaches `rules.decide`.
+- **`daemon.py` is at 778/780.** The next daemon change needs a module-split decision first
+  (D34; D67 was the last move out).
+- **A seeded skill is never updated by a deploy.** Skills seed with `O_EXCL` (D61), so the home
+  kept the old `connect-gmail` step 4 until the file was deleted and the daemon restarted at this
+  deploy. Any later change to a shipped skill needs the same hand step.
+
+### Live checks (2026-10-11, after the deploy)
+
+| check | result |
+|---|---|
+| a clean user turn "this week's events" | `list_events` and `list_reminders` called, no refusal, `answer` in 3 s |
+| a one-shot schedule two minutes ahead, no screen attached | `schedule_due` → `user` "[scheduled] …" → `answer` → one `delivery` via banner; the row removed itself |
+| mail sense offline (the machine went to sleep) | one `error` at 16:29, one `Recovered` at 17:56, nothing in between (was one record per poll) |
+| `config get senses` | the eight senses, the restored seven and mail |
+| overdue reminder re-signal | nothing to measure yet: no overdue reminder in the window since the deploy |
+
+One observation, not a defect of this work: the scheduled turn's answer stated a wrong time
+(a quarter past the clock line it was given) - a model error on a one-line question, the kind
+the second look does not cover because it concerns no tool.

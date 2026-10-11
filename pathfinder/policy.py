@@ -32,8 +32,9 @@ def _category(spec, args) -> str:
         escalate = bool((args or {}).get("escalate"))
         return "write" if (escalate or not _exec.available()) else "sandboxed"
     if spec.write:
-        # D22: a write the user can undo by deleting a row (add_schedule, remove_schedule)
-        # runs by itself for the user; a calendar write may sync and invite, so it stays "write".
+        # D22: a write the user can undo by deleting a row (remove_schedule) runs by itself for
+        # the user; add_schedule asks, because a due schedule runs as a user turn (WP2b amends
+        # D22); a calendar write may sync and invite, so it stays "write".
         return "reversible" if spec.reversible else "write"
     if spec.network:
         return "network"

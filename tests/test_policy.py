@@ -64,7 +64,7 @@ class PolicyTableTest(unittest.TestCase):
             self.assertEqual(policy.decide(READ, "user", {}, grants), "deny")
 
     def test_policy_reversible(self):
-        """D22: a reversible write (add_schedule, remove_schedule) runs by itself for the
+        """D22: a reversible write (remove_schedule) runs by itself for the
         user; every other origin still asks (job/signal) or denies (system) exactly as an
         ordinary write; an irreversible write's own row is unchanged; grants still win for user."""
         cases = [
@@ -77,6 +77,13 @@ class PolicyTableTest(unittest.TestCase):
             self.assertEqual(policy.decide(WRITE, "user", {}, {}), "ask")  # irreversible: unchanged
             grants = {"reversible_thing": "deny"}
             self.assertEqual(policy.decide(REVERSIBLE, "user", {}, grants), "deny")  # grants still win
+
+    def test_add_schedule_asks_in_a_user_turn(self):
+        """A due schedule runs as a user turn, so one the model adds while reading a mail must not
+        gain user trust silently: add_schedule asks even for the user; remove_schedule does not."""
+        from pathfinder.senses import schedule
+        self.assertEqual(policy.decide(schedule.TOOLS["add_schedule"], "user", {}, {}), "ask")
+        self.assertEqual(policy.decide(schedule.TOOLS["remove_schedule"], "user", {}, {}), "allow")
 
     def test_memory_origin_row(self):
         """The consolidation pass: read allowed, reversible edits allowed, everything else

@@ -7,8 +7,8 @@ not turn every command into a shell error.
 
 ## shell (this partition)
 
-Add to `~/.zshrc` (requires the sense to be turned on: `pathfinder config set senses
-'{"shell": {}}'`):
+Add to `~/.zshrc` (requires the sense to be turned on: `pathfinder config set senses.shell
+'{}'`):
 
 ```zsh
 zmodload zsh/datetime          # $EPOCHSECONDS is empty without it
@@ -44,8 +44,8 @@ affected - `precmd` already ran after the command finished either way.
 
 ## Claude Code hooks
 
-Turn the sense on with `pathfinder config set senses '{"claude_code": {}}'` (merge it into
-whatever `senses` already holds), then add this block to Claude Code's `settings.json`. Each
+Turn the sense on with `pathfinder config set senses.claude_code '{}'` (the other senses
+stay on), then add this block to Claude Code's `settings.json`. Each
 hook gets the event's JSON on stdin; the one-liner below reads `cwd`/`message` out of it and
 backgrounds the CLI call the same way the shell hook does, so a slow or stopped daemon never
 holds the hook up:
@@ -86,8 +86,10 @@ they are silent, since the user is presumably already looking at Claude Code's o
 Poll senses, no hook needed - just turn them on:
 
 ```bash
-pathfinder config set senses '{"calendar": {}, "reminders": {}}'   # needs pyobjc-framework-EventKit
-pathfinder config set senses '{"mail": {"host": "imap.example.com", "user": "you@example.com"}}'
+pathfinder config set senses.calendar '{}'    # needs pyobjc-framework-EventKit
+pathfinder config set senses.reminders '{}'
+pathfinder config set senses.mail '{"host": "imap.example.com", "user": "you@example.com"}'
+pathfinder service restart                    # senses load at start; run it in a shell, not in a turn
 ```
 
 `calendar`/`reminders` need `pyobjc-framework-EventKit` installed and Calendar/Reminders access

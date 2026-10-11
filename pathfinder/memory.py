@@ -9,9 +9,7 @@ keeping. `Manager` is bound once (`memory.bind`), the same pattern as `jobs.bind
 from __future__ import annotations
 
 import difflib
-import importlib
 import os
-import pkgutil
 import tempfile
 import threading
 import time
@@ -21,13 +19,12 @@ from pathlib import Path
 from . import clock, config, ledger, loop
 from . import rules as rules_mod
 from . import skills as skills_mod
-from . import senses as senses_pkg
 from . import tools as tools_mod
 from .broker import Broker, Gate
 from .jobs import default_job_step_factory as default_pass_step_factory  # identical: worker_model/model, priority "job"
 from .llm import LLMError, openai_compat, resolve
 from .loop import TurnControl
-from .signals import Signal
+from .signals import Signal, sense_modules
 from .state import State
 from .tools import ToolSpec
 
@@ -150,6 +147,11 @@ def _read_memory(path, control=None):
     p = vault_path(_manager.home, path)  # ValueError propagates - the broker turns it into a tool error
     if not p.exists():
         pages = _manager.state.pages()
+        key = path.replace("_", " ").lower()  # live: a title with spaces asked for, a file with underscores on disk
+        same = next((vault_path(_manager.home, pg["path"]) for pg in pages
+                     if pg["path"].startswith("wiki/") and pg["path"].replace("_", " ").lower() == key), None)
+        if same is not None and same.exists():
+            return tools_mod.clip(same.read_text(encoding="utf-8"))
         listing = ", ".join(pg["path"] for pg in pages) if pages else "(no pages yet)"
         return f"no such page: {path}. Pages: {listing}"
     return tools_mod.clip(p.read_text(encoding="utf-8"))
@@ -332,10 +334,7 @@ class Manager:
         on): a RULES.md row for a sense not yet enabled must still parse."""
         conditions = dict(rules_mod.CORE_CONDITIONS)
         kinds = set()
-        for _finder, name, _is_pkg in pkgutil.iter_modules(senses_pkg.__path__):
-            if name.startswith("_"):
-                continue
-            mod = importlib.import_module(f"pathfinder.senses.{name}")
+        for _name, mod in sense_modules():  # a broken sense must not kill every memory pass
             conditions.update(getattr(mod, "CONDITIONS", {}) or {})
             kinds.update((getattr(mod, "KINDS", {}) or {}).keys())
         return conditions, kinds

@@ -493,6 +493,9 @@ class Daemon:
                     leftover = list(s.control.steers)  # said after the last drain: recorded, not yet answered
                     s.control, s.turn, s.origin = None, "", None
             self.send(s, {"type": "turn.end", "turn": turn, "kind": kind})
+            if item_kind == "say" and payload.startswith("[scheduled] ") and not self._is_attached(s.id):
+                # no screen saw this scheduled turn: a banner says it ran; the answer stays in history
+                self.outbox.enqueue(Notice(uuid.uuid4().hex[:12], s.id, f"{payload} ({kind})", "schedule", []))
             self.outbox.release()  # a held notice may be releasable now that this turn ended
             if leftover and kind != "gated":  # a gate took its leftovers into the pending messages
                 s.queue.put_nowait(("continue", "\n".join(leftover)))
@@ -531,6 +534,9 @@ class Daemon:
             self.record("decision", origin="signal", signal_key=signal.key, action="silence", why="seen")
             return
         target = self._target_session()
+        if signal.sense == "schedule":  # the owner's own note runs as their turn: its Gate resumes like any other
+            target.queue.put_nowait(("say", f"[scheduled] {signal.fields['text']}"))
+            return
         target.queue.put_nowait(("signal", signal))
 
     def _target_session(self) -> Session:

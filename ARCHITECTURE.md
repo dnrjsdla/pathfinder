@@ -219,11 +219,21 @@ runs after coerce and before policy, so **the gate shows what will actually happ
 `read_file` and `write_file` a relative path becomes `<workspace>/path`, `~` expands, and the path is resolved through symlinks, so the approval line names the file really touched (U27); a param
 declaring `"format": "local_datetime"` is canonicalized by `normalize_local_datetime(*keys)`, which
 parses with `clock.parse_local` and lets its `ValueError` (a `Z` or an offset) become a tool error
-the model can act on. Core tools: `run_command(command, escalate)` (write, sandboxed),
-`read_file(path)`, `write_file(path, content)` (write) — both file tools refuse
-`exec.SECRET_PATHS`. A sense may add more (schedule's `add_schedule`/`list_schedules`/
+the model can act on. Core tools: `run_command(command, escalate)` (write, sandboxed; its
+description says audio, GUI and Apple Events do nothing inside the sandbox - exit 0 - so escalate
+for those), `read_file(path)`, `write_file(path, content)` (write) — both file tools refuse
+`exec.SECRET_PATHS`. `run_command`'s `normalize` (`_command_check`, D74) refuses, before the gate,
+a command whose first word is a tool's name, in `TOOLS` or `OFF_TOOLS` (`` `list_events` is a
+tool, not a shell command: call it directly``), and one that restarts or stops PATHFINDER's own
+daemon (`_SELF_RESTART`: `pathfinder service restart|stop`, a `launchctl
+kickstart|bootout|load|unload` naming pathfinder): that ends the turn with no answer, so the owner
+runs it in a shell after the turn. A convenience, not a security boundary - a command that kills
+the process another way passes. A sense may add more (schedule's `add_schedule`/`list_schedules`/
 `remove_schedule` — see §8), merged into this same registry by `signals.load`; `jobs.py` adds
-`start_job` the same way, at import time (see §9), and `skills.py` adds `read_skill` (§10). `origins` (default: all four - `ledger.ORIGINS`)
+`start_job` the same way, at import time (see §9), and `skills.py` adds `read_skill` (§10).
+`OFF_TOOLS` maps each tool of a sense module that is not turned on to that sense (`signals.load`
+fills it from `signals.sense_modules()`, the one scan of `pathfinder/senses/`), so the broker can
+say why the name is missing. `origins` (default: all four - `ledger.ORIGINS`)
 names which turn origins may even see a tool's schema; `for_origin(origin)` filters `TOOLS` by it -
 `start_job` declares `origins={"user"}`, so a job's own registry and a signal turn's never contain
 it: "a worker cannot make a worker" is structure, not a policy check. `origins` is opt-in for
@@ -250,9 +260,11 @@ declares `reversible=True` (D22) is judged as `reversible` instead of `write`.
 for a sandboxed tool that left its box (escalate, or no sandbox), and only with one of the three
 words: config refuses anything else and policy ignores it — a typo must not switch the gate off.
 `DENIED_TEXT` says it is policy, not a failure, so the model does not route around it. `reversible`
-means a write the user can undo by deleting a row it made (`add_schedule`, `remove_schedule`) —
+means a write the user can undo by deleting a row it made (`remove_schedule`) —
 it runs by itself for the user, but a signal-opened turn (a mail that tries to plant one) still
-asks, same as any other write.
+asks, same as any other write. `add_schedule` is a plain write since D71: a due schedule runs as
+the owner's own turn (§7), so a row registered while a turn reads someone else's text must not
+later run with the owner's trust.
 
 **`exec.py`** — the Mark.5 Seatbelt profile (HISTORY has its measurements): `(deny default)`,
 process exec/fork, read everything except `SECRET_PATHS` under HOME (`.ssh .aws .gnupg .config/gh
@@ -265,7 +277,9 @@ thread kills the whole process group the moment `control.interrupt` is set, outp
 blocked it. `available()` is darwin plus `/usr/bin/sandbox-exec`.
 
 **`broker.py`** — `Broker(tools, origin, grants, control, emit, approved, denied)`;
-`call(id, name, args)` is the loop's `call_tool`: unknown tool → error (worded unlike a denial);
+`call(id, name, args)` is the loop's `call_tool`: unknown tool → error (worded unlike a denial;
+a tool of a sense that is off says so, `no such tool: list_events (the calendar sense is off)`,
+from `tools.OFF_TOOLS`, D74);
 coerce → error; a denied id → `USER_DENIED_TEXT`; an approved id whose `(name, args)` match what
 the user approved runs once and is consumed; otherwise `policy.decide`: deny → `DENIED_TEXT`,
 ask → `raise Gate(id, name, arguments)`, allow → `emit("tool_call")`, run the handler with
@@ -310,6 +324,14 @@ words and leaves no dangling `user` message (D30).
   leaves the draft standing. The look's usage counts, but it is not a step; a steer typed during
   it waits for it (`in_tool`), an interrupt still cuts it. `Outcome.check` is `passed`,
   `flagged`, `failed` or `None` (not checked).
+- **A forged record** (D72). Every final draft, re-runs included, is checked for `RECORD_HEADER`
+  before the second look: only the harness writes the record (§3), so a draft that writes it out
+  imitates it. The first one, with a step left, is withdrawn in the open through the same
+  `withdraw` a flagged draft takes (flags `["forged_record"]`; `FORGED_WHAT`/`FORGED_WHY`, constants
+  of their own, outside m10's `FLAG_WORDS`) and the step runs again once; a second one is cut at
+  the header and goes on to the second look like any draft. The cut reaches the ledger and the
+  returned answer, but the text already streamed stays on the screen: there is no second
+  `retract`.
 - Every outcome carries all text streamed in the turn, except a draft the second look withdrew;
   a gate (`Gate.said`) and a model error in mid-stream (`LLMError.said`) carry it too, so the
   daemon can record it (Invariant 2, §2). Reasoning is never echoed into history.
@@ -335,7 +357,14 @@ words and leaves no dangling `user` message (D30).
   connection stays open.
 - A session is a queue plus one worker (`_Lane`, a deque-backed queue — plain `asyncio.Queue` has
   no peek). Lane items: `("say", text)`, `("resume", approval_id)`, `("continue", steer_text)`,
-  `("signal", Signal)`. `attach` resumes the latest session younger than `session_resume_s`.
+  `("signal", Signal)`. A due schedule never becomes a `signal` item (D71): `push_signal` records
+  the `signal` and checks its 24 h dedupe as for any sense, then queues `("say", "[scheduled]
+  <text>")` on the target session, so the owner's own note runs as their turn - user origin and
+  trust, in history, a Gate stored as an approval and resumed like any other - and RULES.md
+  (quiet hours, budget, its `## schedule_due` row) is never consulted for it. When no screen is
+  attached, the turn's outcome goes out through the outbox as a notice (a banner),
+  `[scheduled] <note> (answer|gated)`, and the answer waits in the session's history (D41: a
+  screen that opens follows the notice). `attach` resumes the latest session younger than `session_resume_s`.
   **D41: a session is its conversation** - `sessions.last_ts` moves on every session event except
   a screen's `presence` heartbeat, a memory pass's own, a signal's triage (of a signal turn only
   the delivered notice, its `assistant` event, counts), and a job (D63): its own events, a steer to
@@ -395,6 +424,10 @@ words and leaves no dangling `user` message (D30).
   socket unlinked) - before this, Ctrl-C never reached `close()` and every npx child was orphaned.
 - The daemon survives a blocked model: `LLMError` becomes an `error` event, an `error` line and
   `turn.end {kind: "error"}`. The socket is born 0600; a live one is refused.
+- A poll sense's failure reaches the daemon through `SenseLoop.on_error` (`_sense_error`) as an
+  `error` event, `sense <name>: <Type>: <message>`, once per distinct error (§8); its recovery
+  takes the same path, `sense <name>: Recovered: polling again` - so a count of `error` events
+  includes recoveries.
 - `jobs.Manager` is built in `__init__` (`self.jobs_mgr`, bound via `jobs.bind`) and given
   `self._job_record` (records, then sends `job.start`/`job.gate`/`job.end` to the job's session), `push_signal`
   and a step factory - `self.rules`, already loaded, is passed straight in rather than loaded
@@ -416,6 +449,7 @@ Daemon.push_signal ── record "signal" ── state.seen(key, 24h)? ── ye
         │ no                                                          (dropped, nothing queued)
         ▼
 session lane: ("signal", Signal) — every consecutive one behind it drains into one bundle
+             (a schedule is queued as ("say", "[scheduled] <text>") instead: §7, D71)
         │
         ▼
 Daemon.run_signal_turn ── rules.decide per signal FIRST (never held, never sleeps):
@@ -456,9 +490,13 @@ Daemon.run_signal_turn ── rules.decide per signal FIRST (never held, never s
   bidi, zero-width or ANSI character reaches the model through a signal (U21). `load(cfg, home)` imports each
   configured `pathfinder.senses.<name>`, checks it exports `OPTIONS`, a valid `TRUST`, and `KINDS`
   whose every row defaults to `silence` (a sense with no "stay quiet" case is refused), merges its
-  `TOOLS` into the shared registry, and injects `home` into its options as `_home`. `SenseLoop`
+  `TOOLS` into the shared registry, and injects `home` into its options as `_home`; then it fills
+  `tools.OFF_TOOLS` from every sense module not configured (`sense_modules()`, the one scan of
+  `pathfinder/senses/`, which skips a module that fails to import). `SenseLoop`
   runs each loaded poll sense on its own `CADENCE_S` in a thread, catching a raising sense instead
-  of dying. `seen_recently`/`hold_for` are the dedupe and rate-limit reads from `state`.
+  of dying; the same error text again is not handed to `on_error` a second time, and the next
+  clean poll after a failure hands it `signals.Recovered` once (D74; live, one mail `gaierror`
+  wrote 144 identical records). `seen_recently`/`hold_for` are the dedupe and rate-limit reads from `state`.
 - **`rules.py`** — transplanted from Mark.5 `brain/rules.py` (`prepare` dropped, `model` renamed
   `ask_model`). `RULES.md`: frontmatter (`quiet_hours, daily_budget, min_interval_s, burst_limit,
   judgment_cap, idle_threshold_s`) plus one `## <kind>` table per kind, first match wins. The
@@ -466,7 +504,7 @@ Daemon.run_signal_turn ── rules.decide per signal FIRST (never held, never s
   plus whatever the loaded senses register (`all_day`, `sender_in`/`sender_domain_in`/
   `subject_has`, `away`); a section whose kind belongs to no loaded sense is parsed but not
   checked. `decide(signal, rules, user_lists, today, now)`: quiet hours -> defer, daily budget
-  spent -> defer (a `trust: user` signal, e.g. a schedule or a claude_code kind's own instance,
+  spent -> defer (a `trust: user` signal, e.g. a reminder or a claude_code kind's own instance,
   is exempt from **both** — an alarm the user set is theirs to hear at 3 a.m. too); then the
   table; no match -> `ask_model`. `judge(signal, cfg, today)` (D13) is one request on
   `worker_model` if set else `model`, no tools, no history, messages = a short fixed system
@@ -485,12 +523,15 @@ Daemon.run_signal_turn ── rules.decide per signal FIRST (never held, never s
 - **`senses/`** — one file each, capped at 150 lines (a leading-underscore file is a shared
   adapter, outside that budget). `schedule.py`: reads `cfg["schedules"]` (poll, 30 s), fires a
   due row once, advances `at` through `config.set` for a repeat, drops a one-shot row; ships
-  `add_schedule`/`list_schedules`/`remove_schedule` (the first and third `write=True,
-  reversible=True`). `shell.py`: push-only (`build(fields, now)`), `command_failed` (exit != 0) /
+  `add_schedule`/`list_schedules`/`remove_schedule` (`add_schedule` `write=True`, so it asks,
+  D71; `remove_schedule` `write=True, reversible=True`); a due row runs as the owner's
+  `[scheduled]` turn, not a signal turn (§7). `shell.py`: push-only (`build(fields, now)`), `command_failed` (exit != 0) /
   `command_finished` (exit == 0), registers `exit_nonzero` and `duration_over`; its dedupe key
   includes the arrival time, since a repeat is exactly what `count_over` needs to see.
   `calendar.py`/`reminders.py` (the calendar's `poll` signals only events not yet started - an
-  all-day event re-signalled every poll, 92 times in a day): two sense modules over one adapter, `_eventkit.py` (a shared adapter under the 250-line ceiling of `senses/_*.py`,
+  all-day event re-signalled every poll, 92 times in a day; `reminders.py`'s signals each key
+  once per process, `_announced` - an overdue reminder stays in the window until done and was
+  re-signalled 98 times a day): two sense modules over one adapter, `_eventkit.py` (a shared adapter under the 250-line ceiling of `senses/_*.py`,
   PyObjC's `EventKit`/`Foundation` imported lazily inside each function - trimmed from Mark.5's
   `eventkit_bridge.py` to list/add, plus complete/delete for a reminder (D38: both `write=True`,
   so they ask; an id that is not a reminder raises `LookupError`), timestamps as plain epoch floats so no second date
@@ -498,8 +539,8 @@ Daemon.run_signal_turn ── rules.decide per signal FIRST (never held, never s
   local `YYYY-MM-DD HH:MM`, because the model misread epochs); split in two because their `TRUST` differs (an
   event may be someone else's invitation, `third_party`; a reminder is the user's own note,
   `user`) - one `TRUST` string per sense module is why they can't share a file. Off without
-  PyObjC: `poll` raises once (`SenseLoop.on_error` logs it as an `error` event) and quietly
-  returns `[]` on every later poll; the tools raise the same message, caught by the broker like
+  PyObjC: `poll` raises on every poll and `SenseLoop` logs it once as an `error` event (no
+  `_off_logged` flag of their own); the tools raise the same message, caught by the broker like
   any handler exception. `mail.py` (D57, D59: reading only) stands on `_imap.py`, the shared IMAP adapter: a read-only
   `SELECT`, every fetch through `BODY.PEEK` so nothing is marked read, the password read from the
   Keychain on each call (`keychain_service`/`user`, stored with `/secret mail` or `pathfinder
@@ -595,7 +636,9 @@ partition 3) and now `wiki/*.md` - no `vault/` directory: "inside the vault" is 
 (`vault_path`) against these three, refusing `..`, an absolute path, or anything else.
 
 - **Tools**, registered at import like `jobs.py`'s: `search_memory(query)` (hybrid `state.search`,
-  FTS-only when `embed_model` is unset or embedding fails), `read_memory(path)`, `read_ledger(after,
+  FTS-only when `embed_model` is unset or embedding fails), `read_memory(path)` (a missing path
+  falls back to the `wiki/` page whose name matches with spaces and underscores alike, case
+  ignored, before the `no such page` listing), `read_ledger(after,
   limit=80)` (the numbered slice a pass pages through, `render_line` per readable event, tool
   chatter skipped) and `edit_memory(target, op, old, new, evidence)` (`reversible=True`, D22).
   `search_memory`/`read_memory` are open to all five origins; `read_ledger` is `memory`-only;
@@ -603,8 +646,9 @@ partition 3) and now `wiki/*.md` - no `vault/` directory: "inside the vault" is 
   user/reversible = allow), the pass's too, nothing else may even see it.
 - **The gate (`Manager.vet`, no model)**: target inside the vault; `op` one of `add|replace|remove`
   with `new`/`old` non-empty as each needs; `old` must match exactly one line of the file as it
-  stands; the file after the edit still parses (`RULES.md` through `rules.parse` with the loaded
-  senses' vocabulary; `USER.md`'s frontmatter must keep its three lists); `evidence` is seqs the
+  stands; the file after the edit still parses (`RULES.md` through `rules.parse` with the
+  senses' vocabulary - `_rule_vocab` over `signals.sense_modules()`, which skips a module that
+  fails to import, so one broken sense cannot kill a memory pass; `USER.md`'s frontmatter must keep its three lists); `evidence` is seqs the
   caller actually read (a pass's own `allowed` set from `read_ledger`, or - for a user turn, which
   has none to cite - the session's latest `user` message, filled in automatically); a `USER.md`
   edit from the pass needs evidence whose origin is `user` (`test_user_facts_need_user_origin`). A
@@ -886,14 +930,19 @@ the next turn calls `mcp__<server>__<tool>`. Every hop is an event; `state.db` d
 | A memory pass is a write call, then a separate summary call - none when there are no new messages | `test_memory.test_pass_makes_a_write_call_then_a_summary_call`, `test_no_summary_call_without_new_messages` |
 | Mail's search sends the query as a UTF-8 literal; a process's first poll takes the watermark and announces nothing | `test_mail.test_query_goes_as_a_literal_utf8`, `test_first_poll_takes_the_watermark_silently` |
 | A skill is written only by the owner, the seed copy or an approved `edit_memory` from a user turn (never the memory pass, never `grants`): `write_file` refuses `<home>/skills/`; a seed never overwrites an existing skill; a skill holding a token is not loaded; `skills.py` <= 120 | `test_skills.test_write_file_cannot_write_a_skill`, `test_bind_copies_missing_seeds_and_leaves_edited_ones`, `test_a_skill_with_a_token_is_not_loaded`, `test_invariants.test_skills_module_under_120_lines`, `test_memory.test_skill_edit_from_user_turn_always_waits_for_approval`, `test_skill_edit_from_pass_signal_or_job_is_refused`, `test_third_party_text_cannot_become_a_skill`, `test_approvals_prints_a_skill_proposal_whole` |
+| D73: `config set senses.<name>` sets or switches off one sense and keeps the others; `config get [key]` prints the current value; a `ConfigError` is one line, exit 1 | `test_init.test_config_set_sense_merges_not_replaces`, `test_config_set_sense_off_removes_one`, `test_config_get_prints_current_value`, `test_config_error_is_one_line_not_a_traceback` |
+| D74: a tool of a sense that is off is refused with the sense's name; `run_command` refuses a tool's name used as a command and a restart of PATHFINDER's own daemon before the gate; a sense's repeated error is logged once, its recovery once | `test_broker.test_unknown_tool_of_an_off_sense_names_the_sense`, `test_tools.test_run_command_refuses_a_tool_name_as_a_command`, `test_run_command_refuses_restarting_the_daemon`, `test_signals.test_repeated_sense_error_is_logged_once_then_recovery_once` |
+| D72: a draft that writes out the tool-call record is withdrawn and re-run once; a second one is cut at the header | `test_loop.test_forged_record_is_withdrawn_and_rerun_once`, `test_forged_record_on_the_rerun_is_cut` |
+| D71: a due schedule runs as the owner's own turn (user origin, its Gate stored and resumed on approval, no signal notice; no banner while a screen is attached); `add_schedule` asks in a user turn | `test_daemon.test_schedule_due_runs_as_a_user_turn_and_can_gate`, `test_schedule_turn_with_a_screen_attached_sends_no_banner`, `test_policy.test_add_schedule_asks_in_a_user_turn` |
+| An overdue reminder signals once per process; `read_memory` finds a wiki page across spaces and underscores; a sense that fails to import leaves the rule vocabulary to the others | `test_calendar.test_overdue_reminder_signals_once_per_process`, `test_memory.test_read_memory_matches_space_and_underscore_names`, `test_rule_vocab_skips_a_sense_that_fails_to_import` |
 | D49's ceilings (§13): 1.3x the §6 allocation for every core row that had no test of its own, D56's 200 for `mirror.py`, §6's allocations for `llm/` and `mcp/`, 250 for a shared sense adapter; the thirteen core rows together under 5,500; the ledger's types pinned (partition 8 added fields, no type); `config.json` written only by `config.set` | `test_invariants.test_module_ceilings`, `test_core_under_5500_lines`, `test_sense_files_under_150_lines`, `test_no_new_ledger_type`, `test_config_json_written_only_by_config_set` |
 
 ## 13. How to count
 
 ```bash
-python3 -m unittest discover -s tests            # all tests, no network (722 on this checkout)
+python3 -m unittest discover -s tests            # all tests, no network (738 on this checkout)
 wc -l pathfinder/{ledger,state,daemon,loop,broker,policy,exec,tools,signals,rules,deliver,jobs,memory}.py
-                                                  # the core, D49: the blueprint's §6 rows; 4,129 lines today,
+                                                  # the core, D49: the blueprint's §6 rows; 4,202 lines today,
                                                   # 5,500 together at most (test_core_under_5500_lines), each row
                                                   # under its own ceiling: ledger 520, state 780, daemon 780,
                                                   # loop 520, broker+policy 455, exec 390, tools 390,
@@ -922,9 +971,11 @@ python3 -m pathfinder approvals                   # pending gates, read from sta
 python3 -m pathfinder approve ID | deny ID        # resumes the gated turn and prints its answer
 python3 -m pathfinder interrupt                   # stops the running turn of the latest session
 python3 -m pathfinder config set grants '{"write_file": "allow"}'
-python3 -m pathfinder config set senses '{"schedule": {}, "shell": {}, "calendar": {}, "reminders": {}}'
+python3 -m pathfinder config get senses           # the current value (any key; none = the whole config)
+python3 -m pathfinder config set senses.calendar '{}'   # one sense on, the others kept (D73)
+python3 -m pathfinder config set senses.calendar off    # one sense off
 python3 -m pathfinder signal shell '{"cmd": "make test", "exit": 1, "seconds": 3, "cwd": "/tmp"}'
-python3 -m pathfinder config set senses '{"mail": {"host": "imap.example.com", "user": "you@example.com"}}'
+python3 -m pathfinder config set senses.mail '{"host": "imap.example.com", "user": "you@example.com"}'
 pathfinder secret mail                            # once, after turning mail on (or /secret mail in the screen)
 pathfinder secret ID NAME [--from pasted-<seq>]   # a server's token, typed hidden into the Keychain; --from binds a pasted token
 python3 -m pathfinder search "weather"           # the registry copy on disk, no daemon
@@ -949,8 +1000,8 @@ python3 -m pathfinder memory undo                  # replay the last memory_appl
   no model name is in the code or the README - the list comes from the machine); `npx` (a warning
   only); the home directory (0700; `RULES.md`/`USER.md` stay the daemon's first-start job); the
   secret-free senses one yes/no each, merged into `senses` through one `config.set` (mail and
-  calendar are announced, not asked - they need a password or a permission prompt and `init` must
-  not block on either); the shell hook (the snippet to `<home>/hooks/pathfinder.zsh`, one guarded
+  calendar are announced, not asked, as one `pathfinder config set senses.<name>` line each - they
+  need a password or a permission prompt and `init` must not block on either); the shell hook (the snippet to `<home>/hooks/pathfinder.zsh`, one guarded
   line appended to `~/.zshrc` after a backup, a newline first when the file lacks one; the snippet
   loads `zsh/datetime` and registers through `add-zsh-hook`, beside the user's own hooks); the Claude Code hooks (two entries merged into
   `~/.claude/settings.json` through `config.merge_json_file`, D60); the launchd agent (written

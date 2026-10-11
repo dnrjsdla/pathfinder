@@ -14,18 +14,14 @@ def _no_pyobjc():
 
 
 class CalendarOffTest(unittest.TestCase):
-    def setUp(self):
-        calendar_sense._off_logged = False
-        reminders_sense._off_logged = False
-
     def test_calendar_off_without_pyobjc(self):
         with _no_pyobjc():
             with self.assertRaises(RuntimeError) as cm:
                 calendar_sense.poll({}, 1000.0)
             self.assertIn("install pyobjc-framework-EventKit", str(cm.exception))
-            # logged once (SenseLoop.on_error would have recorded it) - then quiet forever
-            self.assertEqual(calendar_sense.poll({}, 1000.0), [])
-            self.assertEqual(calendar_sense.poll({}, 2000.0), [])
+            # raises on every poll: an empty list would read as a recovery (SenseLoop dedupes the error)
+            with self.assertRaises(RuntimeError):
+                calendar_sense.poll({}, 2000.0)
 
     def test_calendar_tools_return_error_string_when_off(self):
         with _no_pyobjc():
@@ -40,7 +36,8 @@ class CalendarOffTest(unittest.TestCase):
             with self.assertRaises(RuntimeError) as cm:
                 reminders_sense.poll({}, 1000.0)
             self.assertIn("install pyobjc-framework-EventKit", str(cm.exception))
-            self.assertEqual(reminders_sense.poll({}, 1000.0), [])
+            with self.assertRaises(RuntimeError):
+                reminders_sense.poll({}, 2000.0)
 
 
 class AddEventGateTest(unittest.TestCase):
@@ -107,6 +104,20 @@ class ToolResultTimesTest(unittest.TestCase):
         with mock.patch.object(reminders_sense.ek, "list_reminders", return_value=rems):
             sigs = reminders_sense.poll({}, 1000.0)
         self.assertEqual(sigs[0].key, "reminder:r1:5000.0")
+
+    def test_overdue_reminder_signals_once_per_process(self):
+        """Live: one overdue reminder re-signalled 98 times a day - it never leaves the window."""
+        reminders_sense._announced.clear()
+        with mock.patch.object(reminders_sense.ek, "list_reminders",
+                               return_value=[{"id": "r1", "title": "버스", "due": 500.0}]):
+            first = reminders_sense.poll({}, 1000.0)
+            again = reminders_sense.poll({}, 1300.0)
+        with mock.patch.object(reminders_sense.ek, "list_reminders",
+                               return_value=[{"id": "r1", "title": "버스", "due": 900.0}]):
+            moved = reminders_sense.poll({}, 1600.0)  # rescheduled: a new key speaks once more
+        self.assertEqual([s.kind for s in first], ["overdue_reminder"])
+        self.assertEqual(again, [])
+        self.assertEqual([s.key for s in moved], ["reminder:r1:900.0"])
 
 
 class AccessGrantTest(unittest.TestCase):

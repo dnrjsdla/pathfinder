@@ -606,3 +606,64 @@ the search or the poll takes over. `_run` clears `failed_at` and `error` as it s
 Cost: one more request ten minutes after a failure; `mirror.py` 196/200. — *Reversed if* a
 registry outage makes the retry itself a cost (it is one page), or if live use shows the copy
 still stale for hours: then the poll's cadence shortens after a failure instead.
+
+## 2026-10-11 — Seventeen days of real use (owner's choices on four questions)
+
+**D71. A due schedule runs as the owner's own turn, and `add_schedule` asks (amends D20, D22)**
+(decided 2026-10-11). `Daemon.push_signal` records a `schedule` sense's signal and checks its
+24 h dedupe as before, then queues `("say", "[scheduled] <text>")` on the target session instead
+of a signal turn. The turn is a user turn: its Gate is stored as an approval and resumed on
+`/approve` like any other (D16), where a signal turn's Gate was dropped and only the note's text
+went out. The owner wrote the text, so user trust is right; the cost is that a schedule bypasses
+RULES.md and D20's quiet hours, daily budget and burst rules, and the shipped `## schedule_due`
+rule row is now dead. When no screen is attached, the turn's outcome goes out through the outbox
+as a notice (a banner), `[scheduled] <note> (answer|gated)`, and the answer waits in the
+session's history (D41: a screen that opens follows the notice). Because that turn carries user
+trust, `add_schedule` loses D22's `reversible` and asks in a user turn too: a schedule the model
+registers while it handles someone else's text must not later run with the owner's trust
+(`remove_schedule` stays reversible). Live: two daily schedule turns ended `gated` in 2 s and
+delivered the bare note; the briefing the owner asked for never ran. — *Reversed if* scheduled
+turns are cut or misread as owner chat (`chat_approval`, steers) in live use, or an unattended
+`gated` outcome is left for hours: then the signal turn gains its own resume path (a daemon
+module split first, `daemon.py` 778/780).
+
+**D72. A draft that writes out the tool-call record is a forged record: withdrawn in the open
+and re-run once, a second one cut at the header** (decided 2026-10-11; a harness guard, D52's
+record unchanged). `loop.run` checks every final draft, re-runs included and before the second
+look, for `RECORD_HEADER`. The first, with a step left, is withdrawn through the same path as a
+flagged draft (`retract`, flags `["forged_record"]`, `RERUN_NOTE`); a second is cut at the
+header, and the cut reaches the ledger and the answer, while the text already streamed stays on
+the screen (no second `retract`). `FLAG_WORDS`, the verifier prompt and `system.txt` stay as
+measured (D51, D52, D68): `FORGED_WHAT`/`FORGED_WHY` is a separate constant, so
+`test_second_look_matches_the_bench` and m10' stand. Moving the record out of its own system
+message was rejected: it would void m10' and D68's smoke and spend credits on a re-run. Live:
+5 drafts in 17 days wrote out the record header; 1 reached the owner as the answer. — *Reversed
+if* the guard withdraws a correct answer that quotes the record on request, or forged drafts
+persist after the re-run: then the record's role and placement is a measured change.
+
+**D73. Senses are turned on and off one at a time** (decided 2026-10-11). `pathfinder config set
+senses.<name> '<json>'|off` loads the current `senses`, sets or drops that one key and writes the
+whole value through `config.set("senses", …)` - still the only config writer; `pathfinder config
+get [key]` prints the current value as JSON; a `ConfigError` prints one line and exits 1, not a
+traceback. `config set senses '<json>'` still replaces the whole value, and the `connect-gmail`
+skill, `init`'s announced lines, `docs/senses.md` and the READMEs no longer tell anyone to use
+it. Live: on 2026-10-09 the model replaced the whole dict while connecting Gmail, and seven
+senses went silent for two days unnoticed. Making `config set senses` itself merge was rejected:
+it would leave no way to switch one off and break "set = replace". — *Reversed if* the dotted
+form needs a second key family (another dict-valued key turned on piecewise): then one general
+`config set KEY.SUB` rule instead of a `senses.`-only branch.
+
+**D74. The tool door says why** (decided 2026-10-11). A call to an unknown tool that belongs to
+a sense that is off is refused as `no such tool: X (the <sense> sense is off)`: `tools.OFF_TOOLS`,
+filled by `signals.load` through `signals.sense_modules()` (the one scan of the senses package,
+`memory._rule_vocab` uses it too). `run_command`'s `normalize` refuses, before the gate, a tool's
+name used as a shell command and any restart or stop of PATHFINDER's own daemon (it ends the
+turn with no answer; the owner runs it after the turn) - a convenience, not a security boundary.
+A sense that keeps raising the same error is logged once, and its next clean poll once as
+`Recovered` (`signals.Recovered`, recorded as an `error` event `sense <name>: Recovered: polling
+again`, so error counts include recoveries); the daemon is unchanged, and calendar and reminders
+drop their own `_off_logged` flag. Live: 16 `no such tool` refusals while seven senses were off
+and the model diagnosed permissions; 144 of 158 error records were one mail `gaierror`; 2 turns
+were cut by an in-turn restart. — *Reversed if* a refusal blocks a command the owner meant to
+run (then the pattern narrows), or a sense that fails and recovers by turns
+fills the ledger with error and `Recovered` pairs.

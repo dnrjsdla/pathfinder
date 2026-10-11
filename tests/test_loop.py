@@ -2,7 +2,7 @@ import json
 import unittest
 
 from pathfinder.llm import LLMError
-from pathfinder.loop import FLAG_WORDS, RERUN_NOTE, STEER_ENVELOPE, VERIFIER_PROMPT, TurnControl, run, settle, verifier_input
+from pathfinder.loop import FLAG_WORDS, FORGED_WHAT, FORGED_WHY, RERUN_NOTE, STEER_ENVELOPE, VERIFIER_PROMPT, TurnControl, run, settle, verifier_input
 from pathfinder.state import RECORD_HEADER
 from pathfinder.signals import AGENDA_HEADER
 
@@ -243,6 +243,29 @@ class SecondLookTest(unittest.TestCase):
         self.assertEqual(messages[5:], [{"role": "system", "content": note},
                                         {"role": "assistant", "content": "It holds two."}])
         self.assertEqual(len(looks.asks), 1)  # the re-run is not checked again
+
+    def test_forged_record_is_withdrawn_and_rerun_once(self):
+        forged = "Done.\n" + RECORD_HEADER + '\nrun_command {"command":"ls"} ok'
+        looks = _looks([("text", _verdict())])
+        out, messages, emitted = self._run([[("text", forged)], [("text", "I have not run it yet.")]], looks)
+        self.assertEqual(emitted[1], ("retract", {"draft": forged, "flags": ["forged_record"],
+                                                  "what": FORGED_WHAT, "why": FORGED_WHY}))
+        self.assertEqual((out.kind, out.text, out.check, out.steps), ("answer", "I have not run it yet.", "passed", 2))
+        note = RERUN_NOTE.format(what=FORGED_WHAT, why=FORGED_WHY)
+        self.assertEqual(messages[5:], [{"role": "system", "content": note},
+                                        {"role": "assistant", "content": "I have not run it yet."}])
+        self.assertEqual(len(looks.asks), 1)  # the second look sees the re-run, never the forged draft
+
+    def test_forged_record_on_the_rerun_is_cut(self):
+        forged = lambda t: t + "\n\n" + RECORD_HEADER + "\nlist_events {} ok"  # noqa: E731
+        call = {"id": "c1", "name": "list_events", "arguments": {}}
+        steps = [[("tool_calls", [call])], [("text", forged("Nothing today."))], [("text", forged("Still nothing."))]]
+        out, messages, emitted = self._run(steps, _looks(), second_look=None)  # checked with no second look too
+        self.assertEqual([k for k, _ in emitted].count("retract"), 1)
+        self.assertEqual((out.kind, out.text, out.steps), ("answer", "Still nothing.", 3))
+        self.assertEqual(messages[-1], {"role": "assistant", "content": "Still nothing."})
+        out, _, _ = self._run([[("text", forged("Done."))]], _looks(), budget=1)  # no step left: cut at once
+        self.assertEqual((out.kind, out.text), ("answer", "Done."))
 
     def test_second_look_skipped_after_a_tool_or_on_a_resume(self):
         call = {"id": "c1", "name": "list_reminders", "arguments": {}}

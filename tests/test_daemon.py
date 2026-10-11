@@ -816,7 +816,7 @@ class SignalTurnTest(DaemonHarness):
 
         async def scenario(daemon):
             _never_quiet(daemon)
-            daemon.push_signal(Signal(sense="schedule", kind="schedule_due", key="sig-origin",
+            daemon.push_signal(Signal(sense="test", kind="schedule_due", key="sig-origin",
                                       summary="Scheduled note: ping",
                                       fields={"id": "s1", "text": "ping", "at": "2026-09-22 09:00"},
                                       trust="user"))
@@ -837,7 +837,7 @@ class SignalTurnTest(DaemonHarness):
         """LLMError (blocked model): the sense's summary alone is delivered."""
         async def scenario(daemon):
             _never_quiet(daemon)
-            daemon.push_signal(Signal(sense="schedule", kind="schedule_due", key="sig-402",
+            daemon.push_signal(Signal(sense="test", kind="schedule_due", key="sig-402",
                                       summary="Scheduled note: budget",
                                       fields={"id": "s2", "text": "budget", "at": "2026-09-22 09:00"},
                                       trust="user"))
@@ -850,6 +850,83 @@ class SignalTurnTest(DaemonHarness):
         history = state.history(delivery["session"])
         state.close()
         self.assertEqual([m["content"] for m in history if m["role"] == "assistant"], ["Scheduled note: budget"])
+
+
+    def test_schedule_due_runs_as_a_user_turn_and_can_gate(self):
+        """The owner's scheduled note runs as their own turn, not a signal turn: a write it leads
+        to gates as a stored approval and resumes on /approve (a signal turn's gate is dropped)."""
+        from pathfinder.senses import schedule
+        note_path = str(self.home / "scheduled-note.txt")
+
+        def model(cfg, control=None, tools=None):
+            def step(messages):
+                if messages[-1]["role"] == "tool":
+                    yield ("text", "done")
+                else:
+                    yield ("tool_calls", [{"id": "c1", "name": "write_file",
+                                            "arguments": {"path": note_path, "content": "brief"}}])
+            return step
+
+        def wait_for(type_, kind):
+            for _ in range(300):
+                if any(e["type"] == type_ and e.get("kind") == kind for e in Ledger(self.home).read()):
+                    return
+                time.sleep(0.01)
+
+        banners = []
+
+        async def scenario(daemon):
+            _never_quiet(daemon)
+            daemon.outbox.banner = lambda text: banners.append(text) or True
+            config.set(self.home, "schedules", [{"id": "b1", "at": "2026-09-22 09:00", "repeat": "none",
+                                                 "text": "write the daily brief"}])
+            for sig in schedule.poll({"_home": self.home}, time.time()):
+                daemon.push_signal(sig)
+            await asyncio.to_thread(wait_for, "turn_end", "gated")
+            await asyncio.to_thread(wait_for, "delivery", None)  # the banner goes out right after the turn
+            approval_id = next(e["id"] for e in Ledger(self.home).read() if e["type"] == "approval_pending")
+            c = await Client.open(self.home)
+            c.send({"type": "approve", "id": approval_id})
+            await asyncio.to_thread(wait_for, "turn_end", "answer")
+            c.close()
+
+        self.run_with(model, scenario)
+        events = self.events()
+        user = next(e for e in events if e["type"] == "user")
+        self.assertEqual((user["origin"], user["trust"], user["text"]),
+                         ("user", "user", "[scheduled] write the daily brief"))
+        pending = next(e for e in events if e["type"] == "approval_pending")
+        self.assertEqual((pending["origin"], pending["tool"]), ("user", "write_file"))
+        self.assertEqual([(e["origin"], e["kind"]) for e in events if e["type"] == "turn_end"],
+                         [("user", "gated"), ("user", "answer")])
+        self.assertEqual(Path(note_path).read_text(), "brief")  # resumed and ran after /approve
+        # no screen was attached: one banner says the scheduled turn ran and stopped at a gate
+        self.assertEqual(banners, ["[scheduled] write the daily brief (gated)"])
+        self.assertEqual([e["via"] for e in events if e["type"] == "delivery"], ["banner"])
+
+    def test_schedule_turn_with_a_screen_attached_sends_no_banner(self):
+        """An attached screen already shows the scheduled turn as it runs - no extra notice."""
+        from pathfinder.senses import schedule
+        banners = []
+
+        async def scenario(daemon):
+            _never_quiet(daemon)
+            daemon.outbox.banner = lambda text: banners.append(text) or True
+            c = await Client.open(self.home)
+            c.send({"type": "attach"})
+            await c.until("attached")
+            config.set(self.home, "schedules", [{"id": "b1", "at": "2026-09-22 09:00", "repeat": "none",
+                                                 "text": "say hello"}])
+            for sig in schedule.poll({"_home": self.home}, time.time()):
+                daemon.push_signal(sig)
+            seen = await c.until("turn.end")
+            c.close()
+            return seen
+
+        seen = self.run_with(fake_model("hello"), scenario)
+        self.assertEqual(seen[-1]["kind"], "answer")
+        self.assertEqual(banners, [])
+        self.assertEqual([e for e in self.events() if e["type"] == "delivery"], [])
 
 
 class DeliverTest(DaemonHarness):
@@ -1006,7 +1083,7 @@ class DeliverTest(DaemonHarness):
             _never_quiet(daemon)
             daemon.rules = dataclasses.replace(daemon.rules, min_interval_s=999, burst_limit=999)
             daemon.record("turn_start", session="S", turn="t0", origin="signal")  # "just spoke"
-            daemon.push_signal(Signal(sense="schedule", kind="schedule_due", key="k-hold",
+            daemon.push_signal(Signal(sense="test", kind="schedule_due", key="k-hold",
                                       summary="Scheduled note: A", fields={}, trust="user"))
             for _ in range(200):
                 if any(e["type"] == "decision" and e["action"] == "speak" for e in Ledger(self.home).read()):
@@ -1141,7 +1218,7 @@ class RateLimitDoesNotBlockLaneTest(DaemonHarness):
             attached = await c.recv()
             sid = attached["session"]
             daemon.record("turn_start", session=sid, turn="t0", origin="signal")  # "just spoke"
-            daemon.push_signal(Signal(sense="schedule", kind="schedule_due", key="k-hold",
+            daemon.push_signal(Signal(sense="test", kind="schedule_due", key="k-hold",
                                       summary="A", fields={}, trust="user"))
             await asyncio.sleep(0.1)
             t0 = time.time()
@@ -1285,7 +1362,7 @@ class SignalTurnControlTest(DaemonHarness):
 
         async def scenario(daemon):
             _never_quiet(daemon)
-            daemon.push_signal(Signal(sense="schedule", kind="schedule_due", key="k-run",
+            daemon.push_signal(Signal(sense="test", kind="schedule_due", key="k-run",
                                       summary="A", fields={}, trust="user"))
             s = None
             for _ in range(200):
@@ -1322,7 +1399,7 @@ class SignalTurnControlTest(DaemonHarness):
             c.send({"type": "attach"})
             await c.recv()
 
-            daemon.push_signal(Signal(sense="schedule", kind="schedule_due", key="k-say-signal",
+            daemon.push_signal(Signal(sense="test", kind="schedule_due", key="k-say-signal",
                                       summary="A", fields={}, trust="user"))
             s = None
             for _ in range(200):
@@ -2372,7 +2449,7 @@ class SessionLifetimeTest(DaemonHarness):
             c.send({"type": "attach"})
             first = (await c.recv())["session"]
             self._age(daemon, first, 3 * 3600)
-            daemon.push_signal(Signal(sense="schedule", kind="schedule_due", key="gap-1",
+            daemon.push_signal(Signal(sense="test", kind="schedule_due", key="gap-1",
                                       summary="Scheduled note: train", fields={"id": "s1"}, trust="user"))
             notice = (await c.until("notice"))[-1]
             c.send({"type": "presence", "idle_s": 5})
@@ -2397,7 +2474,7 @@ class SessionLifetimeTest(DaemonHarness):
             c.send({"type": "attach"})
             first = (await c.recv())["session"]
             self._age(daemon, first, 3 * 3600)
-            daemon.push_signal(Signal(sense="schedule", kind="schedule_due", key="gap-2",
+            daemon.push_signal(Signal(sense="test", kind="schedule_due", key="gap-2",
                                       summary="Scheduled note: bus", fields={"id": "s2"}, trust="user"))
             await c.until("notice")
             c.close()
@@ -2417,7 +2494,7 @@ class SessionLifetimeTest(DaemonHarness):
             c.send({"type": "presence", "idle_s": 1})  # typing
             await asyncio.sleep(0.05)
             self._age(daemon, first, 3 * 3600)
-            daemon.push_signal(Signal(sense="schedule", kind="schedule_due", key="gap-3",
+            daemon.push_signal(Signal(sense="test", kind="schedule_due", key="gap-3",
                                       summary="Scheduled note: call", fields={"id": "s3"}, trust="user"))
             for _ in range(200):
                 if daemon.outbox.queue or any(e["type"] == "delivery" for e in self.events()):
@@ -2555,7 +2632,7 @@ class SessionLifetimeTest(DaemonHarness):
             await self._settle(daemon)
             c.send({"type": "presence", "idle_s": 0})  # typing: the next notice is held, then the daemon stops
             await asyncio.sleep(0.05)
-            daemon.push_signal(Signal(sense="schedule", kind="schedule_due", key="dirty-1", fields={"id": "s1"},
+            daemon.push_signal(Signal(sense="test", kind="schedule_due", key="dirty-1", fields={"id": "s1"},
                                       summary="Scheduled note: \x1b[1mtrain\u202e", trust="user"))
             for _ in range(200):
                 if any(e.get("signal_key") == "dirty-1" and e.get("action") == "speak" for e in self.events()):
@@ -2585,7 +2662,7 @@ class SessionLifetimeTest(DaemonHarness):
             c.send({"type": "attach"})
             await c.until("attached")
             for i, summary in enumerate(["Scheduled note: one\n\ttwo", "Scheduled note: \x1b[31mred\u202e"]):
-                daemon.push_signal(Signal(sense="schedule", kind="schedule_due", key=f"held-{i}", fields={"id": str(i)},
+                daemon.push_signal(Signal(sense="test", kind="schedule_due", key=f"held-{i}", fields={"id": str(i)},
                                           summary=summary, trust="user"))
                 await asyncio.sleep(0.05)
             texts = [(await c.until("notice"))[-1]["text"] for _ in range(2)]

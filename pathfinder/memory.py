@@ -150,6 +150,11 @@ def _read_memory(path, control=None):
     p = vault_path(_manager.home, path)  # ValueError propagates - the broker turns it into a tool error
     if not p.exists():
         pages = _manager.state.pages()
+        key = path.replace("_", " ").lower()  # live: a title with spaces asked for, a file with underscores on disk
+        same = next((vault_path(_manager.home, pg["path"]) for pg in pages
+                     if pg["path"].startswith("wiki/") and pg["path"].replace("_", " ").lower() == key), None)
+        if same is not None and same.exists():
+            return tools_mod.clip(same.read_text(encoding="utf-8"))
         listing = ", ".join(pg["path"] for pg in pages) if pages else "(no pages yet)"
         return f"no such page: {path}. Pages: {listing}"
     return tools_mod.clip(p.read_text(encoding="utf-8"))
@@ -335,7 +340,10 @@ class Manager:
         for _finder, name, _is_pkg in pkgutil.iter_modules(senses_pkg.__path__):
             if name.startswith("_"):
                 continue
-            mod = importlib.import_module(f"pathfinder.senses.{name}")
+            try:
+                mod = importlib.import_module(f"pathfinder.senses.{name}")
+            except ImportError:  # one broken sense (live: imaplib) must not kill every memory pass; SenseLoop logs it
+                continue
             conditions.update(getattr(mod, "CONDITIONS", {}) or {})
             kinds.update((getattr(mod, "KINDS", {}) or {}).keys())
         return conditions, kinds

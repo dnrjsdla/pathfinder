@@ -98,7 +98,7 @@ TOOLS = {
             "repeat": {"type": "string", "description": "none|daily|weekly"},
         },
         required=["at", "text"], handler=_add_schedule, normalize=normalize_local_datetime("at"),
-        write=True, reversible=True,
+        write=True,  # not reversible: a due schedule runs as a user turn, so adding one asks (amends D22)
     ),
     "list_schedules": ToolSpec(
         name="list_schedules", description="List scheduled notes.",

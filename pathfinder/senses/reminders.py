@@ -19,7 +19,6 @@ CADENCE_S = 300
 _WINDOW_S = 3600
 _AGENDA_S, _AGENDA_MAX = 86400, 10  # D42: what every turn carries
 _OFF = "reminders sense is off: install pyobjc-framework-EventKit"
-_off_logged = False
 # keys this process has signalled: an overdue reminder stays in the window until done (live: one
 # re-signalled 98 times a day), so each key speaks once per process, like mail's `_last_uid`.
 # ponytail: process-local, so a restart re-signals each open key once (the 24 h dedupe holds it
@@ -28,20 +27,15 @@ _announced: set = set()
 
 
 def poll(options, now):
-    global _off_logged
     try:
         reminders = ek.list_reminders(due_before_ts=now + _WINDOW_S)
     except ImportError:
-        if _off_logged:
-            return []
-        _off_logged = True
-        raise RuntimeError(_OFF) from None
+        raise RuntimeError(_OFF) from None  # every poll; SenseLoop logs a repeated error once
     out = []
     for r in reminders:
         key = f"reminder:{r['id']}:{r['due']}"
         if r["due"] is None or key in _announced:
             continue
-        _announced.add(key)
         kind = "overdue_reminder" if r["due"] < now else "due_reminder"
         title = oneline(r["title"])
         out.append(Signal(
@@ -50,6 +44,7 @@ def poll(options, now):
             fields={"title": title, "due": clock.format_local(r["due"]),
                     "minutes_until": clock.minutes_until(r["due"], now)},
             trust=TRUST))
+        _announced.add(key)  # after the append: a Signal that failed to build is retried next poll
     return out
 
 

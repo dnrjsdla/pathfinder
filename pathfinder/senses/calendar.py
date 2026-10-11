@@ -1,7 +1,6 @@
-"""calendar sense - events via EventKit (see `_eventkit.py`). Off without PyObjC: `poll` logs
-one `error` event through the daemon's normal sense-failure path (SenseLoop.on_error) the first
-time, then quietly returns [] on every later poll - the calendar simply never speaks again,
-rather than filling the ledger with the same "not installed" error every 5 minutes."""
+"""calendar sense - events via EventKit (see `_eventkit.py`). Off without PyObjC: `poll` raises
+the same "not installed" error on every poll; SenseLoop records a repeated identical error once,
+so the ledger is not filled every 5 minutes and no false "Recovered" follows."""
 from __future__ import annotations
 
 from .. import clock
@@ -17,7 +16,6 @@ _WINDOW_S = 3600  # look one hour ahead; RULES.md's minutes_until_under does the
 _MAX_WINDOW_S = 31 * 86400  # list_events window cap - an unbounded range is an unbounded EventKit scan
 _AGENDA_S, _AGENDA_MAX = 86400, 10  # D42: what every turn carries
 _OFF = "calendar sense is off: install pyobjc-framework-EventKit"
-_off_logged = False
 
 
 def _all_day(signal, value, today, now):
@@ -28,14 +26,10 @@ CONDITIONS = {"all_day": _all_day}
 
 
 def poll(options, now):
-    global _off_logged
     try:
         events = ek.list_events(now, now + _WINDOW_S)
     except ImportError:
-        if _off_logged:
-            return []
-        _off_logged = True
-        raise RuntimeError(_OFF) from None
+        raise RuntimeError(_OFF) from None  # every poll; SenseLoop logs a repeated error once
     out = []
     for ev in events:
         if ev["start"] is None or ev["start"] < now:  # started: not upcoming (live: a holiday re-signalled 92 times a day)

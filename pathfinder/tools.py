@@ -222,6 +222,23 @@ def _write_file(path, content, control=None):
     return {"path": str(p), "bytes": len(content.encode("utf-8"))}
 
 
+# PATHFINDER's own daemon restarted or stopped from inside a turn kills that turn (live 2026-10).
+_SELF_RESTART = re.compile(r"\bpathfinder\s+service\s+(restart|stop)\b|\blaunchctl\s+(kickstart|bootout)\b.*\bpathfinder\b")
+
+
+def _command_check(args):
+    """run_command's `normalize`: refused before the gate, so the user is never asked to approve
+    a command that would only fail or end the turn."""
+    command = args["command"]
+    first = (command.split() or [""])[0]
+    if first in TOOLS:
+        raise ValueError(f"`{first}` is a tool, not a shell command: call it directly")
+    if _SELF_RESTART.search(command):
+        raise ValueError("refused: restarting PATHFINDER ends this turn without an answer - "
+                         "ask the owner to run it in a shell after this turn")
+    return args
+
+
 def _run_command(command, escalate=False, control=None):
     return _exec.run_command(command, escalate, control=control)
 
@@ -229,13 +246,14 @@ def _run_command(command, escalate=False, control=None):
 TOOLS = {
     "run_command": ToolSpec(
         name="run_command",
-        description="Run a shell command in a sandboxed workspace; the network is open (curl works).",
+        description="Run a shell command in a sandboxed workspace; the network is open (curl works). Audio, GUI "
+                    "and Apple Events have no effect inside the sandbox (exit 0, nothing happens); escalate for those.",
         params={
             "command": {"type": "string", "description": "the shell command to run"},
             "escalate": {"type": "boolean", "description": "run outside the sandbox (needs the user's approval)"},
         },
         required=["command"],
-        handler=_run_command,
+        handler=_run_command, normalize=_command_check,
         write=True, sandboxed=True,
     ),
     "read_file": ToolSpec(
@@ -257,3 +275,5 @@ TOOLS = {
         write=True,
     ),
 }
+
+OFF_TOOLS: dict = {}  # tool name -> its sense, for every sense not turned on (`signals.load` fills it)

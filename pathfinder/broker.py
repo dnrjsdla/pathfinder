@@ -5,7 +5,7 @@ import json
 import unicodedata
 
 from . import policy
-from .tools import READ_CLIP, clean, clip, coerce, map_strings
+from .tools import OFF_TOOLS, READ_CLIP, clean, clip, coerce, map_strings
 
 
 def _clip_for_model(value):
@@ -59,7 +59,9 @@ class Broker:
     def call(self, id, name, args) -> dict:
         spec = self.tools.get(name)
         if spec is None:
-            return self._refuse(id, str(name)[:64], args, f"no such tool: {str(name)[:64]}")  # model text: bounded
+            name = str(name)[:64]  # model text: bounded
+            off = f" (the {OFF_TOOLS[name]} sense is off)" if name in OFF_TOOLS else ""
+            return self._refuse(id, name, args, f"no such tool: {name}{off}")
 
         coerced, error = coerce(spec, args)
         if error:

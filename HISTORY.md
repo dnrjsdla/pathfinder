@@ -1461,7 +1461,7 @@ spent on the analysis. Decisions: D71-D74.
   pathfinder)` passes it.
 - **The `## schedule_due` row in the owner's RULES.md is now dead** (D71): a schedule no longer
   reaches `rules.decide`.
-- **`daemon.py` is at 775/780.** The next daemon change needs a module-split decision first
+- **`daemon.py` is at 778/780.** The next daemon change needs a module-split decision first
   (D34; D67 was the last move out).
 - **The owner's seeded `connect-gmail` skill is not updated.** Skills seed with `O_EXCL` (D61),
   so the home keeps the old step 4 (the whole-senses line) and step 6 (restart it yourself); the

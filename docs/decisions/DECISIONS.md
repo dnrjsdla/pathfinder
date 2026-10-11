@@ -625,7 +625,7 @@ registers while it handles someone else's text must not later run with the owner
 delivered the bare note; the briefing the owner asked for never ran. — *Reversed if* scheduled
 turns are cut or misread as owner chat (`chat_approval`, steers) in live use, or an unattended
 `gated` outcome is left for hours: then the signal turn gains its own resume path (a daemon
-module split first, `daemon.py` 775/780).
+module split first, `daemon.py` 778/780).
 
 **D72. A draft that writes out the tool-call record is a forged record: withdrawn in the open
 and re-run once, a second one cut at the header** (decided 2026-10-11; a harness guard, D52's

@@ -880,9 +880,9 @@ through /secret, never the chat.]` 와 `tools.READ_CLIP` 에서 자른 본문이
 ## 13. 세는 법
 
 ```bash
-python3 -m unittest discover -s tests            # 전체 테스트, 네트워크 없음 (이 체크아웃에서 736)
+python3 -m unittest discover -s tests            # 전체 테스트, 네트워크 없음 (이 체크아웃에서 738)
 wc -l pathfinder/{ledger,state,daemon,loop,broker,policy,exec,tools,signals,rules,deliver,jobs,memory}.py
-                                                  # 코어(D49: 청사진 §6 의 줄들), 오늘 4,201줄; 합쳐서 많아야
+                                                  # 코어(D49: 청사진 §6 의 줄들), 오늘 4,202줄; 합쳐서 많아야
                                                   # 5,500(test_core_under_5500_lines), 줄마다 제 상한 아래:
                                                   # ledger 520 · state 780 · daemon 780 · loop 520 ·
                                                   # broker+policy 455 · exec 390 · tools 390 ·

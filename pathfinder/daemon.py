@@ -493,6 +493,9 @@ class Daemon:
                     leftover = list(s.control.steers)  # said after the last drain: recorded, not yet answered
                     s.control, s.turn, s.origin = None, "", None
             self.send(s, {"type": "turn.end", "turn": turn, "kind": kind})
+            if item_kind == "say" and payload.startswith("[scheduled] ") and not self._is_attached(s.id):
+                # no screen saw this scheduled turn: a banner says it ran; the answer stays in history
+                self.outbox.enqueue(Notice(uuid.uuid4().hex[:12], s.id, f"{payload} ({kind})", "schedule", []))
             self.outbox.release()  # a held notice may be releasable now that this turn ended
             if leftover and kind != "gated":  # a gate took its leftovers into the pending messages
                 s.queue.put_nowait(("continue", "\n".join(leftover)))

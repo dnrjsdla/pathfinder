@@ -873,13 +873,17 @@ class SignalTurnTest(DaemonHarness):
                     return
                 time.sleep(0.01)
 
+        banners = []
+
         async def scenario(daemon):
             _never_quiet(daemon)
+            daemon.outbox.banner = lambda text: banners.append(text) or True
             config.set(self.home, "schedules", [{"id": "b1", "at": "2026-09-22 09:00", "repeat": "none",
                                                  "text": "write the daily brief"}])
             for sig in schedule.poll({"_home": self.home}, time.time()):
                 daemon.push_signal(sig)
             await asyncio.to_thread(wait_for, "turn_end", "gated")
+            await asyncio.to_thread(wait_for, "delivery", None)  # the banner goes out right after the turn
             approval_id = next(e["id"] for e in Ledger(self.home).read() if e["type"] == "approval_pending")
             c = await Client.open(self.home)
             c.send({"type": "approve", "id": approval_id})
@@ -896,7 +900,33 @@ class SignalTurnTest(DaemonHarness):
         self.assertEqual([(e["origin"], e["kind"]) for e in events if e["type"] == "turn_end"],
                          [("user", "gated"), ("user", "answer")])
         self.assertEqual(Path(note_path).read_text(), "brief")  # resumed and ran after /approve
-        self.assertEqual([e for e in events if e["type"] == "delivery"], [])  # no signal notice
+        # no screen was attached: one banner says the scheduled turn ran and stopped at a gate
+        self.assertEqual(banners, ["[scheduled] write the daily brief (gated)"])
+        self.assertEqual([e["via"] for e in events if e["type"] == "delivery"], ["banner"])
+
+    def test_schedule_turn_with_a_screen_attached_sends_no_banner(self):
+        """An attached screen already shows the scheduled turn as it runs - no extra notice."""
+        from pathfinder.senses import schedule
+        banners = []
+
+        async def scenario(daemon):
+            _never_quiet(daemon)
+            daemon.outbox.banner = lambda text: banners.append(text) or True
+            c = await Client.open(self.home)
+            c.send({"type": "attach"})
+            await c.until("attached")
+            config.set(self.home, "schedules", [{"id": "b1", "at": "2026-09-22 09:00", "repeat": "none",
+                                                 "text": "say hello"}])
+            for sig in schedule.poll({"_home": self.home}, time.time()):
+                daemon.push_signal(sig)
+            seen = await c.until("turn.end")
+            c.close()
+            return seen
+
+        seen = self.run_with(fake_model("hello"), scenario)
+        self.assertEqual(seen[-1]["kind"], "answer")
+        self.assertEqual(banners, [])
+        self.assertEqual([e for e in self.events() if e["type"] == "delivery"], [])
 
 
 class DeliverTest(DaemonHarness):

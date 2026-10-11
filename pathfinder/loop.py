@@ -71,6 +71,9 @@ FLAG_WORDS = {"unsupported_state": "says what the calendar, reminders, memory or
               "false_incapability": "says a tool or capability is missing"}
 RERUN_NOTE = ("[Your draft answer was not shown to the user: it {what}, and no tool result in this "
               "turn supports it ({why}). Call the tool now, or say plainly that you cannot.]")
+# Not measured, so apart from FLAG_WORDS: a draft that writes out the record (D52) imitates it -
+# only the harness writes one. Live, such a draft reached the owner as the answer.
+FORGED_WHAT, FORGED_WHY = "writes out a tool-call record", "only the system writes that record"
 
 
 def _sum_usage(total, delta):
@@ -187,11 +190,20 @@ def run(step, messages, *, call_tool, emit, budget=8, control=None, resume=False
     usage, check = None, None
     called = resume  # a tool ran in this turn (a call refused at the door is not one, a policy deny is, D69): no second look
     said = []  # everything streamed this turn reaches the ledger; only a withdrawn draft leaves it
+    forged = False  # a forged record re-runs once; a second one is cut off
 
     def with_said(e, parts=()):
         e.said = "".join(said + list(parts))  # a gate question, or text a model error cut, must reach the ledger
         e.check = check  # a re-run that gates or fails still owes turn_end its check
         return e
+
+    def withdraw(draft, flags, what, why):
+        # Already on the screen, so withdrawn in the open (D35): out of `said` and
+        # `messages`, a note says why, and the step re-runs.
+        messages.pop()
+        said.pop()
+        emit("retract", {"draft": draft, "flags": flags, "what": what, "why": why})
+        messages.append({"role": "system", "content": RERUN_NOTE.format(what=what, why=why or "no reason given")})
 
     if resume:
         try:
@@ -255,6 +267,12 @@ def run(step, messages, *, call_tool, emit, budget=8, control=None, resume=False
         messages.append(assistant_msg)
 
         if not tool_calls:
+            if RECORD_HEADER in text:  # checked on every draft, re-runs included
+                if not forged and i < budget:
+                    forged = True
+                    withdraw(text, ["forged_record"], FORGED_WHAT, FORGED_WHY)
+                    continue
+                text = said[-1] = messages[-1]["content"] = text[:text.find(RECORD_HEADER)].rstrip()
             if second_look is not None and check is None and not called and text.strip() and i < budget:
                 if control is not None:
                     control.in_tool = True  # a steer typed during the look waits for it; an interrupt still cuts
@@ -265,15 +283,8 @@ def run(step, messages, *, call_tool, emit, budget=8, control=None, resume=False
                         control.in_tool = False
                 usage = _sum_usage(usage, used)  # the harness's own call, like D30's: not a step
                 check = "failed" if flags is None else "flagged" if flags else "passed"
-                if flags:
-                    # Already on the screen, so withdrawn in the open (D35): out of `said` and
-                    # `messages`, a note says why, and the step re-runs once - never re-checked.
-                    what = " and ".join(FLAG_WORDS[f] for f in flags)
-                    messages.pop()
-                    said.pop()
-                    emit("retract", {"draft": text, "flags": flags, "what": what, "why": why})
-                    messages.append({"role": "system",
-                                     "content": RERUN_NOTE.format(what=what, why=why or "no reason given")})
+                if flags:  # re-runs once - never looked at again
+                    withdraw(text, flags, " and ".join(FLAG_WORDS[f] for f in flags), why)
                     continue
             return Outcome("answer", text="".join(said), steps=i, usage=usage, check=check)
 

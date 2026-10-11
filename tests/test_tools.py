@@ -104,10 +104,12 @@ class RunCommandCheckTest(unittest.TestCase):
 
     def test_run_command_refuses_restarting_the_daemon(self):
         for command in ("pathfinder service restart", "python3 -m pathfinder service stop",
-                        "launchctl kickstart -k gui/501/pathfinder.daemon", "launchctl bootout gui/501/pathfinder.daemon"):
+                        "launchctl kickstart -k gui/501/pathfinder.daemon", "launchctl bootout gui/501/pathfinder.daemon",
+                        "launchctl unload ~/Library/LaunchAgents/pathfinder.daemon.plist",
+                        "launchctl load -w ~/Library/LaunchAgents/pathfinder.daemon.plist"):
             with self.assertRaisesRegex(ValueError, "restarting PATHFINDER ends this turn", msg=command):
                 self._check(command)
-        for command in ("pathfinder service status", "launchctl list | grep pathfinder", "echo restart"):
+        for command in ("pathfinder service status", "launchctl list | grep pathfinder", "launchctl unload other.plist", "echo restart"):
             self.assertEqual(self._check(command), {"command": command})
 
 

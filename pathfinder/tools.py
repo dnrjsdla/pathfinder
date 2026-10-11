@@ -223,7 +223,7 @@ def _write_file(path, content, control=None):
 
 
 # PATHFINDER's own daemon restarted or stopped from inside a turn kills that turn (live 2026-10).
-_SELF_RESTART = re.compile(r"\bpathfinder\s+service\s+(restart|stop)\b|\blaunchctl\s+(kickstart|bootout)\b.*\bpathfinder\b")
+_SELF_RESTART = re.compile(r"\bpathfinder\s+service\s+(restart|stop)\b|\blaunchctl\s+(kickstart|bootout|unload|load)\b.*\bpathfinder\b")
 
 
 def _command_check(args):

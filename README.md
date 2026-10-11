@@ -61,10 +61,11 @@ is the list of decisions with the condition that would reverse each.
 ## Turning on more senses
 
 `init` turns on the senses that need no secret and prints, for the two that do, the exact line
-to paste later. `config set senses` replaces the whole value, so keep what is already on:
+to paste later, one sense per line - the other senses stay on:
 
 ```bash
-pathfinder config set senses '{"attach": {}, "catalog": {}, "schedule": {}, "reminders": {}, "shell": {}, "claude_code": {}, "calendar": {}, "mail": {"host": "imap.example.com", "user": "you@example.com"}}'
+pathfinder config set senses.calendar '{}'
+pathfinder config set senses.mail '{"host": "imap.example.com", "user": "you@example.com"}'
 pathfinder secret mail                   # the IMAP password, typed hidden into the Keychain (or /secret mail in the screen)
 ```
 

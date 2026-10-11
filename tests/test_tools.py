@@ -93,6 +93,24 @@ class OriginRegistryTest(unittest.TestCase):
             del tools_mod.TOOLS["memory_only_thing"]
 
 
+class RunCommandCheckTest(unittest.TestCase):
+    def _check(self, command):
+        return tools_mod.TOOLS["run_command"].normalize({"command": command})
+
+    def test_run_command_refuses_a_tool_name_as_a_command(self):
+        with self.assertRaisesRegex(ValueError, "`read_file` is a tool, not a shell command: call it directly"):
+            self._check("read_file ~/notes.txt")
+        self.assertEqual(self._check("ls -la"), {"command": "ls -la"})
+
+    def test_run_command_refuses_restarting_the_daemon(self):
+        for command in ("pathfinder service restart", "python3 -m pathfinder service stop",
+                        "launchctl kickstart -k gui/501/pathfinder.daemon", "launchctl bootout gui/501/pathfinder.daemon"):
+            with self.assertRaisesRegex(ValueError, "restarting PATHFINDER ends this turn", msg=command):
+                self._check(command)
+        for command in ("pathfinder service status", "launchctl list | grep pathfinder", "echo restart"):
+            self.assertEqual(self._check(command), {"command": command})
+
+
 def _oneline_before_u31(text, n=None):
     """`tools.oneline` as it was before U31, kept to prove the new one is byte-identical."""
     text = tools_mod._ANSI_RE.sub("", str(text))

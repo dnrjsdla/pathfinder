@@ -1,4 +1,5 @@
-"""pathfinder daemon | reindex | say TEXT | config set KEY VALUE |
+"""pathfinder daemon | reindex | say TEXT | config get [KEY] |
+config set KEY VALUE | config set senses.NAME JSON|off |
 approvals | approve ID | deny ID | interrupt |
 listen | signal SENSE JSON | react up|down [ID] | rules | tools |
 jobs | job stop ID | job steer ID TEXT |
@@ -423,6 +424,37 @@ def memory_undo(home, n=1):
     return 0
 
 
+def config_cmd(home, args):
+    """`config get [KEY]` prints JSON; `config set KEY VALUE` writes through config.set();
+    `config set senses.NAME JSON|off` changes that one sense and keeps the others (a whole-senses
+    `config set` once switched seven senses off unnoticed). A refusal is one line, exit 1."""
+    try:
+        cfg = config.load(home)
+        if args[0] == "get":
+            if len(args) == 2 and args[1] not in cfg:
+                raise config.ConfigError(f"unknown config key: {args[1]}")
+            print(json.dumps(cfg[args[1]] if len(args) == 2 else cfg, indent=2, ensure_ascii=False))
+            return 0
+        key, raw = args[1], args[2]
+        try:
+            value = json.loads(raw)
+        except ValueError:
+            value = raw  # a bare word is a string: `config set model provider:name`
+        if key.startswith("senses."):
+            senses, name = dict(cfg["senses"]), key.removeprefix("senses.")
+            if value == "off":
+                senses.pop(name, None)
+            else:
+                senses[name] = value
+            key, value = "senses", senses
+        config.set(home, key, value, ledger=Ledger(home))
+    except config.ConfigError as e:
+        print(f"pathfinder: {e}", file=sys.stderr)
+        return 1
+    print(f"{args[1]} set")
+    return 0
+
+
 def main(argv=None):
     args = sys.argv[1:] if argv is None else argv
     home = config.home()
@@ -495,14 +527,8 @@ def main(argv=None):
             print(USAGE, file=sys.stderr)
             return 2
         return memory_undo(home, int(args[2]) if len(args) == 3 else 1)
-    if len(args) == 4 and args[:2] == ["config", "set"]:
-        try:
-            value = json.loads(args[3])
-        except ValueError:
-            value = args[3]  # a bare word is a string: `config set model provider:name`
-        config.set(home, args[2], value, ledger=Ledger(home))
-        print(f"{args[2]} set")
-        return 0
+    if args[:2] == ["config", "get"] and len(args) in (2, 3) or args[:2] == ["config", "set"] and len(args) == 4:
+        return config_cmd(home, args[1:])
     print(USAGE, file=sys.stderr)
     return 2
 

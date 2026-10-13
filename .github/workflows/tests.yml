@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [main]
 
+# The rules tests pin epoch timestamps and read quiet hours in local time, so they
+# expect the owner's zone: 1000.0 is 09:16 in Seoul and 00:16 (quiet hours) in UTC.
+env:
+  TZ: Asia/Seoul
+
 jobs:
   tests:
     runs-on: macos-latest
@@ -13,7 +18,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.13"
+          python-version: "3.14"
       - name: unit tests
         run: python3 -m unittest discover -s tests -t .
       - name: personal-data scan

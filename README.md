@@ -10,6 +10,18 @@ you are doing - one approval installs them. Everything it does is one line in a 
 
 **Status: pre-alpha.** It runs; it is not yet packaged. macOS only for now.
 
+**In one line:** an assistant that lives on your Mac, watches your calendar, reminders, mail,
+shell and Claude Code, speaks first when something is worth saying, and never acts without your
+approval. The model is yours (Ollama); every action is one line in a ledger you own.
+
+```bash
+brew install python@3.14 pipx ollama && pipx ensurepath && brew services start ollama && ollama signin
+git clone <this repository> pathfinder && pipx install ./pathfinder
+pathfinder init && pathfinder tui
+```
+
+The sections below say what each line does and what to expect.
+
 ## Ten minutes to the first conversation
 
 Prerequisites (Homebrew). The Python that ships with macOS is too old; PATHFINDER needs 3.11+.
@@ -120,4 +132,4 @@ them. `python3 -m unittest discover -s tests` runs the offline suite, no network
 (`scripts/scan_personal.py`). Placeholders only: `admin@example.com`, `sk-...`. No model names in
 tracked files: they live in `config.json`.
 
-License: to be decided before the repository becomes public.
+License: MIT (see `LICENSE`).

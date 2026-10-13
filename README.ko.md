@@ -9,6 +9,18 @@ AI로 일하는 사람을 위한 상주형 능동 비서. Mac 위에서 백그�
 
 **상태: 프리알파.** 돈다; 아직 패키징 전이다. 당분간 macOS 전용.
 
+**한 줄로:** Mac 에 상주하며 캘린더·리마인더·메일·셸·Claude Code 를 지켜보다가, 말할 가치가 있을 때
+먼저 말을 걸고, 승인 없이는 아무것도 하지 않는 비서. 모델은 내 것(Ollama)이고, 하는 일 전부가
+내 소유의 장부 한 줄이다.
+
+```bash
+brew install python@3.14 pipx ollama && pipx ensurepath && brew services start ollama && ollama signin
+git clone <이 저장소> pathfinder && pipx install ./pathfinder
+pathfinder init && pathfinder tui
+```
+
+아래 절들이 각 줄이 하는 일과 기대할 것을 설명한다.
+
 ## 첫 대화까지 10분
 
 준비물(Homebrew). macOS에 딸려 오는 Python은 너무 오래됐다; PATHFINDER는 3.11 이상이 필요하다.
@@ -117,4 +129,4 @@ OpenAI 호환 엔드포인트면 무엇이든: `pathfinder config set model prov
 `git config core.hooksPath .githooks`가 커밋 전 개인정보 스캔(`scripts/scan_personal.py`)을 켠다.
 자리표시자만: `admin@example.com`, `sk-...`. 추적되는 파일에 모델 이름은 없다: `config.json`에 산다.
 
-라이선스: 저장소가 공개되기 전에 정한다.
+라이선스: MIT (`LICENSE` 참조).

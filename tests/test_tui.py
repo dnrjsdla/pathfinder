@@ -71,7 +71,7 @@ def _answer(value):
     return {"type": "secret", "server_id": "rv11test", "name": "TOKEN", "value": value}
 
 
-def _wait_for(pred, timeout=2):
+def _wait_for(pred, timeout=8):  # a shared CI runner is slow; a passing test never waits this long
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if pred():

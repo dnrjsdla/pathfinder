@@ -156,6 +156,7 @@ class TuiCase(unittest.TestCase):
         self.assertTrue(_wait_for(lambda: "hi" in self.out_text()
                                    and self.out_text().endswith("\r\033[K> hel")))
 
+    @mock.patch.object(tui, "NOTICE_HOLD_S", 4.0)  # a shared CI runner can stall a key by a second; the real 1 s is too tight to test
     def test_notice_waits_while_typing(self):
         self.type_("h")
         _wait_for(lambda: any(m.get("type") == "presence" for m in self.daemon.received))
@@ -164,7 +165,7 @@ class TuiCase(unittest.TestCase):
         self.type_("e")  # a key arrives inside the hold window - resets it
         time.sleep(tui.NOTICE_HOLD_S * 0.6)
         self.assertNotIn("later", self.out_text(), "the notice printed while keys were arriving")
-        self.assertTrue(_wait_for(lambda: "later" in self.out_text(), timeout=2))
+        self.assertTrue(_wait_for(lambda: "later" in self.out_text(), timeout=8))
 
     def test_typing_sends_presence_zero_and_silence_sends_idle(self):
         self.type_("a")

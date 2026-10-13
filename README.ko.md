@@ -129,4 +129,4 @@ OpenAI 호환 엔드포인트면 무엇이든: `pathfinder config set model prov
 `git config core.hooksPath .githooks`가 커밋 전 개인정보 스캔(`scripts/scan_personal.py`)을 켠다.
 자리표시자만: `admin@example.com`, `sk-...`. 추적되는 파일에 모델 이름은 없다: `config.json`에 산다.
 
-라이선스: MIT (`LICENSE` 참조).
+라이선스: Apache-2.0 (`LICENSE` 참조).

@@ -132,4 +132,4 @@ them. `python3 -m unittest discover -s tests` runs the offline suite, no network
 (`scripts/scan_personal.py`). Placeholders only: `admin@example.com`, `sk-...`. No model names in
 tracked files: they live in `config.json`.
 
-License: MIT (see `LICENSE`).
+License: Apache-2.0 (see `LICENSE`).

@@ -1510,6 +1510,31 @@ no schema contains Hangul. The block limit is broken by the Notion specs alone: 
 only"; the alias arm shows the cheaper middle (a few Korean words per tool) closes the Korean gap,
 but that number is an upper bound, not a measurement. Decision for the owner at partition 2.
 
+#### M5 follow-up: why Korean is 0, and an embedding arm
+
+Diagnosis (`diagnosis` in `docs/measurements/v2-m5-2026-10-17.json`): the indexed text of all 33
+tools holds 0 Hangul characters, while each Korean query has 4–10. Both tokenizers split "메일 검색"
+sanely (unicode61: `검색`, `메일`; trigram: ` 검색`, `메일 `, `일 검`), and appending the single word
+`메일` to `search_mail` makes that query hit it (no hit before). Lexical search cannot cross
+languages: the index has no Korean text, so a Korean query has nothing to match.
+
+Local `bge-m3:latest` embeddings of each tool's search text, cosine top-3 (`embed`), and reciprocal-rank
+fusion (k=60) of unicode61 top-3 with embed top-3 (`hybrid`):
+
+| arm | EN top-3 | KO top-3 | all top-3 | max tool block |
+|---|---|---|---|---|
+| unicode61 | 10/10 | 0/10 | 10/20 | 9,062 chars |
+| embed | 10/10 | 8/10 | 18/20 | 6,977 chars |
+| hybrid | 10/10 | 8/10 | 18/20 | 9,401 chars |
+
+`verdict_embed` (pre-registered: best of embed/hybrid ≥ 18/20): PASS, 18/20, about 13 ms per query
+(median 12.7 ms, local, no credits). The two Korean misses are the same in both arms: "내일 일정 추가"
+(expected `add_event`; got `list_schedules`, `add_reminder`, `add_schedule`) and "노션에 댓글 달기"
+(expected `comments`; got `content_convert`, `config`, `file_uploads`). The ≤ 8,000-char block
+criterion is broken by the Notion spec size for every arm, not by the search method. Not verified:
+whether Ollama truncates the long Notion specs before embedding them (bge-m3's context window), so
+the embed result may already include, or may be held back by, that truncation.
+
 ### M9 — Ollama drops the parameters: the schema echo says yes
 
 gemma4:31b-cloud through Ollama 0.34.4, `/v1/chat/completions`, the real `pages` and `databases`

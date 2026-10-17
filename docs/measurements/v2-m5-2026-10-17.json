@@ -67,6 +67,48 @@
     "max": 9062,
     "median": 3762.0
    }
+  },
+  "embed": {
+   "en": {
+    "n": 10,
+    "top1": 10,
+    "top3": 10
+   },
+   "ko": {
+    "n": 10,
+    "top1": 6,
+    "top3": 8
+   },
+   "all": {
+    "n": 20,
+    "top1": 16,
+    "top3": 18
+   },
+   "block_chars": {
+    "max": 6977,
+    "median": 3809.5
+   }
+  },
+  "hybrid": {
+   "en": {
+    "n": 10,
+    "top1": 10,
+    "top3": 10
+   },
+   "ko": {
+    "n": 10,
+    "top1": 6,
+    "top3": 8
+   },
+   "all": {
+    "n": 20,
+    "top1": 16,
+    "top3": 18
+   },
+   "block_chars": {
+    "max": 9401,
+    "median": 4144.0
+   }
   }
  },
  "verdict": {
@@ -78,6 +120,57 @@
   "pass": false,
   "rule": "top-3 >= 18/20 and max block <= 8000 chars in the best FTS-only arm; alias arm excluded",
   "on_fail": "per-server allowlist only (blueprint s13)"
+ },
+ "verdict_embed": {
+  "embed_model": "bge-m3:latest",
+  "best_arm": "embed",
+  "top3": "18/20",
+  "top3_ko": "8/10",
+  "top3_en": "10/10",
+  "max_block_chars": 6977,
+  "pass": true,
+  "embed_ms_median_per_query": 12.7,
+  "rule": "best of {embed, hybrid} top-3 >= 18/20; block size reported, not judged (set by Notion spec size)"
+ },
+ "diagnosis": {
+  "hangul_chars_in_indexed_search_text": {
+   "tools": 33,
+   "total": 0,
+   "tools_with_any": []
+  },
+  "hangul_chars_per_korean_query": {
+   "노션 페이지 보관": 7,
+   "내일 일정 추가": 6,
+   "메일 검색": 4,
+   "셸 명령 실행": 5,
+   "메모리에서 기억 찾기": 9,
+   "미리 알림 목록 보기": 8,
+   "노션 데이터베이스 조회": 10,
+   "파일 쓰기": 4,
+   "매일 아침 알림 예약": 8,
+   "노션에 댓글 달기": 7
+  },
+  "tokenizer_split_of_query": {
+   "query": "메일 검색",
+   "unicode61": [
+    "검색",
+    "메일"
+   ],
+   "trigram": [
+    " 검색",
+    "메일 ",
+    "일 검"
+   ]
+  },
+  "one_word_probe": {
+   "query": "메일 검색",
+   "added_word_to_search_mail": "메일",
+   "hits_before": [],
+   "hits_after": [
+    "search_mail"
+   ]
+  },
+  "conclusion": "Lexical search cannot cross languages: the index holds no Korean text, so a Korean query has nothing to match; the tokenizers split Hangul into sane words/trigrams, so they are not the cause."
  },
  "rows": [
   {
@@ -116,6 +209,27 @@
      "top1_hit": true,
      "top3_hit": true,
      "block_chars": 8850
+    },
+    "embed": {
+     "top3": [
+      "pages",
+      "edit_memory",
+      "search_memory"
+     ],
+     "top1_hit": true,
+     "top3_hit": true,
+     "block_chars": 6582,
+     "embed_ms": 17.8
+    },
+    "hybrid": {
+     "top3": [
+      "pages",
+      "databases",
+      "edit_memory"
+     ],
+     "top1_hit": true,
+     "top3_hit": true,
+     "block_chars": 9401
     }
    }
   },
@@ -155,6 +269,27 @@
      "top1_hit": false,
      "top3_hit": true,
      "block_chars": 9062
+    },
+    "embed": {
+     "top3": [
+      "databases",
+      "search_memory",
+      "workspace"
+     ],
+     "top1_hit": true,
+     "top3_hit": true,
+     "block_chars": 6335,
+     "embed_ms": 20.2
+    },
+    "hybrid": {
+     "top3": [
+      "databases",
+      "workspace",
+      "search_memory"
+     ],
+     "top1_hit": true,
+     "top3_hit": true,
+     "block_chars": 6335
     }
    }
   },
@@ -192,6 +327,27 @@
       "search_tools"
      ],
      "top1_hit": false,
+     "top3_hit": true,
+     "block_chars": 3003
+    },
+    "embed": {
+     "top3": [
+      "search_mail",
+      "search_tools",
+      "search_memory"
+     ],
+     "top1_hit": true,
+     "top3_hit": true,
+     "block_chars": 3003,
+     "embed_ms": 44.6
+    },
+    "hybrid": {
+     "top3": [
+      "search_mail",
+      "search_memory",
+      "search_tools"
+     ],
+     "top1_hit": true,
      "top3_hit": true,
      "block_chars": 3003
     }
@@ -233,6 +389,27 @@
      "top1_hit": true,
      "top3_hit": true,
      "block_chars": 3922
+    },
+    "embed": {
+     "top3": [
+      "run_command",
+      "edit_memory",
+      "write_file"
+     ],
+     "top1_hit": true,
+     "top3_hit": true,
+     "block_chars": 4795,
+     "embed_ms": 14.2
+    },
+    "hybrid": {
+     "top3": [
+      "run_command",
+      "read_skill",
+      "edit_memory"
+     ],
+     "top1_hit": true,
+     "top3_hit": true,
+     "block_chars": 4739
     }
    }
   },
@@ -264,6 +441,27 @@
      "block_chars": 2710
     },
     "alias": {
+     "top3": [
+      "read_memory",
+      "read_file",
+      "remove_schedule"
+     ],
+     "top1_hit": true,
+     "top3_hit": true,
+     "block_chars": 3109
+    },
+    "embed": {
+     "top3": [
+      "read_memory",
+      "read_file",
+      "search_memory"
+     ],
+     "top1_hit": true,
+     "top3_hit": true,
+     "block_chars": 2844,
+     "embed_ms": 17.8
+    },
+    "hybrid": {
      "top3": [
       "read_memory",
       "read_file",
@@ -311,6 +509,27 @@
      "top1_hit": true,
      "top3_hit": true,
      "block_chars": 4433
+    },
+    "embed": {
+     "top3": [
+      "propose_install",
+      "config__open_relay",
+      "search_tools"
+     ],
+     "top1_hit": true,
+     "top3_hit": true,
+     "block_chars": 3268,
+     "embed_ms": 12.9
+    },
+    "hybrid": {
+     "top3": [
+      "propose_install",
+      "config__open_relay",
+      "config"
+     ],
+     "top1_hit": true,
+     "top3_hit": true,
+     "block_chars": 4433
     }
    }
   },
@@ -346,6 +565,27 @@
       "add_schedule",
       "remove_schedule",
       "add_reminder"
+     ],
+     "top1_hit": true,
+     "top3_hit": true,
+     "block_chars": 3608
+    },
+    "embed": {
+     "top3": [
+      "add_schedule",
+      "add_reminder",
+      "add_event"
+     ],
+     "top1_hit": true,
+     "top3_hit": true,
+     "block_chars": 3764,
+     "embed_ms": 15.3
+    },
+    "hybrid": {
+     "top3": [
+      "add_schedule",
+      "add_reminder",
+      "remove_schedule"
      ],
      "top1_hit": true,
      "top3_hit": true,
@@ -389,6 +629,27 @@
      "top1_hit": true,
      "top3_hit": true,
      "block_chars": 4733
+    },
+    "embed": {
+     "top3": [
+      "file_uploads",
+      "content_convert",
+      "config"
+     ],
+     "top1_hit": true,
+     "top3_hit": true,
+     "block_chars": 6118,
+     "embed_ms": 12.5
+    },
+    "hybrid": {
+     "top3": [
+      "file_uploads",
+      "write_file",
+      "content_convert"
+     ],
+     "top1_hit": true,
+     "top3_hit": true,
+     "block_chars": 5375
     }
    }
   },
@@ -420,6 +681,27 @@
      "block_chars": 3267
     },
     "alias": {
+     "top3": [
+      "complete_reminder",
+      "delete_reminder",
+      "add_reminder"
+     ],
+     "top1_hit": true,
+     "top3_hit": true,
+     "block_chars": 3397
+    },
+    "embed": {
+     "top3": [
+      "complete_reminder",
+      "delete_reminder",
+      "add_reminder"
+     ],
+     "top1_hit": true,
+     "top3_hit": true,
+     "block_chars": 3397,
+     "embed_ms": 12.3
+    },
+    "hybrid": {
      "top3": [
       "complete_reminder",
       "delete_reminder",
@@ -467,6 +749,27 @@
      "top1_hit": true,
      "top3_hit": true,
      "block_chars": 7346
+    },
+    "embed": {
+     "top3": [
+      "comments",
+      "content_convert",
+      "pages"
+     ],
+     "top1_hit": true,
+     "top3_hit": true,
+     "block_chars": 6977,
+     "embed_ms": 17.3
+    },
+    "hybrid": {
+     "top3": [
+      "comments",
+      "pages",
+      "edit_memory"
+     ],
+     "top1_hit": true,
+     "top3_hit": true,
+     "block_chars": 7346
     }
    }
   },
@@ -498,6 +801,27 @@
      "top1_hit": true,
      "top3_hit": true,
      "block_chars": 6039
+    },
+    "embed": {
+     "top3": [
+      "pages",
+      "content_convert",
+      "search_memory"
+     ],
+     "top1_hit": true,
+     "top3_hit": true,
+     "block_chars": 6213,
+     "embed_ms": 12.3
+    },
+    "hybrid": {
+     "top3": [
+      "pages",
+      "content_convert",
+      "search_memory"
+     ],
+     "top1_hit": true,
+     "top3_hit": true,
+     "block_chars": 6213
     }
    }
   },
@@ -529,6 +853,27 @@
      "top1_hit": true,
      "top3_hit": true,
      "block_chars": 3669
+    },
+    "embed": {
+     "top3": [
+      "list_schedules",
+      "add_reminder",
+      "add_schedule"
+     ],
+     "top1_hit": false,
+     "top3_hit": false,
+     "block_chars": 3513,
+     "embed_ms": 11.9
+    },
+    "hybrid": {
+     "top3": [
+      "list_schedules",
+      "add_reminder",
+      "add_schedule"
+     ],
+     "top1_hit": false,
+     "top3_hit": false,
+     "block_chars": 3513
     }
    }
   },
@@ -560,6 +905,27 @@
      "top1_hit": true,
      "top3_hit": true,
      "block_chars": 3522
+    },
+    "embed": {
+     "top3": [
+      "search_mail",
+      "read_mail",
+      "search_memory"
+     ],
+     "top1_hit": true,
+     "top3_hit": true,
+     "block_chars": 3266,
+     "embed_ms": 11.9
+    },
+    "hybrid": {
+     "top3": [
+      "search_mail",
+      "read_mail",
+      "search_memory"
+     ],
+     "top1_hit": true,
+     "top3_hit": true,
+     "block_chars": 3266
     }
    }
   },
@@ -589,6 +955,27 @@
      "top1_hit": true,
      "top3_hit": true,
      "block_chars": 3058
+    },
+    "embed": {
+     "top3": [
+      "run_command",
+      "config",
+      "edit_memory"
+     ],
+     "top1_hit": true,
+     "top3_hit": true,
+     "block_chars": 5538,
+     "embed_ms": 11.8
+    },
+    "hybrid": {
+     "top3": [
+      "run_command",
+      "config",
+      "edit_memory"
+     ],
+     "top1_hit": true,
+     "top3_hit": true,
+     "block_chars": 5538
     }
    }
   },
@@ -616,6 +1003,27 @@
       "search_memory",
       "read_memory",
       "edit_memory"
+     ],
+     "top1_hit": true,
+     "top3_hit": true,
+     "block_chars": 3855
+    },
+    "embed": {
+     "top3": [
+      "search_memory",
+      "edit_memory",
+      "read_memory"
+     ],
+     "top1_hit": true,
+     "top3_hit": true,
+     "block_chars": 3855,
+     "embed_ms": 13.9
+    },
+    "hybrid": {
+     "top3": [
+      "search_memory",
+      "edit_memory",
+      "read_memory"
      ],
      "top1_hit": true,
      "top3_hit": true,
@@ -651,6 +1059,27 @@
      "top1_hit": true,
      "top3_hit": true,
      "block_chars": 3278
+    },
+    "embed": {
+     "top3": [
+      "list_schedules",
+      "list_reminders",
+      "list_mail"
+     ],
+     "top1_hit": false,
+     "top3_hit": true,
+     "block_chars": 3141,
+     "embed_ms": 11.8
+    },
+    "hybrid": {
+     "top3": [
+      "list_schedules",
+      "list_reminders",
+      "list_mail"
+     ],
+     "top1_hit": false,
+     "top3_hit": true,
+     "block_chars": 3141
     }
    }
   },
@@ -682,6 +1111,27 @@
      "top1_hit": false,
      "top3_hit": true,
      "block_chars": 6187
+    },
+    "embed": {
+     "top3": [
+      "content_convert",
+      "config__open_relay",
+      "databases"
+     ],
+     "top1_hit": false,
+     "top3_hit": true,
+     "block_chars": 6652,
+     "embed_ms": 11.9
+    },
+    "hybrid": {
+     "top3": [
+      "content_convert",
+      "config__open_relay",
+      "databases"
+     ],
+     "top1_hit": false,
+     "top3_hit": true,
+     "block_chars": 6652
     }
    }
   },
@@ -713,6 +1163,27 @@
      "top1_hit": true,
      "top3_hit": true,
      "block_chars": 4733
+    },
+    "embed": {
+     "top3": [
+      "write_file",
+      "read_file",
+      "read_memory"
+     ],
+     "top1_hit": true,
+     "top3_hit": true,
+     "block_chars": 3266,
+     "embed_ms": 11.2
+    },
+    "hybrid": {
+     "top3": [
+      "write_file",
+      "read_file",
+      "read_memory"
+     ],
+     "top1_hit": true,
+     "top3_hit": true,
+     "block_chars": 3266
     }
    }
   },
@@ -745,6 +1216,27 @@
      "top1_hit": true,
      "top3_hit": true,
      "block_chars": 3473
+    },
+    "embed": {
+     "top3": [
+      "add_reminder",
+      "add_schedule",
+      "complete_reminder"
+     ],
+     "top1_hit": true,
+     "top3_hit": true,
+     "block_chars": 3601,
+     "embed_ms": 14.5
+    },
+    "hybrid": {
+     "top3": [
+      "add_reminder",
+      "add_schedule",
+      "complete_reminder"
+     ],
+     "top1_hit": true,
+     "top3_hit": true,
+     "block_chars": 3601
     }
    }
   },
@@ -774,6 +1266,27 @@
      "top1_hit": true,
      "top3_hit": true,
      "block_chars": 3304
+    },
+    "embed": {
+     "top3": [
+      "content_convert",
+      "config",
+      "file_uploads"
+     ],
+     "top1_hit": false,
+     "top3_hit": false,
+     "block_chars": 6118,
+     "embed_ms": 11.2
+    },
+    "hybrid": {
+     "top3": [
+      "content_convert",
+      "config",
+      "file_uploads"
+     ],
+     "top1_hit": false,
+     "top3_hit": false,
+     "block_chars": 6118
     }
    }
   }

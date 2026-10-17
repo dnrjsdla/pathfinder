@@ -3,11 +3,16 @@
 m5_tool_search.py -- measurement M5 (blueprint s13): does harness-side FTS5 tool search find the
 right tool among 33 (17 native + 5 memory + 11 Notion), Korean and English queries?
 No model calls. Stdlib only. Queries, aliases and pass line are pre-registered below (fixed before the first run).
-
 Pass line: top-3 >= 18/20 AND max tool block <= 8000 chars, in the best FTS-only arm (unicode61 / trigram).
 The "alias" arm (unicode61 + hand Korean aliases) is shown for the gap only and never decides the verdict.
 
-Usage: python3 bench/v2/m5_tool_search.py [--out p]
+Embedding arms (follow-up; run only with --embed-model, local Ollama, no credits; code in m5_embed.py):
+  embed  = cosine top-3 over embeddings of each tool's search_text; hybrid = RRF(k=60) of unicode61 top-3 + embed top-3.
+  verdict_embed (pre-registered before the first embed run): pass iff the best of {embed, hybrid} has top-3 >= 18/20.
+  The block-size criterion is reported for those arms too, but it is set by the Notion spec size, not the search method.
+  The primary verdict stays FTS-only and unchanged.
+
+Usage: python3 bench/v2/m5_tool_search.py [--out p] [--embed-model name]
        python3 bench/v2/m5_tool_search.py --selfcheck
 """
 import argparse
@@ -18,6 +23,8 @@ import statistics
 import sys
 from datetime import date
 from pathlib import Path
+
+import m5_embed
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
@@ -118,25 +125,26 @@ def search(db, query, trigram, k=3):
     return [r[0] for r in db.execute("SELECT name FROM t WHERE t MATCH ? ORDER BY bm25(t) LIMIT ?", (q, k))]
 
 
-def run():
+def run(embed_model=None):
     corpus = load_corpus()
     assert len(corpus) == 33, len(corpus)
     spec = {n["name"]: s for s, n in corpus}
     arms = {"unicode61": (build(corpus, "unicode61"), False),
             "trigram": (build(corpus, "trigram"), True),
             "alias": (build(corpus, "unicode61", aliases=True), False)}
-    rows = []
-    for lang, q, exp in QUERIES:
-        row = {"query": q, "lang": lang, "expected": sorted(exp), "arms": {}}
-        for arm, (db, tri) in arms.items():
-            top = search(db, q, tri)
-            core_names = {c["function"]["name"] for c in CORE}
-            block = json.dumps(CORE + [spec[x] for x in top if x not in core_names], ensure_ascii=False)
-            row["arms"][arm] = {"top3": top, "top1_hit": bool(top) and top[0] in exp,
-                                "top3_hit": bool(set(top) & exp), "block_chars": len(block)}
-        rows.append(row)
+    core_names = {c["function"]["name"] for c in CORE}
+
+    def cell(top, exp):
+        block = json.dumps(CORE + [spec[x] for x in top if x not in core_names], ensure_ascii=False)
+        return {"top3": top, "top1_hit": bool(top) and top[0] in exp, "top3_hit": bool(set(top) & exp),
+                "block_chars": len(block)}
+    rows = [{"query": q, "lang": lang, "expected": sorted(exp),
+             "arms": {arm: cell(search(db, q, tri), exp) for arm, (db, tri) in arms.items()}}
+            for lang, q, exp in QUERIES]
+    texts = {n["name"]: search_text(n) for _, n in corpus}
+    embed_ms = m5_embed.add_arms(rows, texts, embed_model, cell) if embed_model else None
     summary = {}
-    for arm in arms:
+    for arm in rows[0]["arms"]:
         summary[arm] = {}
         for lang in ("en", "ko", "all"):
             rs = [r["arms"][arm] for r in rows if lang in ("all", r["lang"])]
@@ -151,10 +159,14 @@ def run():
                "max_block_chars": summary[best]["block_chars"]["max"], "pass": ok,
                "rule": "top-3 >= 18/20 and max block <= 8000 chars in the best FTS-only arm; alias arm excluded",
                "on_fail": "per-server allowlist only (blueprint s13)"}
+    out = {"verdict": verdict}
+    if embed_model:
+        out["verdict_embed"] = m5_embed.verdict_embed(summary, embed_model, embed_ms)
     baseline = sum(len(json.dumps(s, ensure_ascii=False)) for s, _ in corpus)
     core = len(json.dumps(CORE, ensure_ascii=False))
     return {"measurement": "M5", "date": str(date.today()), "tools": 33, "all_specs_chars": baseline,
-            "core_stub_chars": core, "summary": summary, "verdict": verdict, "rows": rows}
+            "core_stub_chars": core, "summary": summary, **out,
+            "diagnosis": m5_embed.diagnosis(QUERIES, texts), "rows": rows}
 
 
 def selfcheck():
@@ -165,6 +177,7 @@ def selfcheck():
     db = build(corpus, "unicode61")
     assert "run_command" in search(db, "run a shell command", False)
     assert "pages" in search(build(corpus, "trigram"), "archive a notion page", True)
+    m5_embed.selfcheck()
     print("selfcheck ok")
 
 
@@ -172,12 +185,13 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--selfcheck", action="store_true")
     ap.add_argument("--out", default=str(ROOT / "docs" / "measurements" / f"v2-m5-{date.today()}.json"))
+    ap.add_argument("--embed-model", default=None, help="Ollama embedding model; omit for FTS-only")
     a = ap.parse_args()
     if a.selfcheck:
         return selfcheck()
-    res = run()
+    res = run(a.embed_model)
     Path(a.out).write_text(json.dumps(res, ensure_ascii=False, indent=1))
-    print(json.dumps({"all_specs_chars": res["all_specs_chars"], "summary": res["summary"], "verdict": res["verdict"]},
+    print(json.dumps({k: res[k] for k in ("all_specs_chars", "summary", "verdict", "verdict_embed", "diagnosis") if k in res},
                      ensure_ascii=False, indent=1))
     print("wrote", a.out)
 

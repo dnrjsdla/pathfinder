@@ -2,14 +2,22 @@
 tiny local http.server bound to 127.0.0.1 on an OS-assigned port, running in
 a background thread - loopback inside this test process, not an external
 request."""
+import asyncio
 import contextlib
+import copy
 import http.server
 import json
+import subprocess
 import threading
 import unittest
+from pathlib import Path
+from unittest import mock
 
-from pathfinder.llm import Endpoint, LLMError, resolve
-from pathfinder.llm.openai_compat import parse_sse, stream, _assemble
+from pathfinder.llm import Endpoint, LLMError, Request, Response, resolve
+from pathfinder.llm.openai_compat import complete, parse_sse, stream, to_wire, _assemble
+from pathfinder.llm.rename import rename_args_out, rename_in, rename_out
+
+NOTION = Path(__file__).resolve().parent.parent / "bench" / "v2" / "fixtures" / "notion_tools.json"
 
 
 def _line(obj):
@@ -77,6 +85,9 @@ class TestSSEParseAndAssembly(unittest.TestCase):
 class TestResolve(unittest.TestCase):
     def setUp(self):
         self.cfg = {"providers": {"ollama": {"base_url": "http://localhost:11434/v1", "api_key_env": ""}}}
+        patcher = mock.patch("pathfinder.keychain.secret", return_value=None)  # never the real Keychain
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def test_resolve_splits_on_first_colon(self):
         endpoint = resolve(self.cfg, "ollama:some-model:120b-tag")
@@ -92,6 +103,37 @@ class TestResolve(unittest.TestCase):
     def test_resolve_unknown_provider(self):
         with self.assertRaises(LLMError):
             resolve(self.cfg, "nonexistent-provider:some-model")
+
+    def test_resolve_key_from_env_then_keychain(self):
+        cfg = {"providers": {"p": {"base_url": "http://x", "api_key_env": "FAKE_PF_KEY", "api": "anthropic"}}}
+        with mock.patch.dict("os.environ", {"FAKE_PF_KEY": "from-env"}), \
+             mock.patch("pathfinder.keychain.secret", return_value="from-keychain") as secret:
+            self.assertEqual(resolve(cfg, "p:m").api_key, "from-env")
+            secret.assert_not_called()
+        with mock.patch.dict("os.environ", {}, clear=True), \
+             mock.patch("pathfinder.keychain.secret", return_value="from-keychain") as secret:
+            self.assertEqual(resolve(cfg, "p:m").api_key, "from-keychain")
+            secret.assert_called_once_with("pathfinder-p", "api")
+
+
+class TestResolveKeychain(unittest.TestCase):
+    def test_resolve_openai_provider_never_asks_the_keychain(self):
+        cfg = {"providers": {"ollama": {"base_url": "http://x", "api_key_env": ""}}}
+        with mock.patch("subprocess.run", side_effect=AssertionError("security was called")):
+            self.assertEqual(resolve(cfg, "ollama:m").api_key, "")
+
+    def test_resolve_keychain_through_security_binary(self):
+        """The unpatched `keychain.secret` with only `subprocess.run` faked: service pathfinder-<provider>."""
+        calls = []
+
+        def fake_run(argv, **kw):
+            calls.append(argv)
+            return subprocess.CompletedProcess(argv, 0, stdout="fake-key\n", stderr="")
+
+        cfg = {"providers": {"p": {"base_url": "http://x", "api_key_env": "", "api": "anthropic"}}}
+        with mock.patch("subprocess.run", fake_run):
+            self.assertEqual(resolve(cfg, "p:m").api_key, "fake-key")
+        self.assertEqual(calls[0][:6], ["security", "find-generic-password", "-s", "pathfinder-p", "-a", "api"])
 
 
 class TestStream(unittest.TestCase):
@@ -147,6 +189,173 @@ class TestStreamFailuresAreLLMErrors(unittest.TestCase):
                 with self.assertRaises(LLMError) as caught:
                     list(stream(endpoint, [{"role": "user", "content": "hi"}]))
             self.assertEqual(caught.exception.status, 0)
+
+
+def _neutral(spec):
+    return {"name": spec["name"], "description": spec["description"], "parameters": spec["inputSchema"]}
+
+
+def _notion(*names):
+    return [_neutral(t) for t in json.loads(NOTION.read_text()) if t["name"] in names]
+
+
+def _tool(props):
+    return {"name": "t", "description": "d", "parameters": {"type": "object", "properties": props}}
+
+
+class TestV21Rename(unittest.TestCase):
+    def test_v21_rename_round_trip(self):
+        """Real Notion specs: only the keys named properties/description inside a properties map change,
+        and the model's arguments come back under the original names."""
+        tools = _notion("pages", "databases")
+        out, renames = rename_out(tools)
+        for before, after in zip(tools, out):
+            props, new = before["parameters"]["properties"], after["parameters"]["properties"]
+            self.assertEqual(before["description"], after["description"])  # prose is not touched
+            self.assertEqual(list(new), [k + "_" if k in ("properties", "description") else k for k in props])
+            self.assertEqual({k: v for k, v in props.items() if k not in ("properties", "description")},
+                             {k: v for k, v in new.items() if k not in ("properties_", "description_")})
+            self.assertEqual(new["properties_"], props["properties"])
+            self.assertIn("properties", props)  # the input is not mutated
+        self.assertEqual(renames, {"pages": {(): {"properties": "properties_"}},
+                                   "databases": {(): {"properties": "properties_", "description": "description_"}}})
+        shown = {"action": "update", "page_id": "p1", "properties_": {"Name": "x"}}
+        original = {"action": "update", "page_id": "p1", "properties": {"Name": "x"}}
+        self.assertEqual(rename_in("pages", shown, renames), original)
+        self.assertEqual(rename_args_out("pages", original, renames), shown)
+
+    def test_collision_and_untouched_tools(self):
+        out, renames = rename_out([_tool({"properties": {}, "properties_": {}, "x": {}}), _tool({"x": {}})])
+        self.assertEqual(list(out[0]["parameters"]["properties"]), ["properties__", "properties_", "x"])
+        self.assertEqual(renames, {"t": {(): {"properties": "properties__"}}})
+        self.assertEqual(out[1], _tool({"x": {}}))
+        self.assertEqual(rename_out([_tool({"x": {}})]), ([_tool({"x": {}})], {}))
+        self.assertEqual(rename_in("t", {"properties__": 1, "properties_": 2}, renames), {"properties": 1, "properties_": 2})
+
+    def test_nested_properties_and_items(self):
+        nested = _tool({"properties": {"type": "object", "properties": {"description": {"type": "string"}}},
+                        "rows": {"type": "array", "items": {"type": "object", "properties": {"description": {}}}}})
+        out, renames = rename_out([nested])
+        props = out[0]["parameters"]["properties"]
+        self.assertEqual(props["properties_"]["properties"], {"description_": {"type": "string"}})
+        self.assertEqual(props["rows"]["items"]["properties"], {"description_": {}})
+        shown = {"properties_": {"description_": "a"}, "rows": [{"description_": "b"}, {"other": 1}]}
+        original = {"properties": {"description": "a"}, "rows": [{"description": "b"}, {"other": 1}]}
+        self.assertEqual(rename_in("t", shown, renames), original)
+        self.assertEqual(rename_args_out("t", original, renames), shown)
+
+    def test_required_follows_the_rename(self):
+        tool = _tool({"description": {}, "x": {}})
+        tool["parameters"]["required"] = ["description", "x"]
+        out, _ = rename_out([tool])
+        self.assertEqual(out[0]["parameters"]["required"], ["description_", "x"])
+        self.assertEqual(tool["parameters"]["required"], ["description", "x"])
+
+    def test_array_of_arrays_maps_back(self):
+        tool = _tool({"rows": {"type": "array", "items": {"type": "array", "items": {
+            "type": "object", "properties": {"description": {}}}}}})
+        _, renames = rename_out([tool])
+        self.assertEqual(rename_in("t", {"rows": [[{"description_": 1}]]}, renames), {"rows": [[{"description": 1}]]})
+        self.assertEqual(rename_args_out("t", {"rows": [[{"description": 1}]]}, renames),
+                         {"rows": [[{"description_": 1}]]})
+
+    def test_both_names_renamed_wins_original_only_kept(self):
+        _, renames = rename_out([_tool({"description": {}})])
+        self.assertEqual(rename_in("t", {"description": "old", "description_": "new"}, renames), {"description": "new"})
+        self.assertEqual(rename_in("t", {"description": "kept"}, renames), {"description": "kept"})
+        self.assertEqual(rename_in("other", {"description_": 1}, renames), {"description_": 1})
+
+
+def _request():
+    history = (
+        {"role": "user", "content": [{"type": "text", "text": "find the page"}]},
+        {"role": "system", "content": "RESIDENT", "item": "t1"},
+        {"role": "assistant", "model": "p:m", "content": [
+            {"type": "reasoning", "text": "hmm"}, {"type": "thinking", "thinking": "x", "signature": "s"},
+            {"type": "text", "text": "looking"},
+            {"type": "tool_use", "id": "c1", "name": "pages", "input": {"action": "update", "properties": {"a": 1}}}]},
+        {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "c1", "content": '{"ok": true}'},
+                                     {"type": "text", "text": "also: be quick"}]},
+        {"role": "system", "content": "RESIDENT", "item": "t1"},
+    )
+    return Request("root", "SYSTEM", tuple(_notion("pages")), history)
+
+
+class TestToWire(unittest.TestCase):
+    endpoint = Endpoint(base_url="http://x", api_key="", model="fake-model")
+
+    def test_to_wire_is_stable_and_shaped(self):
+        req = _request()
+        before = copy.deepcopy(req)
+        body = to_wire(req, self.endpoint)
+        self.assertEqual(json.dumps(body), json.dumps(to_wire(_request(), self.endpoint)))
+        self.assertEqual(req, before)  # the Request is not mutated
+        self.assertEqual((body["model"], body["stream"], body["max_tokens"]), ("fake-model", True, 16000))
+        self.assertNotIn("tool_choice", body)
+        self.assertEqual([(m["role"], m.get("content")) for m in body["messages"]], [
+            ("system", "SYSTEM"), ("user", "find the page"), ("system", "RESIDENT"), ("assistant", "looking"),
+            ("tool", '{"ok": true}'), ("user", "also: be quick")])  # one resident copy per item; no thinking
+        call = body["messages"][3]["tool_calls"][0]
+        self.assertEqual(call["function"]["name"], "pages")
+        self.assertEqual(json.loads(call["function"]["arguments"]), {"action": "update", "properties_": {"a": 1}})
+        self.assertEqual(body["messages"][4]["tool_call_id"], "c1")
+        props = body["tools"][0]["function"]["parameters"]["properties"]
+        self.assertIn("properties_", props)
+        self.assertNotIn("properties", props)
+        self.assertNotIn("tools", to_wire(Request("root", "S"), self.endpoint))
+
+
+class TestComplete(unittest.TestCase):
+    def _run(self, body, req=None, status=200, **kw):
+        with _server(body, status=status) as base_url:
+            endpoint = Endpoint(base_url=base_url, api_key="", model="fake-test-model")
+            return asyncio.run(complete(endpoint, req or Request("root", "S"), **kw))
+
+    def test_complete_text_usage_and_on_text(self):
+        body = (b'data: {"choices":[{"delta":{"reasoning":"think"}}]}\n\n'
+                b'data: {"choices":[{"delta":{"content":"Hello"}}]}\n\n'
+                b'data: {"choices":[{"delta":{"content":" world"},"finish_reason":"stop"}]}\n\n'
+                b'data: {"choices":[],"usage":{"prompt_tokens":5,"completion_tokens":2}}\n\n'
+                b'data: [DONE]\n\n')
+        seen = []
+        resp = self._run(body, on_text=seen.append)
+        self.assertEqual(seen, ["Hello", " world"])
+        self.assertEqual(resp, Response(
+            [{"type": "reasoning", "text": "think"}, {"type": "text", "text": "Hello world"}], "end_turn",
+            {"input_tokens": 5, "output_tokens": 2, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0},
+            "fake-test-model", []))
+
+    def test_complete_tool_call_is_renamed_back(self):
+        args = json.dumps({"action": "update", "properties_": {"a": 1}})
+        chunk = {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "c9", "function": {"name": "pages", "arguments": args}}]},
+                              "finish_reason": "tool_calls"}]}
+        resp = self._run(("data: " + json.dumps(chunk) + "\n\ndata: [DONE]\n\n").encode(),
+                         Request("root", "S", tuple(_notion("pages"))))
+        self.assertEqual(resp.stop_reason, "tool_use")
+        self.assertEqual(resp.blocks, [{"type": "tool_use", "id": "c9", "name": "pages",
+                                        "input": {"action": "update", "properties": {"a": 1}}}])
+
+    def test_complete_stop_reasons_cancel_and_errors(self):
+        length = b'data: {"choices":[{"delta":{"content":"x"},"finish_reason":"length"}]}\n\ndata: [DONE]\n\n'
+        self.assertEqual(self._run(length).stop_reason, "max_tokens")
+        cut = {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "c1", "function": {
+            "name": "pages", "arguments": '{"action": "upd'}}]}, "finish_reason": "length"}]}
+        resp = self._run(("data: " + json.dumps(cut) + "\n\ndata: [DONE]\n\n").encode())
+        self.assertEqual(resp.stop_reason, "max_tokens")  # a tool call cut at the limit is not tool_use
+        self.assertEqual(resp.blocks[0]["input"], {"_raw": '{"action": "upd'})
+        filtered = b'data: {"choices":[{"delta":{},"finish_reason":"content_filter"}]}\n\ndata: [DONE]\n\n'
+        self.assertEqual(self._run(filtered).stop_reason, "refusal")
+        with self.assertRaises(LLMError) as cm:
+            self._run(b'data: {"error": {"message": "overloaded"}}\n\ndata: [DONE]\n\n')
+        self.assertEqual(cm.exception.status, 0)
+        self.assertIn("overloaded", cm.exception.message)
+        cancel = threading.Event()
+        cancel.set()
+        resp = self._run(b'data: {"choices":[{"delta":{"content":"x"}}]}\n\ndata: [DONE]\n\n', cancel=cancel)
+        self.assertEqual((resp.stop_reason, resp.blocks), ("interrupted", []))
+        with self.assertRaises(LLMError) as cm:
+            self._run(b'{"error": "no credit"}', status=402)
+        self.assertTrue(cm.exception.blocked)
 
 
 if __name__ == "__main__":

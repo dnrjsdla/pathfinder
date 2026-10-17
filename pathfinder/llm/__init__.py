@@ -4,6 +4,8 @@ and daemon never see a model name."""
 import os
 from dataclasses import dataclass
 
+from .. import keychain
+
 
 @dataclass(frozen=True)
 class Endpoint:
@@ -11,6 +13,28 @@ class Endpoint:
     api_key: str
     model: str
     api: str = "openai"  # which wire format: "openai" (default) or "anthropic" (D2, D37 - experimental)
+
+
+@dataclass(frozen=True)
+class Request:
+    role: str               # a `models` key: root | worker | reviewer | triage | summarize | night
+    system: str             # piece 1, byte-frozen
+    tools: tuple = ()       # piece 2: {"name", "description", "parameters"}; read_result first, rest by name
+    messages: tuple = ()    # pieces 3-5: {"role": "user", "content": [text | tool_result]} ·
+                            # {"role": "assistant", "model": ref, "content": [blocks]} · {"role": "system", "content": resident, "item": turn}
+    model: str = ""         # spawn override "provider:model"; "" = the role's chain
+    max_tokens: int = 16000  # root; 2,000 for summarize
+    clone: str = ""         # with `turn`, pins the router's chain position for this run
+    turn: str = ""
+
+
+@dataclass
+class Response:
+    blocks: list            # verbatim (thinking with signature)
+    stop_reason: str        # end_turn | tool_use | max_tokens | refusal | interrupted
+    usage: dict             # input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens
+    model: str              # the "provider:model" that answered
+    fallbacks: list         # [{model, status, message}] tried before it
 
 
 class LLMError(Exception):
@@ -43,6 +67,8 @@ def resolve(cfg, ref):
                            f'set providers.{provider}.api to "openai" or "anthropic"')
     api_key_env = p.get("api_key_env", "")
     api_key = os.environ.get(api_key_env, "") if api_key_env else ""
+    if not api_key and api == "anthropic":  # a local (openai-style) provider needs no key: never ask the Keychain
+        api_key = keychain.secret(f"pathfinder-{provider}", "api") or ""
     return Endpoint(base_url=p["base_url"], api_key=api_key, model=model, api=api)
 
 

@@ -629,5 +629,117 @@ class MemoryStateTest(unittest.TestCase):
         rebuilt.close()
 
 
+class CloneIndexTest(unittest.TestCase):
+    """v2 partition 1: the result store, clone rows, gates and context rows, all derived."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.home = Path(self._tmp.name)
+        self.ledger = Ledger(self.home)
+        self.state = State(self.home / "state.db")
+
+    def tearDown(self):
+        self.state.close()
+        self._tmp.cleanup()
+
+    def _record(self, type, **kw):
+        event = self.ledger.append(type, clone=kw.pop("clone", "root"), **kw)
+        self.state.apply(event)
+        return event
+
+    def _gate(self, call_id, turn):
+        return self._record("gate", session="s1", turn=turn, origin="user", step=1, call_id=call_id,
+                            tool="write_file", args={"path": "/tmp/x", "content": call_id}, effect="write", brief="b")
+
+    def _day(self):
+        """Two turns of the root in s1 (a read stored as r:N, two gates handed off, one reported
+        approved with its result, one denied), a fold, and a stray turn in another session."""
+        s = dict(session="s1", origin="user")
+        self._record("spawn", parent="", preset="root", brief="", model="", budget=0)
+        self._record("user", trust="user", text="open the file", turn="t1", **s)
+        self._record("turn_start", turn="t1", item="user", resident="now", **s)
+        self._record("assistant", turn="t1", step=1, model="p:m", stop_reason="tool_use", usage={}, text="",
+                     final=False, blocks=[{"type": "tool_use", "id": "c1", "name": "read_file", "input": {}}], **s)
+        read = self._record("result", turn="t1", trust="third_party", step=1, call_id="c1", tool="read_file",
+                            ok=True, body={"results": [{"title": "a"}, {"title": "b"}]}, **s)
+        first, second = self._gate("c2", "t1"), self._gate("c3", "t1")
+        self._record("assistant", turn="t1", step=2, model="p:m", stop_reason="end_turn", usage={}, text="asked",
+                     final=True, blocks=[{"type": "text", "text": "asked"}], **s)
+        self._record("turn_end", turn="t1", kind="answer", steps=2, usage={}, **s)
+        self._record("resume", turn="t1", trust="user", gate=first["seq"], decision="approved", by="socket", **s)
+        ran = self._record("result", turn="t1", trust="third_party", gate=first["seq"], call_id="c2",
+                           tool="write_file", ok=True, body="wrote 2 bytes", **s)
+        self._record("resume", turn="t1", trust="user", gate=second["seq"], decision="denied", by="chat", **s)
+        self._record("user", session="s1", turn="t2", gate=[first["seq"], second["seq"]], text="report")
+        self._record("turn_start", session="s1", turn="t2", item="continue", resident="now")
+        self._record("summary", session="s1", first=1, upto=read["seq"], text="old", handles=[], model="p:m", usage={})
+        fold = self._record("summary", session="s1", first=1, upto=ran["seq"], text="new",
+                            handles=[f"r:{read['seq']}"], model="p:m", usage={})
+        self._record("interrupted", session="s1", turn="t2", step=0, why="restart")
+        self._record("turn_end", session="s1", turn="t2", kind="interrupted", steps=0, usage={})
+        self._record("user", trust="user", text="elsewhere", turn="t3", session="s2", origin="user")
+        open_gate = self._gate("c4", "t3")
+        proposal = self.ledger.append("approval_pending", session="s1", origin="memory", id="m1", call_id="m1",
+                                      tool="edit_memory", args={"op": "add"}, messages=[])
+        self.state.apply(proposal)
+        return dict(read=read, first=first, second=second, ran=ran, fold=fold, open=open_gate, proposal=proposal)
+
+    def _readers(self, seqs):
+        st = self.state
+        return {"results": [st.result(seqs[k]["seq"]) for k in ("read", "ran")],
+                "gates": [st.gate(seqs[k]["seq"]) for k in ("first", "second", "open")],
+                "open": st.open_gates(), "clone": st.clone_row("root"),
+                "context": st.context("root", "s1", 0), "fold": st.last_fold("root", "s1"),
+                "items": [st.approval_item(seqs[k]["seq"]) for k in ("first", "proposal")]}
+
+    def test_projection(self):
+        seqs = self._day()
+        read, ran = self.state.result(seqs["read"]["seq"]), self.state.result(seqs["ran"]["seq"])
+        self.assertEqual(read["body"], {"results": [{"title": "a"}, {"title": "b"}]})
+        self.assertEqual((ran["body"], ran["ok"], ran["tool"]), ("wrote 2 bytes", True, "write_file"))
+        self.assertIsNone(self.state.result(seqs["first"]["seq"]))  # a gate is not a result
+        first, second, open_ = (self.state.gate(seqs[k]["seq"]) for k in ("first", "second", "open"))
+        self.assertEqual((first["decision"], first["reported"], first["result"]), ("approved", True, ran["seq"]))
+        self.assertEqual((second["decision"], second["reported"], second["result"]), ("denied", True, None))
+        self.assertEqual((open_["decision"], open_["reported"], open_["args"]["content"]), (None, False, "c4"))
+        decided = self._gate("c5", "t3")  # decided, its report never ran: still listed
+        for decision in ("approved", "denied"):  # the first decision wins; a second resume is ignored
+            self._record("resume", session="s1", turn="t3", trust="user", gate=decided["seq"], decision=decision,
+                         by="socket")
+        self.assertEqual([(g["seq"], g["decision"]) for g in self.state.open_gates()],
+                         [(seqs["open"]["seq"], None), (decided["seq"], "approved")])
+        self.assertEqual(self.state.clone_row("root")["state"], "parked")
+        context = self.state.context("root", "s1", 0)
+        self.assertNotIn("spawn", {e["type"] for e in context})
+        self.assertTrue(all("body" not in e for e in context))
+        self.assertNotIn("elsewhere", [e.get("text") for e in context])  # another session's window
+        self.assertEqual([e["seq"] for e in self.state.context("root", "s1", seqs["ran"]["seq"])][0],
+                         seqs["ran"]["seq"] + 1)
+        self.assertEqual(self.state.last_fold("root", "s1")["text"], "new")
+        self.assertIsNone(self.state.last_fold("root", "s2"))
+        self.assertEqual(self.state.approval_item(seqs["first"]["seq"])["kind"], "gate")
+        proposal = self.state.approval_item(seqs["proposal"]["seq"])
+        self.assertEqual((proposal["kind"], proposal["id"]), ("proposal", "m1"))
+        self.assertIsNone(self.state.approval_item(seqs["read"]["seq"]))
+
+    def test_a_gate_changes_no_clone_state(self):
+        self._record("spawn", parent="", preset="root", brief="", model="", budget=0)
+        self._record("turn_start", session="s1", turn="t1", item="user", resident="")
+        self._gate("c1", "t1")
+        self.assertEqual(self.state.clone_row("root")["state"], "running")
+        self._record("turn_end", session="s1", turn="t1", kind="answer", steps=1, usage={})
+        self.assertEqual(self.state.clone_row("root")["state"], "parked")
+
+    def test_rebuild_restores_every_reader(self):
+        seqs = self._day()
+        before = self._readers(seqs)
+        self.state.close()
+        for p in self.home.glob("state.db*"):
+            p.unlink()
+        self.state = State(self.home / "state.db")
+        self.state.rebuild(self.ledger)
+        self.assertEqual(self._readers(seqs), before)
+
+
 if __name__ == "__main__":
     unittest.main()

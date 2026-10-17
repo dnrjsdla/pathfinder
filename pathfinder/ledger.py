@@ -24,6 +24,9 @@ TYPES = frozenset({
     "memory_pass", "memory_apply", "session_summary",
     "pin_accept", "pin_revoke",
     "install_step", "install_done", "install_failed", "uninstalled",
+    # v2 (partition 1 contract); every one carries `clone`
+    "thought", "self_note", "summary", "result", "spawn", "progress", "gate", "resume", "return",
+    "triage", "task_open", "task_wake", "task_update", "task_close",
 })
 ORIGINS = frozenset({"user", "signal", "job", "system", "memory"})
 TRUST = frozenset({"user", "self", "third_party"})
@@ -102,6 +105,9 @@ class Ledger:
         collide = RESERVED & data.keys()
         if collide:
             raise ValueError(f"data keys collide with reserved fields: {sorted(collide)}")
+        # Deviation 4: a model's blocks replay verbatim - a masked thinking block, signature or
+        # tool_use edits an earlier message on replay. The screen `text` stays masked.
+        blocks = data.pop("blocks", None) if type == "assistant" else None
         with self._thread_lock, self._lock_path.open("r+") as lockf:
             fcntl.flock(lockf, fcntl.LOCK_EX)  # cross-process: serializes daemon + CLI appends
             try:
@@ -121,6 +127,8 @@ class Ledger:
                 # event, written and returned, carries only its handle - so state, history and the
                 # record do too; in any other text it is redacted, with no Keychain call
                 event = keychain.vault(event, self.pasted) if trust == "user" else keychain.mask(event)
+                if blocks is not None:
+                    event["blocks"] = _clean(blocks)
                 path = self.dir / f"{partition(ts)}.jsonl"
                 line = json.dumps(event) + "\n"
                 # A crash mid-write leaves a fragment without a newline. Appending straight

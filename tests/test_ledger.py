@@ -36,6 +36,30 @@ class LedgerClosedVocabTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.ledger.append("user", seq=999)
 
+    def test_v2_types_append_with_their_fields(self):
+        """The partition 1 contract's Data section: every new type appends; every one carries `clone`."""
+        fields = {
+            "result": {"step": 1, "call_id": "c1", "tool": "read_file", "ok": True, "body": {"a": 1},
+                       "cut": {"kept": 1, "of": 2}, "gate": 3},
+            "gate": {"step": 1, "call_id": "c1", "tool": "write_file", "args": {"path": "x"}, "effect": "write",
+                     "brief": "b"},
+            "resume": {"gate": 3, "decision": "approved", "by": "socket"},
+            "summary": {"first": 1, "upto": 2, "text": "t", "handles": ["r:1"], "model": "p:m", "usage": {}},
+            "spawn": {"parent": "", "preset": "root", "brief": "", "model": "", "budget": 0},
+            "progress": {"parent": "root", "text": "t"},
+            "return": {"parent": "root", "status": "done", "text": "t", "handles": []},
+            "thought": {"step": 1, "plan": "p", "of": 2}, "self_note": {"kind": "k", "text": "t", "evidence": []},
+            "triage": {"signal_key": "k", "action": "a", "urgent": False, "line": "l", "model": "p:m"},
+            "task_open": {"task": "t", "goal": "g", "trigger": "x", "budget": 1, "end": 0},
+            "task_wake": {"task": "t", "why": "w"}, "task_update": {"task": "t", "state": "s"},
+            "task_close": {"task": "t", "why": "w"},
+        }
+        for type_, data in fields.items():
+            with self.subTest(type_):
+                event = self.ledger.append(type_, clone="root", **data)
+                self.assertEqual({k: event[k] for k in data}, data)
+                self.assertEqual(event["clone"], "root")
+
     def test_ledger_closed_vocab_partition_3_types(self):
         """signal, decision, judgment, delivery, reaction - partition 3's new event types."""
         for type_ in ("signal", "decision", "judgment", "delivery", "reaction", "presence"):
@@ -461,6 +485,25 @@ class PastedTokenTest(unittest.TestCase):
         self.assertNotIn(self.TOKEN, self._on_disk())
         self.assertEqual(self._on_disk().count("key [redacted]"), 2)  # the appends landed
         self.assertFalse((self.home / "pasted.json").exists())
+
+    def test_assistant_blocks_written_verbatim(self):
+        """Deviation 4: `assistant.blocks` replay byte for byte, so the mask skips them; the screen
+        `text`, and a result body, stay masked. The Keychain is never asked."""
+        mock.patch.stopall()
+        blocks = [{"type": "thinking", "thinking": f"saw {self.OTHER}", "signature": self.TOKEN},
+                  {"type": "tool_use", "id": "toolu_1", "name": "save", "input": {"key": self.OTHER}}]
+        with mock.patch("pathfinder.keychain.subprocess.run") as run:
+            event = self.ledger.append("assistant", origin="user", clone="root", step=1, model="p:m",
+                                       blocks=blocks, stop_reason="tool_use", usage={}, text=f"key {self.OTHER}",
+                                       final=False)
+            result = self.ledger.append("result", origin="user", trust="third_party", clone="root", step=1,
+                                        call_id="toolu_1", tool="save", ok=True, body=f"env {self.OTHER}")
+        run.assert_not_called()
+        self.assertEqual(event["blocks"], blocks)
+        self.assertEqual((event["text"], result["body"]), ("key [redacted]", "env [redacted]"))
+        on_disk = [json.loads(line) for line in self._on_disk().splitlines()]
+        self.assertEqual(on_disk[0]["blocks"], blocks)
+        self.assertEqual(next(self.ledger.read(event["seq"] - 1))["blocks"], blocks)
 
     def test_a_token_in_a_tool_result_is_redacted_without_the_keychain(self):
         mock.patch.stopall()

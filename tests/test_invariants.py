@@ -116,9 +116,12 @@ class SourceInvariants(unittest.TestCase):
         """D49's gate for the rows that had no test (partition 8, U17): 1.3x the blueprint §6
         allocation for the core rows, D56's 200 for mirror.py, §6's allocation for llm/ and mcp/.
         A `+` row is one ceiling over the files together."""
-        ceilings = {"state.py": 780, "loop.py": 520, "ledger.py": 520, "tools.py": 390, "exec.py": 390,
+        # state.py 800: v2 partition 1 holds v1's record and the new index side by side from U1
+        # until U10a deletes the D52 record, v1 summaries and job rows; then back to 780.
+        # llm/** 715: contract v2-partition-1 pool ceiling; per-file table lands in U10b.
+        ceilings = {"state.py": 800, "loop.py": 520, "ledger.py": 520, "tools.py": 390, "exec.py": 390,
                     "deliver.py": 325, "broker.py+policy.py": 455, "signals.py+rules.py": 585,
-                    "mirror.py": 200, "llm/**/*.py": 600, "mcp/**/*.py": 1858}
+                    "mirror.py": 200, "llm/**/*.py": 715, "mcp/**/*.py": 1858}
         for row, ceiling in ceilings.items():
             with self.subTest(row):
                 files = [list(SRC.glob(part)) for part in row.split("+")]
@@ -134,7 +137,7 @@ class SourceInvariants(unittest.TestCase):
         self.assertLessEqual(n, 5500, f"the core is {n} lines, over the §6 cap of 5,500")
 
     def test_no_new_ledger_type(self):
-        """Partition 8 adds two fields (`assistant.withdrawn`, `turn_end.check`) and no type."""
+        """v2 partition 1's Data section: the v2 types join; v1's leave in U10a with their last writers."""
         from pathfinder import ledger
         self.assertEqual(ledger.TYPES, frozenset({
             "session_start", "user", "assistant", "tool_call", "tool_result",
@@ -144,7 +147,9 @@ class SourceInvariants(unittest.TestCase):
             "job_start", "job_done", "job_failed",
             "memory_pass", "memory_apply", "session_summary",
             "pin_accept", "pin_revoke",
-            "install_step", "install_done", "install_failed", "uninstalled"}), "a new ledger type needs a decision")
+            "install_step", "install_done", "install_failed", "uninstalled",
+            "thought", "self_note", "summary", "result", "spawn", "progress", "gate", "resume", "return",
+            "triage", "task_open", "task_wake", "task_update", "task_close"}), "a new ledger type needs a decision")
 
     def test_config_json_written_only_by_config_set(self):
         """test_single_writer keeps config.json inside config.py; inside it, only set() writes it."""

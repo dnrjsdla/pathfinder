@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, started_ts REAL, last_
 CREATE TABLE IF NOT EXISTS messages (seq INTEGER PRIMARY KEY, session TEXT, role TEXT, content TEXT, ts REAL, ref TEXT);
 CREATE TABLE IF NOT EXISTS approvals (
     id TEXT PRIMARY KEY, call_id TEXT, session TEXT, turn TEXT, tool TEXT,
-    args_json TEXT, messages_json TEXT, ts REAL, decision TEXT, job TEXT
+    args_json TEXT, messages_json TEXT, ts REAL, decision TEXT, job TEXT, seq INTEGER
 );
 CREATE TABLE IF NOT EXISTS signals (key TEXT PRIMARY KEY, ts REAL, sense TEXT, kind TEXT);
 CREATE TABLE IF NOT EXISTS decisions (
@@ -75,10 +75,24 @@ CREATE TABLE IF NOT EXISTS pins (
 CREATE TABLE IF NOT EXISTS installs (
     id TEXT PRIMARY KEY, name TEXT, version TEXT, state TEXT, ts REAL, detail TEXT
 );
+CREATE TABLE IF NOT EXISTS results (seq INTEGER PRIMARY KEY, clone TEXT, session TEXT, turn TEXT, call_id TEXT,
+  tool TEXT, ok INTEGER, body TEXT);
+CREATE TABLE IF NOT EXISTS clones (id TEXT PRIMARY KEY, parent TEXT, preset TEXT, state TEXT, session TEXT,
+  turn TEXT, ts REAL);
+CREATE TABLE IF NOT EXISTS gates (seq INTEGER PRIMARY KEY, clone TEXT, session TEXT, turn TEXT, call_id TEXT,
+  tool TEXT, args_json TEXT, effect TEXT, brief TEXT, decision TEXT, reported INTEGER, result INTEGER, ts REAL);
+CREATE TABLE IF NOT EXISTS context (seq INTEGER PRIMARY KEY, clone TEXT, session TEXT, turn TEXT, type TEXT,
+  event_json TEXT);
+CREATE INDEX IF NOT EXISTS context_by_clone ON context (clone, session, seq);
 """
 
 NEW_TABLES = ("signals", "decisions", "judgments", "deliveries", "reactions", "presence", "signal_turns", "jobs",
-              "pages_fts", "pages", "vectors", "summaries", "memory_passes", "memory_applies", "pins", "installs")
+              "pages_fts", "pages", "vectors", "summaries", "memory_passes", "memory_applies", "pins", "installs",
+              "results", "clones", "gates", "context")
+# the v2 events a clone's window is assembled from (a result's body stays in `results`)
+CONTEXT_TYPES = frozenset({"user", "assistant", "result", "turn_start", "turn_end", "gate", "resume", "interrupted",
+                           "summary"})
+_GATE_COLUMNS = "seq, clone, session, turn, call_id, tool, args_json, effect, brief, decision, reported, result, ts"
 
 
 @dataclass
@@ -110,6 +124,8 @@ class State:
             self.db.execute("ALTER TABLE approvals ADD COLUMN job TEXT")
         if "ref" not in {r[1] for r in self.db.execute("PRAGMA table_info(messages)")}:
             self.db.execute("ALTER TABLE messages ADD COLUMN ref TEXT")  # D52: a record row's call id
+        if "seq" not in {r[1] for r in self.db.execute("PRAGMA table_info(approvals)")}:
+            self.db.execute("ALTER TABLE approvals ADD COLUMN seq INTEGER")  # v2: one approval-id namespace
         self.db.execute("INSERT OR IGNORE INTO meta (key, value) VALUES ('cursor', '0')")
         self.db.execute("INSERT OR IGNORE INTO meta (key, value) VALUES ('memory_cursor', '0')")
         self.db.commit()
@@ -184,10 +200,10 @@ class State:
                 self.db.execute("UPDATE sessions SET turns = turns + 1 WHERE id = ?", (session,))
         if event["type"] == "approval_pending":
             self.db.execute(
-                "INSERT OR IGNORE INTO approvals (id, call_id, session, turn, tool, args_json, messages_json, ts, decision, job) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)",
+                "INSERT OR IGNORE INTO approvals (id, call_id, session, turn, tool, args_json, messages_json, ts, decision, "
+                "job, seq) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)",
                 (event["id"], event["call_id"], session, event.get("turn", ""), event["tool"],
-                 json.dumps(event["args"]), json.dumps(event["messages"]), event["ts"], event.get("job")),
+                 json.dumps(event["args"]), json.dumps(event["messages"]), event["ts"], event.get("job"), seq),
             )
             if event.get("job"):  # `pathfinder jobs` shows a paused job as gated, not running
                 self.db.execute("UPDATE jobs SET state = 'gated' WHERE id = ?", (event["job"],))
@@ -286,6 +302,8 @@ class State:
             self.db.execute(
                 "UPDATE jobs SET ended_ts = ?, state = ?, reason = ? WHERE id = ?",
                 (event["ts"], state_val, event.get("reason", ""), event["id"]))
+        if event.get("clone"):
+            self._project_clone(seq, event)
         # a pass's own events (origin "memory") must not look like the user is still there -
         # they would keep the session alive forever and the pass would never see it go idle.
         # Nor may a screen's 30 s `presence` heartbeat or a signal's silent triage (D41: live, one
@@ -296,6 +314,39 @@ class State:
                 and (origin != "signal" or event["type"] == "assistant")):
             self.db.execute("UPDATE sessions SET last_ts = ? WHERE id = ?", (event["ts"], session))
         self.db.execute("UPDATE meta SET value = ? WHERE key = 'cursor'", (str(seq),))
+
+    def _project_clone(self, seq, event):
+        """v2 events (they carry `clone`): context rows, the result store, gates, clone rows. A gate
+        changes no clone state (V22); a clone moves only on turn_start, turn_end and interrupted."""
+        kind, clone, session, turn = event["type"], event["clone"], event.get("session", ""), event.get("turn", "")
+        if kind in CONTEXT_TYPES:
+            row = {k: v for k, v in event.items() if not (kind == "result" and k == "body")}
+            self.db.execute("INSERT OR IGNORE INTO context (seq, clone, session, turn, type, event_json) "
+                            "VALUES (?, ?, ?, ?, ?, ?)", (seq, clone, session, turn, kind, json.dumps(row)))
+        if kind == "result":
+            self.db.execute("INSERT OR IGNORE INTO results (seq, clone, session, turn, call_id, tool, ok, body) "
+                            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                            (seq, clone, session, turn, event.get("call_id", ""), event.get("tool", ""),
+                             int(bool(event.get("ok"))), json.dumps(event.get("body"), ensure_ascii=False)))
+            if event.get("gate"):  # a handed-off call's outcome: its gate points at it
+                self.db.execute("UPDATE gates SET result = ? WHERE seq = ?", (seq, event["gate"]))
+        if kind == "gate":
+            self.db.execute(f"INSERT OR IGNORE INTO gates ({_GATE_COLUMNS}) "
+                            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 0, NULL, ?)",
+                            (seq, clone, session, turn, event["call_id"], event["tool"], json.dumps(event["args"]),
+                             event.get("effect", ""), event.get("brief", ""), event["ts"]))
+        if kind == "resume":
+            self.db.execute("UPDATE gates SET decision = ? WHERE seq = ? AND decision IS NULL",  # the first wins
+                            (event["decision"], event["gate"]))
+        if kind == "user" and event.get("gate"):  # a report turn: one event for every gate it reports
+            self.db.executemany("UPDATE gates SET reported = 1 WHERE seq = ?", [(g,) for g in event["gate"]])
+        if kind == "spawn":
+            self.db.execute("INSERT OR IGNORE INTO clones (id, parent, preset, state, session, turn, ts) "
+                            "VALUES (?, ?, ?, 'parked', ?, ?, ?)",
+                            (clone, event.get("parent", ""), event.get("preset", ""), session, turn, event["ts"]))
+        if kind in ("turn_start", "turn_end", "interrupted"):
+            self.db.execute("UPDATE clones SET state = ?, session = ?, turn = ?, ts = ? WHERE id = ?",
+                            ("running" if kind == "turn_start" else "parked", session, turn, event["ts"], clone))
 
     def _insert_message(self, seq, session, role, content, ts):
         self.db.execute(
@@ -405,6 +456,58 @@ class State:
         if row is None:
             return None
         return {"id": row[0], "started_ts": row[1], "last_ts": row[2], "turns": row[3]}
+
+    def result(self, seq: int) -> dict | None:
+        """A stored result by its seq (`r:N`), body included - `read_result` is this one SELECT."""
+        row = self.db.execute("SELECT seq, clone, session, turn, call_id, tool, ok, body FROM results "
+                              "WHERE seq = ?", (seq,)).fetchone()
+        if row is None:
+            return None
+        return {"seq": row[0], "clone": row[1], "session": row[2], "turn": row[3], "call_id": row[4],
+                "tool": row[5], "ok": bool(row[6]), "body": json.loads(row[7])}
+
+    def context(self, clone: str, session: str, after: int) -> list[dict]:
+        """`clone`'s recorded events in `session` with seq > `after`, oldest first (a result without its body)."""
+        rows = self.db.execute("SELECT event_json FROM context WHERE clone = ? AND session = ? AND seq > ? "
+                               "ORDER BY seq", (clone, session, after))
+        return [json.loads(r[0]) for r in rows]
+
+    def last_fold(self, clone: str, session: str) -> dict | None:
+        """The newest `summary` event of `clone` in `session`."""
+        row = self.db.execute("SELECT event_json FROM context WHERE clone = ? AND session = ? AND type = 'summary' "
+                              "ORDER BY seq DESC LIMIT 1", (clone, session)).fetchone()
+        return None if row is None else json.loads(row[0])
+
+    def clone_row(self, id: str) -> dict | None:
+        row = self.db.execute("SELECT id, parent, preset, state, session, turn, ts FROM clones WHERE id = ?",
+                              (id,)).fetchone()
+        return None if row is None else dict(zip(("id", "parent", "preset", "state", "session", "turn", "ts"), row))
+
+    @staticmethod
+    def _gate_row(row) -> dict:
+        gate = dict(zip(_GATE_COLUMNS.split(", "), row))
+        gate["args"] = json.loads(gate.pop("args_json"))
+        gate["reported"] = bool(gate["reported"])
+        return gate
+
+    def gate(self, seq: int) -> dict | None:
+        """A gate by its seq: `decision` is None while it is open; `result` is the seq of the
+        handed-off call's `result`, None until it ran."""
+        row = self.db.execute(f"SELECT {_GATE_COLUMNS} FROM gates WHERE seq = ?", (seq,)).fetchone()
+        return None if row is None else self._gate_row(row)
+
+    def open_gates(self) -> list[dict]:
+        """Every gate not yet reported, decided or not (`decision` None while open), oldest first."""
+        rows = self.db.execute(f"SELECT {_GATE_COLUMNS} FROM gates WHERE reported = 0 ORDER BY seq")
+        return [self._gate_row(r) for r in rows]
+
+    def approval_item(self, seq: int) -> dict | None:
+        """What `approve <seq>` names: a clone's gate, or a proposal by its `approval_pending` seq."""
+        gate = self.gate(seq)
+        if gate is not None:
+            return {"kind": "gate", **gate}
+        row = self.db.execute("SELECT id FROM approvals WHERE seq = ?", (seq,)).fetchone()
+        return None if row is None else {"kind": "proposal", **self.approval(row[0])}
 
     def pending(self) -> list:
         """Approvals with no decision yet, oldest first - what survives a restart."""

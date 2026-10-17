@@ -68,11 +68,13 @@ rule §6 keeps); targets are §6.
 | Module | §6 target / test | Now → after P1 | Imports (package) | Imported by |
 |---|---|---|---|---|
 | `ledger.py` | 200 / 260 | 152 → ~175 | keychain | daemon, init, `__main__`, memory, keychain* |
-| `state.py` | 600 / 780 (800 from U1 to U10a) | 695 → ~710 | clock | daemon, `__main__`, memory, senses/catalog |
+| `state.py` | 600 / 780 (800 from U1 to U10a) | 695 → 800 (at the temporary ceiling until U10a) | clock | daemon, `__main__`, memory, senses/catalog |
 | `results.py` (new) | 300 / 390 | ~200 | tools | assemble, clone |
 | `assemble.py` (new, holds fold) | 400 / 520 | ~330 | llm, results | clone |
 | `clone.py` (new) | 400 / 520 | ~380 | assemble, broker, llm, results, tools | daemon |
 | `router.py` + `llm/**` | 550 / 715 | 385 → ~600 | llm, llm.anthropic, llm.openai_compat, keychain | clone, daemon, memory (embed) |
+| ↳ `llm/openai_compat.py` (urllib SSE + `to_wire` + `complete`; `stream` leaves in U9; inside the pool row) | 200 / 260 | 135 → ~210 | llm, llm.rename | router, memory (embed) |
+| ↳ `llm/rename.py` (new; V21; inside the pool row) | 80 / 105 | ~70 | — | llm.openai_compat |
 | `daemon.py` | 300 at P6 / 780 kept | 778 → ~600 | (≈15: not yet under the ceiling) | `__main__` |
 
 \* keychain's function-level import of `ledger.locked` predates v2; it is on the coupling test's `NOT_YET` list.
@@ -87,8 +89,9 @@ Public interfaces (one line each; everything else private):
   `TYPES` (below); `assistant.blocks` is written verbatim (exempt from `mask`/`vault`, Deviation 4).
 - `state` (new readers): `result(seq: int) -> dict | None` · `context(clone: str, session: str, after: int) ->
   list[dict]` · `last_fold(clone: str, session: str) -> dict | None` (the newest `summary` context row) ·
-  `clone_row(id: str) -> dict | None` · `gate(seq: int) -> dict | None` · `open_gates() -> list[dict]` ·
-  `approval_item(seq: int) -> dict | None` (a gate or a proposal by its event seq).
+  `clone_row(id: str) -> dict | None` · `gate(seq: int) -> dict | None` · `open_gates() -> list[dict]` (every gate not
+  yet reported, decided or not) · `approval_item(seq: int) -> dict | None` (a gate or a proposal by its event seq;
+  `kind: gate|proposal`).
 - `results`: `READ_RESULT: dict` (neutral tool spec) · `summary(body) -> dict` (rule renderer) · `render(event:
   dict) -> str` (the tool message for a `result`) · `read(state: State, seen: set[int], args: dict) -> tuple[bool,
   object]` · `cap(body) -> tuple[object, dict | None]` (the store cap; the dict describes the cut).
@@ -96,16 +99,18 @@ Public interfaces (one line each; everything else private):
   State, view: View, tools: list[dict]) -> Request` · `window_handles(state: State, view: View) -> set[int]` ·
   `resident(parts: list[str]) -> str` · `fold_point(state: State, view: View) -> int | None` · `fold_request(state:
   State, view: View, upto: int) -> Request` · `handle_lines(state: State, view: View, upto: int) -> list[str]`.
-- `llm`: `Endpoint`, `LLMError` (kept) · `resolve(cfg: dict, ref: str) -> Endpoint` (key: env `api_key_env`, else
-  Keychain service `pathfinder-<provider>`, account `api`) · `Request`, `Response` (below).
+- `llm`: `Endpoint`, `LLMError` (kept) · `resolve(cfg: dict, ref: str) -> Endpoint` (key: env `api_key_env`, else, for
+  `api: "anthropic"` providers only, Keychain service `pathfinder-<provider>`, account `api`; a local provider never
+  triggers a `security` call) · `Request`, `Response` (below).
 - `llm.anthropic`: `async complete(endpoint: Endpoint, req: Request, on_text: Callable[[str], None] | None) ->
   Response` (cancelled by cancelling its task) · `to_wire(req: Request, endpoint: Endpoint) -> dict` (pure).
 - `llm.openai_compat`: `async complete(endpoint, req, on_text, cancel: threading.Event | None) -> Response` (runs
-  urllib in a thread) · `to_wire(req, endpoint) -> dict` · `rename_out(tools: list[dict]) -> tuple[list[dict],
-  dict]` · `rename_in(tool_name: str, args: dict, renames: dict) -> dict` · `rename_args_out(tool_name: str, args:
-  dict, renames: dict) -> dict` · `embed(endpoint, texts) -> list` and `parse_sse` (kept).
+  urllib in a thread) · `to_wire(req, endpoint) -> dict` · `embed(endpoint, texts) -> list` and `parse_sse` (kept).
+- `llm.rename` (V21, used by `openai_compat`): `rename_out(tools: list[dict]) -> tuple[list[dict], dict]` ·
+  `rename_in(tool_name: str, args: dict, renames: dict) -> dict` · `rename_args_out(tool_name: str, args: dict,
+  renames: dict) -> dict`.
 - `router`: `Router(load_cfg: Callable[[], dict])` · `async complete(self, req: Request, on_text=None, cancel=None)
-  -> Response` · `chain(self, role: str, override: str = "") -> list[str]`.
+  -> Response` (sets `Response.model` to the `provider:model` ref; adapters return the bare endpoint model) · `chain(self, role: str, override: str = "") -> list[str]`.
 - `clone`: `Item(kind: str, text: str, session: str, origin: str = "user", gate: int = 0)` (kind
   `user|schedule|continue|signal`; `signal`: M6 now, attention in P5) · `Clone(id: str, role: str, *, home: Path, state:
   State, record: Callable[..., dict], router: Router, send: Callable, enqueue: Callable[[Item], None], resident:
@@ -126,7 +131,7 @@ untouched until policy is rewritten (P2).
 |---|---|---|
 | `assistant` (extended) | clone (1), one per model step | `clone, step, model, blocks, stop_reason, usage, text, final` |
 | `result` | clone (1), one per run call | `clone, step, call_id, tool, ok, body` (raw, ≤ cap; trust third_party), `cut` when capped, `gate` for a handed-off call |
-| `user` (extended) | daemon (a say), clone (report item, budget note) | `clone`, `steer` (a say during a running turn), `gate` (a report turn: the list of gate seqs it reports) |
+| `user` (extended) | daemon (a say), clone (report item, budget note) | `clone`, `steer` (a say during a running turn), `gate` (a report turn: the list of gate seqs it reports; `gate` is always a list; a single report is `[N]`) |
 | `gate` | clone (1), instead of a `result` | `clone, step, call_id, tool, args, effect, brief` |
 | `resume` | clone (1) | `clone, gate` (its seq), `decision` (`approved|denied`), `by` (`socket|chat`) |
 | `interrupted` (extended) | clone (1) | `clone, step, why` (`user|restart`) |
@@ -147,7 +152,7 @@ interrupt and a restart; `why` is on the `interrupted` event). A gate never ends
 {"seq": 810, "type": "result", "turn": "t9", "origin": "user", "trust": "third_party", "clone": "root", "step": 1, "call_id": "toolu_0", "tool": "read_file", "ok": true, "body": "{\"results\": [ ...100 items... ]}"}
 {"seq": 845, "type": "gate", "turn": "t10", "origin": "user", "trust": "self", "clone": "root", "step": 1, "call_id": "toolu_3", "tool": "write_file", "args": {"path": "/tmp/pf1/workspace/answer.txt", "content": "..."}, "effect": "write", "brief": "Write that id, and nothing else, into ..."}
 {"seq": 851, "type": "resume", "turn": "t10", "origin": "user", "trust": "user", "clone": "root", "gate": 845, "decision": "approved", "by": "socket"}
-{"seq": 902, "type": "summary", "origin": "system", "trust": "self", "clone": "root", "first": 700, "upto": 790, "text": "...", "handles": ["r:712", "r:760"], "model": "anthropic:<model from config>", "usage": {"input_tokens": 7100, "output_tokens": 640}}
+{"seq": 902, "type": "summary", "session": "s1", "origin": "system", "trust": "self", "clone": "root", "first": 700, "upto": 790, "text": "...", "handles": ["r:712", "r:760"], "model": "anthropic:<model from config>", "usage": {"input_tokens": 7100, "output_tokens": 640}}
 ```
 
 **`r:N` = the seq of a `result` event.** The body is in the ledger (truth) and copied into state (derived, so
@@ -162,18 +167,19 @@ adds `approvals.seq`): `approve <seq>` has one namespace.
 **state.db** (all derived, dropped and replayed by `rebuild`; no titles or recipients until P3 has a reader):
 ```sql
 CREATE TABLE IF NOT EXISTS results (seq INTEGER PRIMARY KEY, clone TEXT, session TEXT, turn TEXT, call_id TEXT,
-  tool TEXT, ok INTEGER, chars INTEGER, body TEXT);
+  tool TEXT, ok INTEGER, body TEXT);
 CREATE TABLE IF NOT EXISTS clones (id TEXT PRIMARY KEY, parent TEXT, preset TEXT, state TEXT, session TEXT,
   turn TEXT, ts REAL);
 CREATE TABLE IF NOT EXISTS gates (seq INTEGER PRIMARY KEY, clone TEXT, session TEXT, turn TEXT, call_id TEXT,
-  tool TEXT, args_json TEXT, effect TEXT, brief TEXT, decision TEXT, reported INTEGER, ts REAL);
+  tool TEXT, args_json TEXT, effect TEXT, brief TEXT, decision TEXT, reported INTEGER, result INTEGER,
+  ts REAL);
 CREATE TABLE IF NOT EXISTS context (seq INTEGER PRIMARY KEY, clone TEXT, session TEXT, turn TEXT, type TEXT,
   event_json TEXT);  -- user, assistant, result (body left out), turn_start, turn_end, gate, resume, interrupted, summary
 CREATE INDEX IF NOT EXISTS context_by_clone ON context (clone, session, seq);
 -- approvals gains `seq INTEGER` (ALTER TABLE, the existing pattern)
 ```
 Projection: `turn_start` → clone `running`; `gate` → `gates` row (no root state change); `resume` → decision; `user {gate: [...]}` → `reported` on each listed gate;
-`turn_end`/`interrupted` → `parked`; `spawn` → insert. v1's session-keyed `summaries` table goes in U10a with
+`result {gate}` → the gate's `result`; `turn_end`/`interrupted` → `parked`; `spawn` → insert, `parked`. v1's session-keyed `summaries` table goes in U10a with
 `session_summary`. `messages` keeps feeding `session_messages` (screens) from `final` assistant text.
 
 **Request / Response** (`llm/__init__.py`, provider-neutral):
@@ -294,6 +300,7 @@ on the way to the model, never to the ledger. No `eager_input_streaming`, no `to
 collides with a sibling. `rename_out` returns the tools and `renames = {tool: {path: {original: renamed}}}` (path = the
 original property names down to that map). `rename_in` maps arguments back: if both names arrive the renamed one wins and
 the original is ignored; an original-only key is kept (M9: the model sent `properties` when a description named it).
+A `required` list of the same schema node follows the rename.
 Replayed tool calls go out through `rename_args_out`, matching the schemas the model sees; the ledger holds original names.
 
 **Fold (V5)**, after `turn_end`: if piece 4 > 24,000, the oldest whole turns fold until ≤ 12,000 remain; the last turn
@@ -322,7 +329,7 @@ seq of the last `summary` for this clone and session), computed by `Clone` when 
 | Across turns, same session, no fold/restart | still replayed: a sent block stays in every later request (Haiku keeps previous-turn thinking; stripping would miss the cache each turn) |
 | After a fold | fresh prefix: summary + kept turns, their thinking stripped (epoch = summary seq) |
 | After a restart | all thinking up to the epoch stripped (M2: 0 HTTP 400) |
-| Interrupted step | only its complete text blocks |
+| Interrupted step | only its complete text blocks: on cancel the adapter returns the blocks as they arrived with stop_reason `interrupted`; the clone (U7) keeps only complete text blocks when it records/replays the step (no reasoning/thinking, text marked partial) |
 | Other model (fallback) | the adapter drops thinking whose message `model` ≠ the request's model |
 | Refused exchange | turns ending `refused` are left out of later windows (nothing was sent after them) |
 | Never | an earlier message edited, a resident copy removed, a result re-rendered differently in one daemon life |
@@ -460,12 +467,12 @@ U8a switches; U9–U10b delete. After each: tests green, `scan_personal.py --all
 |---|---|---|---|---|---|---|---|
 | U1 | Types and the index | `ledger.py`, `state.py`, `tests/test_invariants.py` (`test_no_new_ledger_type`; state ceiling 800 with a note until U10a) (+ test_ledger, test_state) | +~120 | — | U3, U4 | new types append; `blocks` verbatim; `approvals.seq`; `rebuild` restores results, clones, gates (with `reported`), context | 30 |
 | U2 | The store | `results.py` (+ test_results) | ~200 | U1 | U4, U5 | render, read (range/query/path, JSON and text), seen-set refusal, 256 KB cap, filter on the way out | 25 |
-| U3 | Neutral types, openai_compat + V21 | `llm/__init__.py`, `llm/openai_compat.py` (+ test_llm) | +~110 | — | U1, U2 | `Request`/`Response`; `to_wire` stable; the rename spec; `complete` on canned SSE; v1 `stream` kept until U9 | 30 |
+| U3 | Neutral types, openai_compat + V21 | `llm/__init__.py`, `llm/openai_compat.py`, `llm/rename.py` (+ test_llm) | +~110 | — | U1, U2 | `Request`/`Response`; `to_wire` stable; the rename spec; `complete` on canned SSE; v1 `stream` kept until U9 | 30 |
 | U4 | Anthropic on the SDK | `llm/anthropic.py`, `pyproject.toml` (+ test_llm_anthropic) | ~190 | U3 | U1, U2 | fake-client tests: blocks verbatim, 3 breakpoints, resident placement + fallback constant, thinking drop on model change, refusal | 30 |
-| U5 | Router and config | `router.py`, `config.py` (+ test_router, test_config) | ~170 + ~25 | U4 | U6 | `test_fallback_chain`, semaphores, override check, `models` and `effort` validated | 25 |
+| U5 | Router and config | `router.py`, `config.py` (+ test_router, test_config) | ~170 + ~25 | U4 | U6 | `test_fallback_chain`, semaphores, override check, `models` and `effort` validated; `Response.model` == the ref (tested) | 25 |
 | U6 | The assembler and fold | `assemble.py`, `prompts/root.txt`, `prompts/fold.txt` (+ test_assemble) | ~330 | U1, U2, U4 | U5 | five pieces in budget, seen set, epoch strip, refused turns out, fold point/request/handle lines; its three invariant tests; `prompts/root.txt` teaches the waiting status — a handed-off call is "requested, not done", never reported as done until its report item arrives | 35 |
-| U7 | The clone | `clone.py` (+ test_clone) | ~380 | U5, U6 | — | the turn table and the hand-off with a fake router and broker: waiting status, `decide` runs the detached call once, the report item (queued reports of one session merged into one turn, never with a say), interrupts, budgets, partial steps, steer, refusal, fold, restore (re-list, re-enqueue, outcome unknown); its three invariant tests | 35 |
-| U8a | The switch | `daemon.py`, `broker.py` (raw result), `tools.py` (`read_file` clip → store, 1 MB cap) (+ test_daemon, test_broker, test_tools) | daemon −250/+80 | U7 | — | rewritten daemon tests pass; approve by seq; the lane survives all-blocked (the memory pass sees unclipped results until U9) | 35 |
+| U7 | The clone | `clone.py` (+ test_clone) | ~380 | U5, U6 | — | the turn table and the hand-off with a fake router and broker: waiting status, `decide` runs the detached call once, the report item (queued reports of one session merged into one turn, never with a say; records `user {gate: [N]}` for one report (list, tested)), interrupts, budgets, partial steps, steer, refusal, fold, restore (re-list, re-enqueue, outcome unknown); its three invariant tests | 35 |
+| U8a | The switch | `daemon.py`, `broker.py` (raw result), `tools.py` (`read_file` clip → store, 1 MB cap) (+ test_daemon, test_broker, test_tools) | daemon −250/+80 | U7 | — | rewritten daemon tests pass; approve by seq; the lane survives all-blocked (the memory pass sees unclipped results until U9); a home whose state.db predates P1 needs `pathfinder reindex` once (approvals.seq is not backfilled by catch_up); the live check starts from a fresh home | 35 |
 | U8b | The CLI and the live check | `__main__.py` (`approvals` by seq; `approve` prints the report turn), `bench/v2/p1_runs.py` | ~+30, ~120 | U8a | R1, R2 (writing) | **the live check passes**, recorded for the lead | 25 |
 | U9 | Delete the old turn engine | deletes `loop.py`, `jobs.py`, `llm/slot.py`, `senses/jobs.py`, old prompts; edits `memory.py` (pass, summarize), `rules.py` (judge stub), `daemon.py` (memory_mgr without a pass factory) (+ retired tests) | −~1,000 | U8b | — | nothing imports the deleted modules; suite green; retired tests listed | 30 |
 | U10a | Dead state and keys | `state.py` (D52 record, v1 summaries, job rows; ceiling back to 780), `ledger.py` (TYPES removals), `config.py` (`model`, `worker_model`) (+ test_state, test_config) | −~150 | U9 | — | `test_no_new_ledger_type` final set; state ≤ 780 | 25 |

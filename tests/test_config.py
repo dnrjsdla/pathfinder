@@ -127,6 +127,34 @@ class ConfigTest(unittest.TestCase):
         cfg = config.set(self.home, "mcp_servers", value)
         self.assertEqual(cfg["mcp_servers"], value)
 
+    def test_models_ship_empty_and_refs_are_checked(self):
+        self.assertEqual(config.load(self.home)["models"], {})
+        cfg = config.set(self.home, "models", {"root": ["ollama:fake-a", "ollama:fake:tag"], "summarize": ["ollama:b"]})
+        self.assertEqual(cfg["models"]["root"], ["ollama:fake-a", "ollama:fake:tag"])
+        for bad in ({"boss": ["ollama:a"]}, {"root": []}, {"root": "ollama:a"}, {"root": ["ollama:"]},
+                    {"root": [":a"]}, {"root": ["a"]}, {"root": [5]}, {"root": ["nowhere:a"]}):
+            with self.subTest(value=bad):
+                with self.assertRaises(config.ConfigError):
+                    config.set(self.home, "models", bad)
+        # a providers change that orphans a ref is refused too, and so is a hand-edited file
+        with self.assertRaises(config.ConfigError):
+            config.set(self.home, "providers", {"other": {"base_url": "http://127.0.0.1:1/v1"}})
+        (self.home / "config.json").write_text(json.dumps({"models": {"root": ["nowhere:a"]}}))
+        with self.assertRaises(config.ConfigError):
+            config.load(self.home)
+
+    def test_provider_shape_and_effort_checked(self):
+        good = {"cloud": {"api": "anthropic", "base_url": "https://cloud.example", "effort": "xhigh"}}
+        self.assertEqual(config.set(self.home, "providers", good)["providers"], good)
+        for bad in ({"cloud": {"api": "anthropic", "base_url": "https://cloud.example", "effort": "huge"}},
+                    {"local": {"base_url": "http://127.0.0.1:1/v1", "effort": "high"}},
+                    {"local": "http://127.0.0.1:1/v1"},
+                    {"local": {"api_key_env": ""}}, {"local": {"base_url": ""}},
+                    {"local": {"base_url": "http://127.0.0.1:1/v1", "api": "gemini"}}):
+            with self.subTest(value=bad):
+                with self.assertRaises(config.ConfigError):
+                    config.set(self.home, "providers", bad)
+
     def test_home_tightens_an_existing_directory(self):
         loose = self.home / "loose"
         loose.mkdir(mode=0o755)

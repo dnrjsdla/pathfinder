@@ -22,7 +22,8 @@ DEFAULTS = {
     "model": "",
     "worker_model": "",
     "embed_model": "",
-    "providers": {"ollama": {"base_url": "http://localhost:11434/v1", "api_key_env": ""}},  # + optional "api": "openai" (default) | "anthropic" (experimental - never run live, D7/D37)
+    "models": {},      # role -> ["provider:model", ...]: first = primary, the rest = the fallback chain
+    "providers": {"ollama": {"base_url": "http://localhost:11434/v1", "api_key_env": ""}},  # + optional "api": "openai" (default) | "anthropic" (experimental - never run live, D7/D37), "effort" (anthropic only)
     "max_steps": 8,
     "session_resume_s": 7200,
     "grants": {},
@@ -30,6 +31,10 @@ DEFAULTS = {
     "schedules": [],   # [{id, at, repeat, text}], written only through schedule.py's tools
     "mcp_servers": {},  # server id -> {transport, command|url, env|headers, timeout, protocol}
 }
+
+_MODEL_ROLES = ("root", "worker", "reviewer", "triage", "summarize", "night")
+_APIS = ("openai", "anthropic")
+_EFFORTS = ("low", "medium", "high", "xhigh", "max")
 
 _SCHEDULE_KEYS = {"id", "at", "repeat", "text"}
 _REPEATS = ("none", "daily", "weekly")
@@ -53,6 +58,43 @@ def _check_senses(value):
         bad = frozenset(options) - frozenset(mod.OPTIONS)
         if bad:  # a typo here would otherwise silently run with the default - refuse at the door
             raise ConfigError(f"unknown option(s) for sense {name}: {sorted(bad)}")
+
+
+def _check_providers(value):
+    for name, spec in value.items():
+        if not isinstance(spec, dict):
+            raise ConfigError(f"providers.{name} must be an object")
+        if not isinstance(spec.get("base_url"), str) or not spec["base_url"]:
+            raise ConfigError(f"providers.{name}.base_url must be a non-empty string")
+        if spec.get("api", "openai") not in _APIS:
+            raise ConfigError(f"providers.{name}.api must be one of {_APIS}")
+        if "effort" in spec:
+            if spec.get("api", "openai") != "anthropic":
+                raise ConfigError(f"providers.{name}.effort is for api anthropic only")
+            if spec["effort"] not in _EFFORTS:
+                raise ConfigError(f"providers.{name}.effort must be one of {_EFFORTS}")
+
+
+def _is_ref(ref):
+    provider, _, model = ref.partition(":") if isinstance(ref, str) else ("", "", "")
+    return bool(provider and model)
+
+
+def _check_models(value):
+    for role, refs in value.items():
+        if role not in _MODEL_ROLES:
+            raise ConfigError(f"unknown models key: {role!r} (one of {_MODEL_ROLES})")
+        if not isinstance(refs, list) or not refs or not all(_is_ref(ref) for ref in refs):
+            raise ConfigError(f"models.{role} must be a non-empty list of \"provider:model\" refs")
+
+
+def _check_refs(cfg):
+    """Across keys: every provider a `models` ref names must exist - run on the whole config, since a later
+    `providers` change can orphan a ref as surely as a bad `models` value."""
+    for role, refs in cfg["models"].items():
+        for ref in refs:
+            if ref.partition(":")[0] not in cfg["providers"]:
+                raise ConfigError(f"models.{role}: unknown provider in {ref!r}")
 
 
 def _check_schedules(value):
@@ -127,6 +169,10 @@ def _check(key, value):
         bad = {k: v for k, v in value.items() if v not in ("allow", "ask", "deny")}
         if bad:  # a typo here would otherwise read as "never ask" - fail closed at the door
             raise ConfigError(f"grants values must be allow, ask or deny: {bad}")
+    if key == "providers":
+        _check_providers(value)
+    if key == "models":
+        _check_models(value)
     if key == "senses":
         _check_senses(value)
     if key == "schedules":
@@ -169,6 +215,7 @@ def load(home: Path) -> dict:
         for key, value in overrides.items():
             _check(key, value)
         cfg.update(overrides)
+        _check_refs(cfg)
     return cfg
 
 
@@ -176,6 +223,7 @@ def set(home: Path, key: str, value, ledger=None) -> dict:
     _check(key, value)
     cfg = load(home)
     cfg[key] = value
+    _check_refs(cfg)
     config_path = Path(home) / "config.json"
     # atomic: write to a temp file in the same directory, then os.replace - a crash
     # mid-write can never leave config.json truncated or half-written

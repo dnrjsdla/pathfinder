@@ -4,13 +4,16 @@ m2_resume.py -- v2 measurement M2: a clone stopped at an approval gate resumes a
 from a context rebuilt only from the ledger (V12), on the Anthropic Messages API.
 Pass line (blueprint section 13): an arm passes at N/N resumed and 0 HTTP 400.
 Arms: strip-all (V12 as written), replay, strip-all-drop (beta drop_block), strip-last-only.
-Usage: <venv>/python bench/v2/m2_resume.py --models M[,M2] [--trials 10] [--arm a,b] [--out DIR]
+An arm whose trials never had a thinking block before the gate is "untested", not "pass".
+Usage: <venv>/python bench/v2/m2_resume.py --models M[,M2] [--trials 10] [--arm a,b] [--effort E] [--out DIR]
        <venv>/python bench/v2/m2_resume.py --selfcheck      (stub client, no network)
 """
-import argparse, json, os, random, re, subprocess, sys, tempfile, uuid
+import argparse, json, os, random, re, sys, tempfile, uuid
 from datetime import date
 
 import anthropic
+
+from m2_stub import api_key, summarize  # scorer and key lookup live next to the stub (200-line cap)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -29,6 +32,7 @@ DECOYS = ["Weekly review template", "Ideas inbox"]
 PROMPT = "Archive the page titled '{title}' and confirm when done."
 DONE_RE = re.compile(r"\barchived\b", re.I)   # resumed = final text reports the archive, no tool call
 THINKING = {"type": "adaptive", "display": "summarized"}
+THINK_TYPES = ("thinking", "redacted_thinking")
 BETA = "thinking-binding-controls-2026-08-01"
 ARMS = ["strip-all", "replay", "strip-all-drop", "strip-last-only"]
 MAX_PRE = 4                  # requests allowed before the gate
@@ -39,12 +43,16 @@ def canon(o):
     return json.dumps(o, ensure_ascii=False, separators=(",", ":"))  # no sort_keys: key order is part of the prefix
 
 
+def n_think(messages):
+    return sum(b["type"] in THINK_TYPES for m in messages for b in m["content"])
+
+
 def strip(messages, arm):
     """The arm's deliberate thinking removal; everything else is untouched."""
     if arm == "replay":
         return messages
     last = max((i for i, m in enumerate(messages) if m["role"] == "assistant"), default=-1)
-    return [{**m, "content": [b for b in m["content"] if b["type"] not in ("thinking", "redacted_thinking")]}
+    return [{**m, "content": [b for b in m["content"] if b["type"] not in THINK_TYPES]}
             if m["role"] == "assistant" and (arm != "strip-last-only" or i == last) else m
             for i, m in enumerate(messages)]
 
@@ -76,8 +84,10 @@ def prefix_identical(sent, arm, system, tools, msgs, k):
     return len(msgs) == k + 1 and canon({"system": system, "tools": tools, "messages": msgs[:k]}) == want
 
 
-def send(client, arm, model, system, tools, messages):
+def send(client, arm, model, system, tools, messages, effort=None):
     kw = dict(model=model, max_tokens=8000, system=system, tools=tools, messages=messages, thinking=THINKING)
+    if effort:
+        kw["output_config"] = {"effort": effort}
     try:
         if arm == "strip-all-drop":
             kw["thinking"] = {**THINKING, "block_binding": {"prefix_mismatch_behavior": "drop_block"}}
@@ -91,11 +101,12 @@ def jsonable(o):
     return json.loads(json.dumps(o, default=lambda x: x.model_dump(mode="json") if hasattr(x, "model_dump") else str(x)))
 
 
-def run_trial(client, model, arm, i):
+def run_trial(client, model, arm, i, effort=None):
     title, rng = TITLES[i % len(TITLES)], random.Random(i)
     rec = {"arm": arm, "trial": i, "title": title, "status": None, "error": "", "resumed": False,
            "extra_search": False, "input_transformations": [], "tokens": {"in": 0, "out": 0},
-           "requests": 0, "prefix_identical": None, "final_text": ""}
+           "requests": 0, "prefix_identical": None, "final_text": "",
+           "thinking_blocks_pre_gate": None, "thinking_blocks_sent_on_resume": None}
 
     def account(status, resp, err):
         rec["requests"] += 1
@@ -117,7 +128,7 @@ def run_trial(client, model, arm, i):
             messages.append({"role": role, "content": content})
         add("user", [{"type": "text", "text": PROMPT.format(title=title)}])
         for _ in range(MAX_PRE):
-            resp = account(*send(client, arm, model, SYSTEM, TOOLS, messages))
+            resp = account(*send(client, arm, model, SYSTEM, TOOLS, messages, effort))
             if resp is None:
                 return rec
             add("assistant", [b.model_dump(mode="json", exclude_none=True) for b in resp.content])
@@ -133,8 +144,11 @@ def run_trial(client, model, arm, i):
         k, sent = len(messages), canon({"system": SYSTEM, "tools": TOOLS, "messages": messages})
         del messages  # drop all in-memory state; only the ledger survives the "restart"
         system, tools, msgs = restart(led, arm)
+        with open(led, encoding="utf-8") as f:  # counted from the ledger, not from memory
+            rec["thinking_blocks_pre_gate"] = sum(json.loads(x).get("block", {}).get("type") in THINK_TYPES for x in f)
+    rec["thinking_blocks_sent_on_resume"] = n_think(msgs)
     rec["prefix_identical"] = prefix_identical(sent, arm, system, tools, msgs, k)
-    resp = account(*send(client, arm, model, system, tools, msgs))
+    resp = account(*send(client, arm, model, system, tools, msgs, effort))
     if resp is not None:
         out = [b.model_dump(mode="json", exclude_none=True) for b in resp.content]
         names = [b["name"] for b in out if b["type"] == "tool_use"]
@@ -144,35 +158,17 @@ def run_trial(client, model, arm, i):
     return rec
 
 
-def summarize(records, arms, trials):
-    out = {}
-    for a in arms:
-        rs = [r for r in records if r["arm"] == a]
-        s = {"trials": len(rs), "resumed": sum(r["resumed"] for r in rs), "http_400": sum(r["status"] == 400 for r in rs),
-             "prefix_identical": sum(bool(r["prefix_identical"]) for r in rs)}
-        out[a] = {**s, "pass": s["resumed"] == trials and s["http_400"] == 0}
-    return {"arms": out, "passing_arms": [a for a, s in out.items() if s["pass"]]}
-
-
-def api_key():
-    try:
-        return os.environ.get("ANTHROPIC_API_KEY") or subprocess.run(
-            ["security", "find-generic-password", "-s", "pathfinder-anthropic", "-w"],
-            capture_output=True, text=True, timeout=10, check=True).stdout.strip()
-    except (subprocess.SubprocessError, OSError):
-        return ""
-
-
 def main():
     ap = argparse.ArgumentParser(description="v2 M2: gate-stop -> ledger -> restart -> resume")
     ap.add_argument("--models", help="comma-separated Anthropic model ids (required for a real run)")
     ap.add_argument("--trials", type=int, default=10)
     ap.add_argument("--arm", default=",".join(ARMS))
+    ap.add_argument("--effort", choices=["low", "medium", "high", "xhigh"], help="output_config.effort (omit = API default)")
     ap.add_argument("--out", default=os.path.join(ROOT, "docs", "measurements"), help="output directory")
     ap.add_argument("--selfcheck", action="store_true")
     a = ap.parse_args()
     if a.selfcheck:
-        return __import__("m2_stub").selfcheck(sys.modules[__name__])  # stub lives next to this file
+        return __import__("m2_stub").selfcheck(sys.modules[__name__])
     arms, models = a.arm.split(","), (a.models or "").split(",")
     if not a.models or set(arms) - set(ARMS):
         ap.error("--models is required; --arm must be from " + ",".join(ARMS))
@@ -185,14 +181,15 @@ def main():
         recs = []
         for arm in arms:
             for i in range(a.trials):
-                recs.append(r := run_trial(client, m, arm, i))
-                print(f"{m} {arm} #{i}: status={r['status']} resumed={r['resumed']} prefix={r['prefix_identical']}")
-        res = {"measurement": "v2-M2", "model": m, "date": date.today().isoformat(), "trials": a.trials,
+                recs.append(r := run_trial(client, m, arm, i, a.effort))
+                print(f"{m} {arm} #{i}: status={r['status']} resumed={r['resumed']} prefix={r['prefix_identical']}"
+                      f" think_pre={r['thinking_blocks_pre_gate']} think_sent={r['thinking_blocks_sent_on_resume']}")
+        res = {"measurement": "v2-M2", "model": m, "effort": a.effort, "date": date.today().isoformat(), "trials": a.trials,
                **summarize(recs, arms, a.trials), "records": recs}
-        path = os.path.join(a.out, f"v2-m2-{re.sub(r'[^A-Za-z0-9._-]', '_', m)}-{res['date']}.json")
+        path = os.path.join(a.out, f"v2-m2-{re.sub(r'[^A-Za-z0-9._-]', '_', m)}{'-effort-' + a.effort if a.effort else ''}-{res['date']}.json")
         with open(path, "w", encoding="utf-8") as f:
             json.dump(res, f, ensure_ascii=False, indent=2)
-        print(json.dumps(res["arms"], indent=2), "\npassing arms:", res["passing_arms"], "\nwrote", path)
+        print(json.dumps(res["arms"], indent=2), "\npassing:", res["passing_arms"], "untested:", res["untested_arms"], "\nwrote", path)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,446 @@
+{
+  "measurement": "v2-M2",
+  "model": "claude-haiku-5-5",
+  "effort": "xhigh",
+  "date": "2026-10-17",
+  "trials": 5,
+  "arms": {
+    "strip-all": {
+      "trials": 5,
+      "resumed": 5,
+      "http_400": 0,
+      "prefix_identical": 5,
+      "thinking_blocks_pre_gate": [
+        1,
+        1
+      ],
+      "verdict": "pass",
+      "pass": true
+    },
+    "replay": {
+      "trials": 5,
+      "resumed": 5,
+      "http_400": 0,
+      "prefix_identical": 5,
+      "thinking_blocks_pre_gate": [
+        1,
+        1
+      ],
+      "verdict": "pass",
+      "pass": true
+    },
+    "strip-all-drop": {
+      "trials": 5,
+      "resumed": 5,
+      "http_400": 0,
+      "prefix_identical": 5,
+      "thinking_blocks_pre_gate": [
+        1,
+        2
+      ],
+      "verdict": "pass",
+      "pass": true
+    },
+    "strip-last-only": {
+      "trials": 5,
+      "resumed": 5,
+      "http_400": 0,
+      "prefix_identical": 5,
+      "thinking_blocks_pre_gate": [
+        1,
+        1
+      ],
+      "verdict": "pass",
+      "pass": true
+    }
+  },
+  "passing_arms": [
+    "strip-all",
+    "replay",
+    "strip-all-drop",
+    "strip-last-only"
+  ],
+  "untested_arms": [],
+  "records": [
+    {
+      "arm": "strip-all",
+      "trial": 0,
+      "title": "Quarterly garden plan",
+      "status": 200,
+      "error": "",
+      "resumed": true,
+      "extra_search": false,
+      "input_transformations": [],
+      "tokens": {
+        "in": 2183,
+        "out": 229
+      },
+      "requests": 3,
+      "prefix_identical": true,
+      "final_text": "The page \"Quarterly garden plan\" has been archived.",
+      "thinking_blocks_pre_gate": 1,
+      "thinking_blocks_sent_on_resume": 0
+    },
+    {
+      "arm": "strip-all",
+      "trial": 1,
+      "title": "Bicycle repair log",
+      "status": 200,
+      "error": "",
+      "resumed": true,
+      "extra_search": false,
+      "input_transformations": [],
+      "tokens": {
+        "in": 2113,
+        "out": 255
+      },
+      "requests": 3,
+      "prefix_identical": true,
+      "final_text": "The \"Bicycle repair log\" page has been archived.",
+      "thinking_blocks_pre_gate": 1,
+      "thinking_blocks_sent_on_resume": 0
+    },
+    {
+      "arm": "strip-all",
+      "trial": 2,
+      "title": "Reading list draft",
+      "status": 200,
+      "error": "",
+      "resumed": true,
+      "extra_search": false,
+      "input_transformations": [],
+      "tokens": {
+        "in": 2220,
+        "out": 374
+      },
+      "requests": 3,
+      "prefix_identical": true,
+      "final_text": "The page \"Reading list draft\" is archived.",
+      "thinking_blocks_pre_gate": 1,
+      "thinking_blocks_sent_on_resume": 0
+    },
+    {
+      "arm": "strip-all",
+      "trial": 3,
+      "title": "Kitchen renovation ideas",
+      "status": 200,
+      "error": "",
+      "resumed": true,
+      "extra_search": false,
+      "input_transformations": [],
+      "tokens": {
+        "in": 2130,
+        "out": 319
+      },
+      "requests": 3,
+      "prefix_identical": true,
+      "final_text": "I archived the \"Kitchen renovation ideas\" page.",
+      "thinking_blocks_pre_gate": 1,
+      "thinking_blocks_sent_on_resume": 0
+    },
+    {
+      "arm": "strip-all",
+      "trial": 4,
+      "title": "Old travel checklist",
+      "status": 200,
+      "error": "",
+      "resumed": true,
+      "extra_search": false,
+      "input_transformations": [],
+      "tokens": {
+        "in": 2203,
+        "out": 262
+      },
+      "requests": 3,
+      "prefix_identical": true,
+      "final_text": "The \"Old travel checklist\" page is archived.",
+      "thinking_blocks_pre_gate": 1,
+      "thinking_blocks_sent_on_resume": 0
+    },
+    {
+      "arm": "replay",
+      "trial": 0,
+      "title": "Quarterly garden plan",
+      "status": 200,
+      "error": "",
+      "resumed": true,
+      "extra_search": false,
+      "input_transformations": [],
+      "tokens": {
+        "in": 2323,
+        "out": 267
+      },
+      "requests": 3,
+      "prefix_identical": true,
+      "final_text": "The \"Quarterly garden plan\" page has been archived.",
+      "thinking_blocks_pre_gate": 1,
+      "thinking_blocks_sent_on_resume": 1
+    },
+    {
+      "arm": "replay",
+      "trial": 1,
+      "title": "Bicycle repair log",
+      "status": 200,
+      "error": "",
+      "resumed": true,
+      "extra_search": false,
+      "input_transformations": [],
+      "tokens": {
+        "in": 2139,
+        "out": 168
+      },
+      "requests": 3,
+      "prefix_identical": true,
+      "final_text": "The \"Bicycle repair log\" page is archived.",
+      "thinking_blocks_pre_gate": 1,
+      "thinking_blocks_sent_on_resume": 1
+    },
+    {
+      "arm": "replay",
+      "trial": 2,
+      "title": "Reading list draft",
+      "status": 200,
+      "error": "",
+      "resumed": true,
+      "extra_search": false,
+      "input_transformations": [],
+      "tokens": {
+        "in": 2221,
+        "out": 283
+      },
+      "requests": 3,
+      "prefix_identical": true,
+      "final_text": "The \"Reading list draft\" page is archived.",
+      "thinking_blocks_pre_gate": 1,
+      "thinking_blocks_sent_on_resume": 1
+    },
+    {
+      "arm": "replay",
+      "trial": 3,
+      "title": "Kitchen renovation ideas",
+      "status": 200,
+      "error": "",
+      "resumed": true,
+      "extra_search": false,
+      "input_transformations": [],
+      "tokens": {
+        "in": 2329,
+        "out": 263
+      },
+      "requests": 3,
+      "prefix_identical": true,
+      "final_text": "The page \"Kitchen renovation ideas\" has been archived.",
+      "thinking_blocks_pre_gate": 1,
+      "thinking_blocks_sent_on_resume": 1
+    },
+    {
+      "arm": "replay",
+      "trial": 4,
+      "title": "Old travel checklist",
+      "status": 200,
+      "error": "",
+      "resumed": true,
+      "extra_search": false,
+      "input_transformations": [],
+      "tokens": {
+        "in": 2239,
+        "out": 290
+      },
+      "requests": 3,
+      "prefix_identical": true,
+      "final_text": "The page \"Old travel checklist\" is archived.",
+      "thinking_blocks_pre_gate": 1,
+      "thinking_blocks_sent_on_resume": 1
+    },
+    {
+      "arm": "strip-all-drop",
+      "trial": 0,
+      "title": "Quarterly garden plan",
+      "status": 200,
+      "error": "",
+      "resumed": true,
+      "extra_search": false,
+      "input_transformations": [],
+      "tokens": {
+        "in": 2116,
+        "out": 264
+      },
+      "requests": 3,
+      "prefix_identical": true,
+      "final_text": "The page \"Quarterly garden plan\" has been archived.",
+      "thinking_blocks_pre_gate": 1,
+      "thinking_blocks_sent_on_resume": 0
+    },
+    {
+      "arm": "strip-all-drop",
+      "trial": 1,
+      "title": "Bicycle repair log",
+      "status": 200,
+      "error": "",
+      "resumed": true,
+      "extra_search": false,
+      "input_transformations": [],
+      "tokens": {
+        "in": 2141,
+        "out": 267
+      },
+      "requests": 3,
+      "prefix_identical": true,
+      "final_text": "The \"Bicycle repair log\" page is archived.",
+      "thinking_blocks_pre_gate": 1,
+      "thinking_blocks_sent_on_resume": 0
+    },
+    {
+      "arm": "strip-all-drop",
+      "trial": 2,
+      "title": "Reading list draft",
+      "status": 200,
+      "error": "",
+      "resumed": true,
+      "extra_search": false,
+      "input_transformations": [],
+      "tokens": {
+        "in": 2209,
+        "out": 369
+      },
+      "requests": 3,
+      "prefix_identical": true,
+      "final_text": "The page \"Reading list draft\" has been archived.",
+      "thinking_blocks_pre_gate": 1,
+      "thinking_blocks_sent_on_resume": 0
+    },
+    {
+      "arm": "strip-all-drop",
+      "trial": 3,
+      "title": "Kitchen renovation ideas",
+      "status": 200,
+      "error": "",
+      "resumed": true,
+      "extra_search": false,
+      "input_transformations": [],
+      "tokens": {
+        "in": 2144,
+        "out": 458
+      },
+      "requests": 3,
+      "prefix_identical": true,
+      "final_text": "The page \"Kitchen renovation ideas\" has been archived.",
+      "thinking_blocks_pre_gate": 2,
+      "thinking_blocks_sent_on_resume": 0
+    },
+    {
+      "arm": "strip-all-drop",
+      "trial": 4,
+      "title": "Old travel checklist",
+      "status": 200,
+      "error": "",
+      "resumed": true,
+      "extra_search": false,
+      "input_transformations": [],
+      "tokens": {
+        "in": 2096,
+        "out": 395
+      },
+      "requests": 3,
+      "prefix_identical": true,
+      "final_text": "The \"Old travel checklist\" page is archived.",
+      "thinking_blocks_pre_gate": 1,
+      "thinking_blocks_sent_on_resume": 0
+    },
+    {
+      "arm": "strip-last-only",
+      "trial": 0,
+      "title": "Quarterly garden plan",
+      "status": 200,
+      "error": "",
+      "resumed": true,
+      "extra_search": false,
+      "input_transformations": [],
+      "tokens": {
+        "in": 2443,
+        "out": 320
+      },
+      "requests": 3,
+      "prefix_identical": true,
+      "final_text": "The page \"Quarterly garden plan\" has been archived.",
+      "thinking_blocks_pre_gate": 1,
+      "thinking_blocks_sent_on_resume": 1
+    },
+    {
+      "arm": "strip-last-only",
+      "trial": 1,
+      "title": "Bicycle repair log",
+      "status": 200,
+      "error": "",
+      "resumed": true,
+      "extra_search": false,
+      "input_transformations": [],
+      "tokens": {
+        "in": 2156,
+        "out": 234
+      },
+      "requests": 3,
+      "prefix_identical": true,
+      "final_text": "The \"Bicycle repair log\" page is archived.",
+      "thinking_blocks_pre_gate": 1,
+      "thinking_blocks_sent_on_resume": 1
+    },
+    {
+      "arm": "strip-last-only",
+      "trial": 2,
+      "title": "Reading list draft",
+      "status": 200,
+      "error": "",
+      "resumed": true,
+      "extra_search": false,
+      "input_transformations": [],
+      "tokens": {
+        "in": 2278,
+        "out": 242
+      },
+      "requests": 3,
+      "prefix_identical": true,
+      "final_text": "I archived the page \"Reading list draft.\"",
+      "thinking_blocks_pre_gate": 1,
+      "thinking_blocks_sent_on_resume": 1
+    },
+    {
+      "arm": "strip-last-only",
+      "trial": 3,
+      "title": "Kitchen renovation ideas",
+      "status": 200,
+      "error": "",
+      "resumed": true,
+      "extra_search": false,
+      "input_transformations": [],
+      "tokens": {
+        "in": 2123,
+        "out": 433
+      },
+      "requests": 3,
+      "prefix_identical": true,
+      "final_text": "The page \"Kitchen renovation ideas\" is archived.",
+      "thinking_blocks_pre_gate": 1,
+      "thinking_blocks_sent_on_resume": 0
+    },
+    {
+      "arm": "strip-last-only",
+      "trial": 4,
+      "title": "Old travel checklist",
+      "status": 200,
+      "error": "",
+      "resumed": true,
+      "extra_search": false,
+      "input_transformations": [],
+      "tokens": {
+        "in": 2450,
+        "out": 661
+      },
+      "requests": 3,
+      "prefix_identical": true,
+      "final_text": "I archived the 'Old travel checklist' page, but I also archived **'Ideas inbox'** by mistake. The search returned three pages, and I sent archive requests for two of them without checking that the second one matched your request. I should have archived only the travel checklist.\n\nI don't have a tool",
+      "thinking_blocks_pre_gate": 1,
+      "thinking_blocks_sent_on_resume": 1
+    }
+  ]
+}

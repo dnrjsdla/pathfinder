@@ -1481,15 +1481,15 @@ One observation, not a defect of this work: the scheduled turn's answer stated a
 (a quarter past the clock line it was given) - a model error on a one-line question, the kind
 the second look does not cover because it concerns no tool.
 
-## 2026-10-17 — Partition 0 of the v2 rebuild: the pre-build measurements (M5, M9 measured; M1, M2 benches built)
+## 2026-10-17 — Partition 0 of the v2 rebuild: the pre-build measurements M1, M2, M5, M9
 
 The v2 blueprint (decisions V1–V19) names four assumptions to measure before any product code:
 M1 (a result store with `read_result` stops fabricated IDs), M2 (a clone stopped at a gate resumes
 from a ledger-rebuilt context), M5 (harness FTS finds the right tool among 33), M9 (Ollama drops
 tool parameters named `properties`/`description`, ollama/ollama#18468). Benches live in `bench/v2/`
 (each file ≤ 200 lines, stdlib except the Anthropic SDK in the Anthropic arm), results in
-`docs/measurements/v2-m<N>-*.json`. No Anthropic key exists on the machine yet, so the two Haiku
-measurements (M1 pass line, M2) are built and self-checked but not run; gemma4 on Ollama was used
+`docs/measurements/v2-m<N>-*.json`. No Anthropic key exists on the machine yet; the two Haiku
+measurements ran later the same day (subsections below); gemma4 on Ollama was used
 for the M9 probes and the M1 smokes only (14 requests in all).
 
 ### M5 — tool search: FAIL on both criteria
@@ -1546,7 +1546,7 @@ mention it by name), never `description` (not mentioned anywhere). Pre-registere
 "partial" (schema-level drop confirmed, call-level only partly). One run per probe, one model.
 Consequence: the openai_compat adapter needs the rename (blueprint §8 "Ollama 어댑터 수선").
 
-### M1 — result store vs inline: bench built, gemma4 smoke only
+### M1 — result store vs inline: gemma4 smoke, then Haiku
 
 Fake Notion world (100 pages, one database, real better-notion specs for `workspace`, `pages`,
 `databases`), N1–N10 from the 10-14 audit pre-registered with scorers, time-ordered fabricated-ID
@@ -1564,14 +1564,32 @@ Smoke, gemma4, task N2 ("list pages" → "archive '휴가 계획'"), request cap
 Two things the smoke already shows: the store arm needs about twice the requests per task
 (45–55 against about 25 for the ten tasks, by the reviewer's count), and the inline arm cannot pass
 N1 at all because the cut shows 41 of 100 items — N1 inline measures the cut, not the model. The
-Haiku run (pass line: fabricated 0, ≥ 9/10) waits for a key.
+Haiku run follows.
 
-### M2 — resume after restart: bench built, self-checked against a stub
+#### M1 on Claude Haiku: fabricated IDs 0 in both arms, pass line missed
+
+Haiku 5.5, the nine model tasks (N8 is a harness check, not run here), request cap 8, same fake Notion world:
+
+| arm | passed (pre-registered) | post-hoc R1 / R2 | fabricated IDs | requests | prompt tokens | mean steps |
+|---|---|---|---|---|---|---|
+| inline | 7/9 | 8/9 / 8/9 | 0 | 28 | 138,830 | 3.11 |
+| store | 5/9 | 6/9 / 8/9 | 0 | 42 | 197,367 | 4.67 |
+
+- **No fabricated IDs in 18 task runs.** Every ID in a call had appeared in an earlier tool result, with and without the store. Haiku respects the "IDs must have been seen" rule on its own, so the store is not what buys this property here.
+- **The pass line (>= 9/10) is missed, but mostly by the scorers.** N6 counted only a later search, `read_result` or "?" as a re-look, and missed the model's `pages get` of the same page plus a same-id retry. Store N7 listed 4 titles, admitted it saw only 30, archived nothing and asked once, but the text had no "?". Store N2 asked before archiving after finding the right page (inline archived directly). Post-hoc (R1 = N6 counts `pages get`; R2 = R1 plus an ask-first pass for N2/N7), both arms reach 8/9; this is not pre-registered and does not replace the 7/9 and 5/9. N1 is the only residual failure.
+- **N1 is a limit choice, not a cut effect.** Both arms asked for limit 50, never paged, and said the view was partial. Inline saw 41 of 50 ("shown 41 of 50"), store saw all 50 over two reads, 5 and 6 of the 13 named pages. The scorer also forbids a second search.
+- **The store costs about 1.5x the requests and 1.4x the prompt tokens (1.08x completion) for no extra passes**, inside the M4 "<= 2x" line. Haiku reads results back one range at a time (15 `read_result` calls), and the 8,000-char cap also applies to `read_result`.
+- Open: rewrite N1 (paging allowed, partial-view admission as the criterion), N6 (re-look = any read of the target) and N7 (ask without "?") before a re-run; one Haiku run per arm, so no variance estimate.
+
+### M2 — resume after restart: stub, then Haiku
 
 Four arms over the same ten gate-stopped trials: strip every thinking block (V12 as written),
 replay them verbatim from the ledger, strip with the `drop_block` binding control, strip only the
 pending turn's. Model-free check per trial: the rebuilt request is byte-identical to the one sent
 before the gate apart from the arm's removal. About 120 Haiku requests, about $0.04.
+
+#### M2 on Claude Haiku: resume after restart passes, but only once thinking exists
+The first M2 run (default effort, 5 trials, 4 arms all 5/5, 0 HTTP 400; `v2-m2-claude-haiku-5-5-2026-10-17.json`) proved nothing about V12: Haiku 5.5 emitted no thinking blocks on this two-step task, so strip-all, replay and drop were the same request. The bench now counts thinking blocks from the ledger and marks such arms "untested". At effort high Haiku still emitted 0 blocks (12 requests, all arms untested). At effort xhigh it emitted 1-2 blocks before the gate in every trial, and all four arms passed 5/5 with 0 HTTP 400 and an identical rebuilt prefix (60 requests, about $0.008; `v2-m2-claude-haiku-5-5-effort-xhigh-2026-10-17.json`). One trial stripped the thinking of the pending tool_use turn and still got 200, so on Haiku the "keep the pending turn's thinking" advice is not a hard error. Not shown: removing a block from the middle of the history (never more than 2 blocks), drop_block on a real mismatch (input_transformations always empty), whether this account enforces the binding, and n=10. Separately, one trial archived a decoy page alongside the target in the same turn, which is a gate/approval concern for the product, not a resume failure. V12 (strip all thinking on restart) stands on this evidence.
 
 ### What the benches changed in the design before a line of product code
 
@@ -1584,5 +1602,5 @@ before the gate apart from the arm's removal. About 120 Haiku requests, about $0
 - **Haiku 5.5 thinks by default**, so the loop must replay the model's content blocks verbatim
   (thinking included) inside a turn; the bench does.
 
-Left open: Korean tool search (M5), the adapter rename (M9), the Haiku runs (M1, M2), and whether
+Left open: Korean tool search (M5), the adapter rename (M9), N1/N6/N7 scorer rewrites before an M1 re-run, M2 at n=10 with a mid-history removal, and whether
 `read_result` round trips cost too much against the M4 "≤ 2× cost" line.

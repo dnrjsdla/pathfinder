@@ -16,6 +16,10 @@ class Endpoint:
     effort: str = ""     # providers.<name>.effort (anthropic only); "" = the API default
 
 
+# Replayed only to the model that wrote them; `reasoning` (openai_compat) always comes from another model.
+THINK_TYPES = ("thinking", "redacted_thinking", "reasoning")
+
+
 @dataclass(frozen=True)
 class Request:
     role: str               # a `models` key: root | worker | reviewer | triage | summarize | night

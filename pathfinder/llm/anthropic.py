@@ -4,15 +4,13 @@ package imports without it: only an `api: "anthropic"` provider needs it install
 import asyncio
 import functools
 
-from . import LLMError, Response
+from . import THINK_TYPES, LLMError, Response
 
 CLEAR_AT_BETA = "mid-conversation-system-clear-at-2026-08-21"
 # Deviation 5. True: a resident copy after every user message of an item, each cleared at the next user message
 # (beta). False, the fallback: one copy per item, after its opening user message, kept in place (no beta).
 RESIDENT_CLEAR_AT = True
 THINKING = {"type": "adaptive", "display": "summarized"}  # summarized: same cost, P4 reads the text
-# Replayed only to the model that wrote them; `reasoning` (openai_compat) always comes from another model.
-THINK_TYPES = ("thinking", "redacted_thinking", "reasoning")
 BREAKPOINT = {"type": "ephemeral"}
 STOP_REASONS = {"stop_sequence": "end_turn", "model_context_window_exceeded": "max_tokens"}
 USAGE_KEYS = ("input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")

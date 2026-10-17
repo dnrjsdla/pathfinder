@@ -90,9 +90,13 @@ def _clip60(text):
 
 
 def approvals(home):
-    """List pending approvals directly from state.db - no daemon protocol needed to read them."""
+    """List pending approvals directly from state.db - no daemon protocol needed to read them: the
+    root's open gates by their seq (V22), then v1 proposals."""
     state = State(home / "state.db")
     try:
+        for gate in state.open_gates():
+            if gate["decision"] is None:  # a decided gate waits only for its report turn
+                print(visible(f"{gate['seq']}  {gate['tool']}  {json.dumps(gate['args'], ensure_ascii=False)}"))
         for row in state.pending():
             if row["tool"] == "edit_memory":
                 a = row["args"]
@@ -154,7 +158,9 @@ def mcp_tools_list(home):
 
 
 def decide(home, kind, approval_id):
-    """approve/deny: send the decision, print the resumed turn's answer until it ends."""
+    """approve/deny: send the decision; for a gate, print the root's report turn until it ends (V22).
+    ponytail: it ends at the session's next turn.end, so a turn already running there when the decision
+    lands ends it early; `listen` shows the report then."""
     sock = _connect(home)
     if sock is None:
         return 1

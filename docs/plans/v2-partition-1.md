@@ -28,7 +28,8 @@ $PF config set providers '{"anthropic": {"api": "anthropic", "base_url": "https:
 $PF config set models "{\"root\": [\"anthropic:$ROOT_MODEL\", \"ollama:$FALLBACK_MODEL\"], \"summarize\": [\"anthropic:$ROOT_MODEL\"]}"
 mkdir -m 700 /tmp/pf1/workspace && (cd "$WT/bench/v2" && python3 -c 'import json, fake_notion as f; w = f.World(); json.dump({"results": w.pages}, open("/tmp/pf1/workspace/pages.json", "w"), ensure_ascii=False); print(w.by_title["휴가 계획"]["id"])') > /tmp/pf1/check/want
 start() { $PF daemon >>/tmp/pf1/check/log 2>&1 & echo $! > /tmp/pf1/check/pid
-          for _ in $(seq 50); do [ -S /tmp/pf1/pathfinder.sock ] && return 0; sleep 0.2; done
+          for _ in $(seq 50); do  # a connect, not [ -S ]: after kill -9 the dead daemon's socket file stays
+            python3 -c 'import socket; socket.socket(socket.AF_UNIX).connect("/tmp/pf1/pathfinder.sock")' 2>/dev/null && return 0; sleep 0.2; done
           echo "daemon did not start in 10 s"; tail -20 /tmp/pf1/check/log; return 1; }
 stop()  { kill "${1:--TERM}" "$(cat /tmp/pf1/check/pid)"; while kill -0 "$(cat /tmp/pf1/check/pid)" 2>/dev/null; do sleep 0.2; done; }
 ```

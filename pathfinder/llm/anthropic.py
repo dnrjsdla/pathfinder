@@ -81,6 +81,9 @@ async def complete(endpoint, req, on_text=None):
     task: the blocks come back as they arrived with stop_reason `interrupted` (the CLONE keeps only complete text
     blocks). `Response.model` is the bare endpoint model; the ROUTER overwrites it with the `provider:model` ref.
     SDK errors become `LLMError(status, message)`; nothing is retried here beyond the SDK's own retries."""
+    if not endpoint.api_key:  # the SDK's TypeError would escape the router; a config error, like a 400: no fallback
+        raise LLMError(400, "no API key: set the provider's api_key_env, or store the key in the Keychain "
+                            "(service pathfinder-<provider>, account api)")
     import anthropic
     import httpx2
     body = to_wire(req, endpoint)

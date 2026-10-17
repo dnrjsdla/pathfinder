@@ -215,6 +215,13 @@ class TestComplete(unittest.TestCase):
             self.run_with(FakeStream(None, error=sdk.APIConnectionError(request=WIRE_REQUEST)))
         self.assertEqual(caught.exception.status, 0)
 
+    def test_missing_key_is_a_config_error_before_any_client(self):
+        keyless = Endpoint(EP.base_url, "", EP.model, api="anthropic")
+        with mock.patch.object(adapter, "_client") as made, self.assertRaises(LLMError) as caught:
+            asyncio.run(adapter.complete(keyless, request(TURN_B)))
+        self.assertEqual(caught.exception.status, 400)  # the router does not fall back on it: the user sees it
+        made.assert_not_called()
+
     def test_cancel_returns_blocks_as_they_arrived(self):
         partial = message([{"type": "text", "text": "Hel"}], None)
         fake = mock.Mock(beta=mock.Mock(messages=FakeMessages(FakeStream(partial, texts=("Hel",), hang=True))))

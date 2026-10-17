@@ -13,6 +13,7 @@ class Endpoint:
     api_key: str
     model: str
     api: str = "openai"  # which wire format: "openai" (default) or "anthropic" (D2, D37 - experimental)
+    effort: str = ""     # providers.<name>.effort (anthropic only); "" = the API default
 
 
 @dataclass(frozen=True)
@@ -35,6 +36,7 @@ class Response:
     usage: dict             # input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens
     model: str              # the "provider:model" that answered
     fallbacks: list         # [{model, status, message}] tried before it
+    stop_details: dict | None = None  # on refusal, the provider's details when it gives them (anthropic)
 
 
 class LLMError(Exception):
@@ -69,15 +71,14 @@ def resolve(cfg, ref):
     api_key = os.environ.get(api_key_env, "") if api_key_env else ""
     if not api_key and api == "anthropic":  # a local (openai-style) provider needs no key: never ask the Keychain
         api_key = keychain.secret(f"pathfinder-{provider}", "api") or ""
-    return Endpoint(base_url=p["base_url"], api_key=api_key, model=model, api=api)
+    return Endpoint(base_url=p["base_url"], api_key=api_key, model=model, api=api, effort=p.get("effort", ""))
 
 
 def stream(endpoint, messages, tools=None, cancel=None, timeout=120):
     """Delegate to the adapter named by `endpoint.api` (D2: two adapters, one (kind, payload)
-    contract - the loop and the slot never know which). Imported lazily so importing this
-    package doesn't pull in the experimental Anthropic adapter (D7) when it is never used."""
+    contract - the loop and the slot never know which). v1 path, gone in U9: the Anthropic
+    adapter has no `stream` any more; from U5 on the router serves `api: anthropic`."""
     if endpoint.api == "anthropic":
-        from . import anthropic as mod
-    else:
-        from . import openai_compat as mod
+        raise LLMError(0, "api anthropic is served by the router (v2)")
+    from . import openai_compat as mod
     yield from mod.stream(endpoint, messages, tools=tools, cancel=cancel, timeout=timeout)

@@ -14,6 +14,7 @@ from pathlib import Path
 from unittest import mock
 
 from pathfinder.llm import Endpoint, LLMError, Request, Response, resolve
+from pathfinder.llm import stream as llm_stream
 from pathfinder.llm.openai_compat import complete, parse_sse, stream, to_wire, _assemble
 from pathfinder.llm.rename import rename_args_out, rename_in, rename_out
 
@@ -103,6 +104,24 @@ class TestResolve(unittest.TestCase):
     def test_resolve_unknown_provider(self):
         with self.assertRaises(LLMError):
             resolve(self.cfg, "nonexistent-provider:some-model")
+
+    def test_unknown_api_is_a_config_error(self):
+        cfg = {"providers": {"p": {"base_url": "http://x", "api_key_env": "", "api": "bogus"}}}
+        with self.assertRaises(LLMError):
+            resolve(cfg, "p:m")
+
+    def test_v1_stream_refuses_api_anthropic(self):
+        endpoint = Endpoint(base_url="http://x", api_key="", model="m", api="anthropic")
+        with self.assertRaises(LLMError) as caught:
+            list(llm_stream(endpoint, [{"role": "user", "content": "hi"}]))
+        self.assertEqual(caught.exception.status, 0)
+
+    def test_resolve_carries_effort(self):
+        cfg = {"providers": {"p": {"base_url": "http://x", "api_key_env": "FAKE_PF_KEY", "api": "anthropic",
+                                   "effort": "xhigh"}, "q": {"base_url": "http://y", "api_key_env": ""}}}
+        with mock.patch.dict("os.environ", {"FAKE_PF_KEY": "from-env"}):
+            self.assertEqual(resolve(cfg, "p:m").effort, "xhigh")
+        self.assertEqual(resolve(cfg, "q:m").effort, "")
 
     def test_resolve_key_from_env_then_keychain(self):
         cfg = {"providers": {"p": {"base_url": "http://x", "api_key_env": "FAKE_PF_KEY", "api": "anthropic"}}}

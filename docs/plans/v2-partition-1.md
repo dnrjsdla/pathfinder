@@ -257,6 +257,7 @@ restart never resets them; a hand-off report is a new item with its own budget. 
 | `deny N` | `resume {gate: N, decision: denied, by}` | — |
 | the report item | `user {clone: root, origin: system, trust: self, gate: [N, …], text}`, then `turn_start` … as any item | opening user message: `gate N (write_file) approved → ` + `results.render(r:M)`, or `… approved → failed: <error ≤ 2,000>`, or `gate N (write_file) denied by the user` |
 
+U7 writes the failed-gate report line as "failed: " + `results.render(event)` and never clips the error itself.
 A `result` with `gate` is never rendered as a `tool_result` (its `tool_use` was answered by the status); it reaches the
 model through the report and `read_result` (r:M is in the window, so in the seen set). `decide` enqueues
 `Item(kind="continue", text, session=the gate's, gate=N)`; the clone records `user {gate}` when it takes the item, not
@@ -290,7 +291,9 @@ U4's placement tests or live-check step 1 show the history breakpoint missing.
 Renderer (rule, lifting `fake_notion.summary`): list → `{type, count, scalar top-level fields without IDs, keys, preview:
 first 3 titles}`; object → `{type, keys, scalar fields without IDs}`; text → `{type, chars, lines, first line ≤ 120}`; a
 string that parses as JSON renders as that JSON. `read_result(handle, range | query | path)` lifts `fake_notion.Store.read`
-(on text: lines). **Seen set** = `assemble.window_handles`: the `r:N` of `result` rows in the current window plus the
+(range: items for lists, characters for text; query: list items, or a text's lines with their char offsets). U6 builds
+`render`'s input as `{**context_row, "body": state.result(seq)["body"]}` (a context row has no body; `state.result` has
+no `cut`). **Seen set** = `assemble.window_handles`: the `r:N` of `result` rows in the current window plus the
 last summary's `handles`; any other handle (another session's, a non-result seq) is refused. `tools.clean` (D62) applies
 on the way to the model, never to the ledger. No `eager_input_streaming`, no `tool_choice`; thinking `{"type":
 "adaptive", "display": "summarized"}` (same cost; P4 reads the text).
@@ -329,8 +332,8 @@ seq of the last `summary` for this clone and session), computed by `Clone` when 
 | Across turns, same session, no fold/restart | still replayed: a sent block stays in every later request (Haiku keeps previous-turn thinking; stripping would miss the cache each turn) |
 | After a fold | fresh prefix: summary + kept turns, their thinking stripped (epoch = summary seq) |
 | After a restart | all thinking up to the epoch stripped (M2: 0 HTTP 400) |
-| Interrupted step | only its complete text blocks: on cancel the adapter returns the blocks as they arrived with stop_reason `interrupted`; the clone (U7) keeps only complete text blocks when it records/replays the step (no reasoning/thinking, text marked partial) |
-| Other model (fallback) | the adapter drops thinking whose message `model` ≠ the request's model |
+| Interrupted step | only its complete text blocks: on cancel the adapter returns the blocks as they arrived with stop_reason `interrupted`; the clone (U7) keeps only complete text blocks when it records/replays the step (no reasoning/thinking, text marked partial). The Anthropic adapter catches `CancelledError` and returns a Response with stop_reason `interrupted`: the clone (U7) must treat that as the cancellation signal, not an exception. The clone checks `asyncio.current_task().cancelling()` after an `interrupted` Response and re-raises `CancelledError` unless the interrupt was its own (a flag it set). |
+| Other model (fallback) | thinking blocks are kept only when the bare model name of the recording (the `provider:model` ref after its first colon) matches the endpoint model, the provider name ignored; otherwise the adapter drops them |
 | Refused exchange | turns ending `refused` are left out of later windows (nothing was sent after them) |
 | Never | an earlier message edited, a resident copy removed, a result re-rendered differently in one daemon life |
 
@@ -351,7 +354,7 @@ priority. The model that answered is `Response.model` → `assistant.model`.
 | `test_fold_keeps_handles` | U6 test_assemble | a fold over 3 turns and 4 handles: `summary.handles` ⊇ them + the previous summary's; handle lines hold no title; `read_result` on one still works |
 | `test_unknown_handle_refused` | U2 test_results | unknown `r:N`, one outside the window, a non-result seq → refused, nothing read |
 | `test_open_gate_survives_restart_and_returns_as_item` | U7 test_clone | gate → the turn ends → close → delete state.db → rebuild → `restore` lists it → approve → the call ran once with the same args → `result {gate}` → report item → answer; no thinking after restart (M2's in-place resume: P3) |
-| `test_append_only_history` | U7 test_clone | a 3-step turn + a second turn with a fake router: for both adapters each `to_wire` body extends the previous byte-for-byte, except at an epoch |
+| `test_append_only_history` | U7 test_clone | a 3-step turn + a second turn with a fake router: for both adapters each `to_wire` body extends the previous byte-for-byte, except at an epoch; for Anthropic system/tools compare exactly and messages with their `cache_control` markers removed (the history breakpoint moves forward, per the API docs) |
 | `test_clone_transitions_in_ledger` | U7 test_clone | every root state change (parked → running → parked, interrupted) has its event; a gate changes no root state; the clones row is derived only from them |
 | `test_fallback_chain` | U5 test_router | 402 → next answers, `fallbacks` holds it; first-request failure switches at once; mid-run 1 stays, 2 switch; 400 does not fall back; all blocked → `LLMError`, the lane lives (U8a) |
 | `test_single_assembler` | U10b test_invariants | AST: `Request(` and `dataclasses.replace`/`replace(` on a Request only in assemble.py; `router.complete` called only in clone.py; adapters imported only by router (named exemption: `openai_compat.embed` in memory) |
@@ -471,10 +474,10 @@ U8a switches; U9–U10b delete. After each: tests green, `scan_personal.py --all
 | U4 | Anthropic on the SDK | `llm/anthropic.py`, `pyproject.toml` (+ test_llm_anthropic) | ~190 | U3 | U1, U2 | fake-client tests: blocks verbatim, 3 breakpoints, resident placement + fallback constant, thinking drop on model change, refusal | 30 |
 | U5 | Router and config | `router.py`, `config.py` (+ test_router, test_config) | ~170 + ~25 | U4 | U6 | `test_fallback_chain`, semaphores, override check, `models` and `effort` validated; `Response.model` == the ref (tested) | 25 |
 | U6 | The assembler and fold | `assemble.py`, `prompts/root.txt`, `prompts/fold.txt` (+ test_assemble) | ~330 | U1, U2, U4 | U5 | five pieces in budget, seen set, epoch strip, refused turns out, fold point/request/handle lines; its three invariant tests; `prompts/root.txt` teaches the waiting status — a handed-off call is "requested, not done", never reported as done until its report item arrives | 35 |
-| U7 | The clone | `clone.py` (+ test_clone) | ~380 | U5, U6 | — | the turn table and the hand-off with a fake router and broker: waiting status, `decide` runs the detached call once, the report item (queued reports of one session merged into one turn, never with a say; records `user {gate: [N]}` for one report (list, tested)), interrupts, budgets, partial steps, steer, refusal, fold, restore (re-list, re-enqueue, outcome unknown); its three invariant tests | 35 |
+| U7 | The clone | `clone.py` (+ test_clone) | ~380 | U5, U6 | — | the turn table and the hand-off with a fake router and broker: waiting status, `decide` runs the detached call once, the report item (queued reports of one session merged into one turn, never with a say; records `user {gate: [N]}` for one report (list, tested)), interrupts, budgets, partial steps, steer, refusal, fold, restore (re-list, re-enqueue, outcome unknown); its three invariant tests; the clone checks `asyncio.current_task().cancelling()` after an `interrupted` Response and re-raises `CancelledError` unless the interrupt was its own (a flag it set) | 35 |
 | U8a | The switch | `daemon.py`, `broker.py` (raw result), `tools.py` (`read_file` clip → store, 1 MB cap) (+ test_daemon, test_broker, test_tools) | daemon −250/+80 | U7 | — | rewritten daemon tests pass; approve by seq; the lane survives all-blocked (the memory pass sees unclipped results until U9); a home whose state.db predates P1 needs `pathfinder reindex` once (approvals.seq is not backfilled by catch_up); the live check starts from a fresh home | 35 |
 | U8b | The CLI and the live check | `__main__.py` (`approvals` by seq; `approve` prints the report turn), `bench/v2/p1_runs.py` | ~+30, ~120 | U8a | R1, R2 (writing) | **the live check passes**, recorded for the lead | 25 |
-| U9 | Delete the old turn engine | deletes `loop.py`, `jobs.py`, `llm/slot.py`, `senses/jobs.py`, old prompts; edits `memory.py` (pass, summarize), `rules.py` (judge stub), `daemon.py` (memory_mgr without a pass factory) (+ retired tests) | −~1,000 | U8b | — | nothing imports the deleted modules; suite green; retired tests listed | 30 |
+| U9 | Delete the old turn engine | deletes `loop.py`, `jobs.py`, `llm/slot.py`, `senses/jobs.py`, old prompts; edits `memory.py` (pass, summarize), `rules.py` (judge stub), `daemon.py` (memory_mgr without a pass factory) (+ retired tests); `llm.stream` and `_post`-based stream leave; `api: anthropic` is served only by the router from U5 on | −~1,000 | U8b | — | nothing imports the deleted modules; suite green; retired tests listed | 30 |
 | U10a | Dead state and keys | `state.py` (D52 record, v1 summaries, job rows; ceiling back to 780), `ledger.py` (TYPES removals), `config.py` (`model`, `worker_model`) (+ test_state, test_config) | −~150 | U9 | — | `test_no_new_ledger_type` final set; state ≤ 780 | 25 |
 | U10b | Clips, emits, the ceilings | `tools.py` (`LEDGER_CLIP`, `clip_for_ledger`), `broker.py` (emits), `tests/test_invariants.py` | −~40, tests +~90 | U10a | — | the invariant-table tests pass; core ≤ 6,000; live check again | 30 |
 

@@ -7,11 +7,12 @@
   turn; Haiku emitted thinking only at effort xhigh (HISTORY's "thinks by default" bullet contradicts its own M2
   run — this contract trusts the run); the store costs ~1.5× requests. A 7-request probe (10-17) showed the
   `clear_at` beta accepted and the tools+system cache prefix fully read across cleared resident copies.
-- **Next:** owner answers Q2–Q4 and the three "needs owner yes" deviations; then U1 ∥ U3. No code yet.
+- **Decided (2026-10-17):** Q2 (a), Q3 (a), Q4 = V22 "hand-off", Deviations 1/4/5 approved (Decisions). **Next:** U1 ∥ U3.
 
 **"It runs" =** the root clone answers one user turn end to end on Haiku; a tool result is stored as `r:N`
-and reopened with `read_result`; a write stops at a gate, the daemon is stopped and its index deleted, and after
-restart the waiting root is reassembled from the ledger and continues when approved; a turn killed mid-run is
+and reopened with `read_result`; a write is handed off at a gate (V22) while the root's turn ends; the daemon is
+stopped and its index deleted; after restart the open gate is still listed, and approving it runs the call and the
+root reports it in a new turn assembled from the ledger; a turn killed mid-run is
 closed as `interrupted`; a blocked first model falls back to gemma4. Then M6 and M8 pass. Model IDs live in
 config only; `$ROOT_MODEL`/`$FALLBACK_MODEL` below are set by the operator.
 
@@ -37,13 +38,14 @@ stop()  { kill "${1:--TERM}" "$(cat /tmp/pf1/check/pid)"; while kill -0 "$(cat /
    names the chain head; no `error`; `cache_read_input_tokens` > 0 from step 2, and on step ≥ 3 above the first request's
    cache write (the history breakpoint read across cleared copies; else take U4's fallback constant and report). Haiku's
    minimum cacheable prefix is 512 tokens (provider docs) and tools + system are ~3k, so a 0 means an invalidator.
-2. `$PF say "Write that id, and nothing else, into /tmp/pf1/workspace/answer.txt."` → a `gate` line, `say` exits.
-   `$PF approvals` lists it by its ledger seq (tool `write_file`, args). `$CHK gate /tmp/pf1`: `gate` event, the
-   root's clone row `waiting`, no `turn_end` after the gate.
+2. `$PF say "Write that id, and nothing else, into /tmp/pf1/workspace/answer.txt."` → a `gate` line; the root says it
+   asked for approval and its turn ends. `$PF approvals` lists gate N by its seq (tool `write_file`, args). `$CHK gate
+   /tmp/pf1`: a `gate` event, no `result` for that call, then `turn_end answer`; the root's row `parked`.
 3. `stop; rm -f /tmp/pf1/state.db*; start && $PF approvals` → the same gate, rebuilt from the ledger. `$PF approve
-   "$($PF approvals | awk 'NR==1{print $1}')"` → the continuation streams. `$CHK restart ...`: `resume {approved}`, a
-   `result` for `write_file` `ok: true`, `answer.txt` = the id, `turn_end answer`, no `interrupted`, no HTTP 400; it prints
-   `thinking blocks before the gate: k` — k = 0 means "untested" (M2's rule), not pass.
+   "$($PF approvals | awk 'NR==1{print $1}')"` → the call runs and the root reports it (printed until that turn's
+   `turn.end`). `$CHK restart ...`: `resume {approved}`, `result {gate: N}` `ok: true`, `answer.txt` = the id, then
+   `user {origin: system, gate: N}`, `turn_start`, an `assistant`, `turn_end answer`; no `interrupted`, no HTTP 400; it
+   prints `thinking blocks before the restart: k` — k = 0 means the post-restart strip is untested, not passed.
 4. `$PF say "Run the shell command: sleep 30" & until grep -q '"name": "run_command"' /tmp/pf1/events/*.jsonl;
    do sleep 0.2; done; stop -9; start && $CHK interrupted /tmp/pf1`: `interrupted {why: restart}` and `turn_end
    interrupted` for that turn, written by `restore()` (kill -9: a SIGTERM `close()` writes no root events either, but
@@ -53,7 +55,7 @@ stop()  { kill "${1:--TERM}" "$(cat /tmp/pf1/check/pid)"; while kill -0 "$(cat /
    /tmp/pf1`: an `error` (anthropic ref, status 0), then an `assistant` whose `model` is the ollama ref.
 6. `stop; rm -rf /tmp/pf1 /tmp/pf1-venv`.
 
-Rests on: V3, V5, V7 (wait only), V11, V12, V13, V14, V21; HISTORY 2026-10-17. NOT in this partition (see
+Rests on: V3, V5, V22 (root gates hand off), V11, V12, V13, V14, V21; HISTORY 2026-10-17. NOT in this partition (see
 "Stubbed"): the tool layer (2), the clone tree and presets (3), self-record and night clone (4), attention, standing
 tasks and channels (5), daemon 300 and view messages (6).
 
@@ -104,11 +106,13 @@ Public interfaces (one line each; everything else private):
   dict, renames: dict) -> dict` · `embed(endpoint, texts) -> list` and `parse_sse` (kept).
 - `router`: `Router(load_cfg: Callable[[], dict])` · `async complete(self, req: Request, on_text=None, cancel=None)
   -> Response` · `chain(self, role: str, override: str = "") -> list[str]`.
-- `clone`: `Item(kind: str, text: str, session: str, origin: str = "user")` (kind `user|schedule|continue|signal`;
-  `signal`: M6 now, attention in P5) · `Clone(id: str, role: str, *, home: Path, state: State, record: Callable[...,
-  dict], router: Router, send: Callable, resident: Callable[[], Awaitable[list[str]]])` · `async run(self, item: Item)
-  -> str` (the `turn_end` kind) · `decide(self, gate: int, decision: str, by: str) -> bool` · `interrupt(self) -> None`
-  · `restore(self) -> None` · `state: str` (`running|waiting|parked|done|failed`; root `parked` between items).
+- `clone`: `Item(kind: str, text: str, session: str, origin: str = "user", gate: int = 0)` (kind
+  `user|schedule|continue|signal`; `signal`: M6 now, attention in P5) · `Clone(id: str, role: str, *, home: Path, state:
+  State, record: Callable[..., dict], router: Router, send: Callable, enqueue: Callable[[Item], None], resident:
+  Callable[[], Awaitable[list[str]]])` · `async run(self, item: Item) -> str` (the `turn_end` kind) · `decide(self, gate:
+  int, decision: str, by: str) -> bool` (records `resume`, runs the detached call on approval, enqueues the report item;
+  False if unknown or decided) · `interrupt(self) -> None` · `restore(self) -> None` · `state: str` (`running|parked` for
+  the root; `waiting|done|failed` are P3's children).
 
 ## Data
 
@@ -121,9 +125,10 @@ untouched until policy is rewritten (P2).
 | Type | Writer (partition) | Fields (besides seq, ts, session, turn, origin, trust) |
 |---|---|---|
 | `assistant` (extended) | clone (1), one per model step | `clone, step, model, blocks, stop_reason, usage, text, final` |
-| `result` | clone (1), one per `tool_use` | `clone, step, call_id, tool, ok, body` (raw, ≤ cap; trust third_party), `cut` when capped |
-| `gate` | clone (1) | `clone, step, call_id, tool, args, effect, brief` |
-| `resume` | clone (1) | `clone, gate` (its seq), `decision` (`approved|denied`), `by` (`socket|chat|interrupt`) |
+| `result` | clone (1), one per run call | `clone, step, call_id, tool, ok, body` (raw, ≤ cap; trust third_party), `cut` when capped, `gate` for a handed-off call |
+| `user` (extended) | daemon (a say), clone (report item, budget note) | `clone`, `steer` (a say during a running turn), `gate` (a report item) |
+| `gate` | clone (1), instead of a `result` | `clone, step, call_id, tool, args, effect, brief` |
+| `resume` | clone (1) | `clone, gate` (its seq), `decision` (`approved|denied`), `by` (`socket|chat`) |
 | `interrupted` (extended) | clone (1) | `clone, step, why` (`user|restart`) |
 | `turn_start` / `turn_end` (extended) | clone (1) | start: `clone, item, resident`; end: `clone, kind, steps, usage` |
 | `error` (extended) | clone (1), one per failed attempt | `clone, step, model, status, message` (≤ 300 chars) |
@@ -135,7 +140,7 @@ untouched until policy is rewritten (P2).
 | `task_open/wake/update/close` | root, worker pair, reviewer (5) | `task` + `goal, trigger, budget, end` / `why` / `state` / `why` |
 
 `turn_end.kind` ∈ `answer | refused | budget | max_tokens | error | interrupted` (`interrupted` covers a user
-interrupt and a restart; `why` is on the `interrupted` event). A gate is not a turn end under the written design (Q4).
+interrupt and a restart; `why` is on the `interrupted` event). A gate never ends a turn (V22).
 
 ```
 {"seq": 812, "type": "assistant", "turn": "t9", "origin": "user", "trust": "self", "clone": "root", "step": 2, "model": "anthropic:<model from config>", "blocks": [{"type": "thinking", "thinking": "...", "signature": "..."}, {"type": "tool_use", "id": "toolu_1", "name": "read_result", "input": {"handle": "r:810", "query": "휴가 계획"}}], "stop_reason": "tool_use", "usage": {"input_tokens": 410, "output_tokens": 96, "cache_read_input_tokens": 9800, "cache_creation_input_tokens": 0}, "text": "", "final": false}
@@ -159,15 +164,15 @@ adds `approvals.seq`): `approve <seq>` has one namespace.
 CREATE TABLE IF NOT EXISTS results (seq INTEGER PRIMARY KEY, clone TEXT, session TEXT, turn TEXT, call_id TEXT,
   tool TEXT, ok INTEGER, chars INTEGER, body TEXT);
 CREATE TABLE IF NOT EXISTS clones (id TEXT PRIMARY KEY, parent TEXT, preset TEXT, state TEXT, session TEXT,
-  turn TEXT, gate INTEGER, ts REAL);
+  turn TEXT, ts REAL);
 CREATE TABLE IF NOT EXISTS gates (seq INTEGER PRIMARY KEY, clone TEXT, session TEXT, turn TEXT, call_id TEXT,
-  tool TEXT, args_json TEXT, effect TEXT, brief TEXT, decision TEXT, ts REAL);
+  tool TEXT, args_json TEXT, effect TEXT, brief TEXT, decision TEXT, reported INTEGER, ts REAL);
 CREATE TABLE IF NOT EXISTS context (seq INTEGER PRIMARY KEY, clone TEXT, session TEXT, turn TEXT, type TEXT,
   event_json TEXT);  -- user, assistant, result (body left out), turn_start, turn_end, gate, resume, interrupted, summary
 CREATE INDEX IF NOT EXISTS context_by_clone ON context (clone, session, seq);
 -- approvals gains `seq INTEGER` (ALTER TABLE, the existing pattern)
 ```
-Projection: `turn_start` → clone `running`; `gate` → `waiting` + `gates` row; `resume` → `running`, decision set;
+Projection: `turn_start` → clone `running`; `gate` → `gates` row (no root state change); `resume` → decision; `user {gate}` → `reported`;
 `turn_end`/`interrupted` → `parked`; `spawn` → insert. v1's session-keyed `summaries` table goes in U10a with
 `session_summary`. `messages` keeps feeding `session_messages` (screens) from `final` assistant text.
 
@@ -217,7 +222,7 @@ spend the budget by itself; openai_compat: prompt + completion).
 
 | # | What happens | Ledger | Screen |
 |---|---|---|---|
-| 1 | `say` (daemon): if the root waits, chat-approval check first (D52-2); else record | `user {clone: root}` | — |
+| 1 | `say` (daemon): chat-approval check first if an open gate is newer than the last user message (D52-2); else record | `user {clone: root}` | — |
 | 2 | Root takes the item; resident parts gathered, frozen | `turn_start {item, resident}` | `turn.start` |
 | 3 | `req = assemble(...)`; `resp = await router.complete(req, on_text=delta)` | `error` per failed attempt | `delta`s |
 | 4 | Response recorded verbatim | `assistant {step, blocks, model, usage}` | — |
@@ -225,19 +230,35 @@ spend the budget by itself; openai_compat: prompt + completion).
 | 6 | `max_tokens` → its `tool_use` blocks get "not run: the answer was cut at the output limit" | `result {ok: false}`, `turn_end max_tokens` | error line |
 | 7 | No `tool_use` → done | `turn_end answer` | `turn.end` |
 | 8 | Each `tool_use`, in order: unknown name / coerce error → refusal text; `read_result` → `results.read` | `result` | `tool` |
-| 9 | Else `Broker.call`: allow → run; deny → `DENIED_TEXT`; `Gate` → wait (row 10) | `result` | `tool` |
-| 10 | Gate: root `waiting`, awaits `decide`; approved → run once; denied → `USER_DENIED_TEXT` | `gate`, `resume`, `result` | `gate` |
+| 9 | Else `Broker.call`: allow → run; deny → `DENIED_TEXT`; `Gate` → hand-off (row 10) | `result` | `tool` |
+| 10 | Gate (V22): the call is detached; the model gets the waiting status and the loop goes on | `gate` | `gate` |
 | 11 | Says recorded since the last step join the next user message as text blocks (steer at step boundaries) | `user {steer: true}` | — |
 | 12 | Steps ≥ `max_steps` or tokens ≥ `TOKEN_BUDGET` → one last step, same tools, a budget note appended; its calls get "not run: budget spent" | `user {origin: system}`, `result`, `turn_end budget` | — |
 | 13 | `interrupt` while running: step task cancelled, `control.interrupt` set (exec kills the process group); a running tool's late return is dropped | partial `assistant`, `result` "outcome unknown: interrupted by the user while it ran" for the started call, "not run: interrupted" for later calls of the batch, `interrupted {why: user}`, `turn_end interrupted` | `turn.end` |
-| 14 | `interrupt` while waiting: the gate closes as denied | `resume {decision: denied, by: interrupt}`, `result` "not run: interrupted while it waited for approval", `interrupted {why: user}`, `turn_end interrupted` | `turn.end` |
-| 15 | After `turn_end`: `fold_point` → fold (below) before the lane takes the next item | `summary` | — |
+| 14 | After `turn_end`: `fold_point` → fold (below) before the lane takes the next item | `summary` | — |
 
 A partial `assistant` (cancelled stream) keeps only **complete** text blocks (no unsigned thinking, no half
 `tool_use`); `text` holds everything streamed. Steps and tokens are counted from the turn's `assistant` events, so a
-resume or a restart never resets them (V7). Says after the final step become a `continue` item (as v1); a non-approval
-`say` while the root waits is a steer that reaches the model with the gate's outcome. One root lane; items carry their
-session and the window is that session's (planner's call).
+restart never resets them; a hand-off report is a new item with its own budget. Says after the final step become a
+`continue` item (as v1). One root lane; items carry their session and the window is that session's (planner's call).
+
+**Gate hand-off (V22, root only):**
+
+| Moment | Ledger | The root sees |
+|---|---|---|
+| `Broker.call` raises `Gate` | `gate {clone, step, call_id, tool, args, effect, brief}`; no `result` | that `tool_use`'s `tool_result` = `{"status": "waiting for approval", "gate": N}`, rendered from the `gate` event (no body, no handle); the turn goes on and ends as any turn |
+| `approve N` (socket, or chat approval) | `resume {gate: N, decision: approved, by}`; the call runs in a thread through `Broker(approved={call_id: (tool, args)})` (coerce, normalize; policy satisfied for that exact call only); `result {clone, gate: N, call_id, tool, ok, body}` = r:M | — |
+| `deny N` | `resume {gate: N, decision: denied, by}` | — |
+| the report item | `user {clone: root, origin: system, trust: self, gate: N, text}`, then `turn_start` … as any item | opening user message: `gate N (write_file) approved → ` + `results.render(r:M)`, or `… approved → failed: <error ≤ 2,000>`, or `gate N (write_file) denied by the user` |
+
+A `result` with `gate` is never rendered as a `tool_result` (its `tool_use` was answered by the status); it reaches the
+model through the report and `read_result` (r:M is in the window, so in the seen set). `decide` enqueues
+`Item(kind="continue", text, session=the gate's, gate=N)`; the clone records `user {gate}` when it takes the item, not
+at `decide` (a running turn must not pull it in: steers are `user` events with `steer: true` only). An `interrupt` leaves
+open gates open — it stops what runs now, and a gate is a decision the user has not made, still listed (deny drops it);
+it does kill a handed-off call already running after approval: `result {gate: N}` "outcome unknown: interrupted by the
+user while it ran". Children (P3) keep V7's waiting in place, so M2's in-place resume path is deferred to them; in P3 a
+detached call is simply a child clone.
 
 **What the model sees** (§7-1; chars of rendered text, thinking excluded):
 
@@ -249,8 +270,8 @@ session and the window is that session's (planner's call).
 | 4 | History | this session's turns since the last fold; summary first ("Earlier in this conversation — a record, not a request:"); one resident copy per past item counts | 24,000 → fold | blocks verbatim; breakpoint 3 on the last user block before the trailing copy (never on a `clear_at` message: 400) | text + tool_calls (renamed); thinking/reasoning dropped |
 | 5 | Current step | user text, steers, tool results via `results.render` (handle + summary ≤ 2,000; errors inline ≤ 2,000; `read_result` output inline ≤ 6,000, Deviation 6) | 8,000 per step; over it, later results shrink to the handle line | `tool_result` + text blocks in one user message | `tool` messages, then a user message for steers |
 
-"User message" for resident placement = the item's opening user message (the say, schedule text, `continue` steers or
-signal envelope) and each `tool_result` message of the item; steers ride inside them. All copies of an item are the
+"User message" for resident placement = the item's opening user message (the say, schedule text, `continue` steers, a
+gate report or a signal envelope) and each `tool_result` message of the item; steers ride inside them. All copies of an item are the
 same bytes and are never removed — append-only on both providers. Window accounting counts one copy per past item for
 both (fold points must not depend on which provider answered: a fallback can switch mid-session); Anthropic's cleared
 copies cost 0 tokens, so it folds a little early there. The fallback is one constant in `llm/anthropic.py`, taken if
@@ -280,9 +301,11 @@ depends on the model. A failed fold (all models blocked) records `error` and ret
 
 **Restart (V12)**, `Clone.restore()` at daemon start, after `state.catch_up`; `close()` (SIGTERM) writes no root events.
 No root row → `spawn {clone: root, preset: root}` once per home. `running` → `interrupted {why: restart}` + `turn_end
-interrupted`, nothing re-run (a write could repeat). `waiting` → the root waits on that gate; `approve`/`deny` (socket or
-chat) → `resume`, run the call, continue with the budget left. A recorded `tool_use` without a `result` renders as
-`is_error` "outcome unknown: interrupted by a restart" — after a `resume` or during a started tool alike; "not run" is
+interrupted`, nothing re-run (a write could repeat). Open gates need nothing reassembled: the root never waits, the
+`gates` rows return with `rebuild`, and `restore` only re-lists them (`approvals`). A decided gate whose report never
+ran (`reported` unset) is enqueued again; an approved gate with no `result` first gets `result {gate: N, ok: false}`
+"outcome unknown: interrupted by a restart" (never re-run). A recorded `tool_use` without a `result` renders as
+`is_error` "outcome unknown: interrupted by a restart" — during a started tool or a batch alike; "not run" is
 used only where the harness knows the call did not start. `View.epoch` = max(`ledger.last_seq` at this daemon's start,
 seq of the last `summary` for this clone and session), computed by `Clone` when it builds the View; thinking of every
 `assistant` with seq ≤ epoch is stripped.
@@ -316,9 +339,9 @@ priority. The model that answered is `Response.model` → `assistant.model`.
 | `test_static_system_frozen` | U6 test_assemble | piece 1 and both adapters' `to_wire` `system`/`tools` byte-identical across steps and turns with changed time, USER.md, wiki |
 | `test_fold_keeps_handles` | U6 test_assemble | a fold over 3 turns and 4 handles: `summary.handles` ⊇ them + the previous summary's; handle lines hold no title; `read_result` on one still works |
 | `test_unknown_handle_refused` | U2 test_results | unknown `r:N`, one outside the window, a non-result seq → refused, nothing read |
-| `test_waiting_clone_survives_restart` | U7 test_clone | gate → close → delete state.db → rebuild → `restore` → `waiting` → approve → tool ran once → answer; no thinking after restart; steps continued |
+| `test_open_gate_survives_restart_and_returns_as_item` | U7 test_clone | gate → the turn ends → close → delete state.db → rebuild → `restore` lists it → approve → the call ran once with the same args → `result {gate}` → report item → answer; no thinking after restart (M2's in-place resume: P3) |
 | `test_append_only_history` | U7 test_clone | a 3-step turn + a second turn with a fake router: for both adapters each `to_wire` body extends the previous byte-for-byte, except at an epoch |
-| `test_clone_transitions_in_ledger` | U7 test_clone | every root state change (parked → running → waiting → running → parked, interrupted) has its event; the clones row is derived only from them |
+| `test_clone_transitions_in_ledger` | U7 test_clone | every root state change (parked → running → parked, interrupted) has its event; a gate changes no root state; the clones row is derived only from them |
 | `test_fallback_chain` | U5 test_router | 402 → next answers, `fallbacks` holds it; first-request failure switches at once; mid-run 1 stays, 2 switch; 400 does not fall back; all blocked → `LLMError`, the lane lives (U8a) |
 | `test_single_assembler` | U10b test_invariants | AST: `Request(` and `dataclasses.replace`/`replace(` on a Request only in assemble.py; `router.complete` called only in clone.py; adapters imported only by router (named exemption: `openai_compat.embed` in memory) |
 | `test_no_new_ledger_type` | U1, then U10a | the new `TYPES` set exactly |
@@ -328,7 +351,8 @@ priority. The model that answered is `Response.model` → `assistant.model`.
 
 Also: U1 `test_assistant_blocks_written_verbatim`; U2 `test_result_body_capped_at_256k`; U3 `test_v21_rename_round_trip`
 (nested, collision, both names, original only, replayed calls, ledger original); U4 `test_resident_breakpoint_placement`;
-U7 `test_refusal_ends_turn_and_leaves_window`, `test_budget_note_keeps_tools`, `test_interrupt_at_gate_denies`,
+U7 `test_refusal_ends_turn_and_leaves_window`, `test_budget_note_keeps_tools`, `test_gate_status_rendered_from_gate_event`, `test_interrupt_leaves_gate_open`,
+`test_decided_gate_requeued_on_restart`, `test_approved_gate_without_result_is_outcome_unknown`,
 `test_partial_step_keeps_complete_text_only`, `test_restart_renders_outcome_unknown`, `test_thinking_stripped_up_to_epoch`;
 U8a `test_approve_ids_are_ledger_seqs`.
 
@@ -356,7 +380,7 @@ Discarded (§12): D52 call record (`RECORD_HEADER`, `calls` rows, `CALL_ARGS_CLI
 (`clip_for_ledger`, broker's `_clip_for_model`, `read_file`'s 8,000 clip; exec's output clip stays until P2); D51 second
 look, `RERUN_NOTE`, the forged-record check; dropping reasoning; `model`/`worker_model`; the urllib Anthropic adapter;
 jobs.py, job resume (D24), `senses/jobs.py`, `start_job`; the signal-turn special case (`SIGNAL_TURN_BUDGET`,
-`SIGNAL_TURNS_CLAUSE`, `_signal_model_turn`'s model part); D16 for the root (Q4); `memory.summarize`/`session_summary` (the
+`SIGNAL_TURNS_CLAUSE`, `_signal_model_turn`'s model part); D16 gate = turn end (V22: the turn goes on); `memory.summarize`/`session_summary` (the
 fold replaces them); `llm/slot.py` (D25); lazy imports in `llm/__init__` and `rules.judge`; D30's tool-less last step
 (→ the budget note, same tools: a changed tool list misses the whole cache).
 
@@ -388,54 +412,40 @@ with `read_result` as the only tool. Verdicts: correct, miss ("not in the record
 or a fabricated ID/title). Pass: 0 factual errors, 100% handles (each handle shown before a fold ∈ `summary.handles`, each
 `read_result` on one succeeds); misses reported. Output `docs/measurements/v2-m8-<model>-<date>.json`: counts, question
 ids, verdicts — no question text, answers or content (`scan_personal.py` before commit). ≈ 30 requests, ≈ $0.05.
-Fail → V5's per-turn one-line index. **Owner to confirm:** both names carry a model ID, as `v2-m1-*`/`v2-m2-*` do —
-the one place a model ID enters a tracked path despite "no model IDs in tracked files".
+Fail → V5's per-turn one-line index. Model IDs in these file names: approved 2026-10-17 (Decisions).
 
 ## Deviations from the blueprint
 
 1. **The resident block is stored** (`turn_start.resident`), against §5 "working memory is not stored". Every earlier
-   copy must replay byte-identical (HISTORY 10-17), and the clock, USER.md and agenda change. **Needs owner yes.**
+   copy must replay byte-identical (HISTORY 10-17), and the clock, USER.md and agenda change. **Approved 2026-10-17.**
 2. **A config `models` table keyed by role**, where §12 discards "the router's per-role model table" (V18). The keys are
    the preset names plus `root`: preset files are tracked and may not name a model, so a preset (P3) names its key.
 3. **M6 and M8 run at the end of P1, not its entrance** (§13): they need the fold, the assembler and the router.
 4. **`assistant.blocks` are exempt from the ledger's token mask** (D66's backstop). Masking a thinking block, a
    signature, or a text/tool_use block edits an earlier message on replay (400 or lost thinking). The model only saw
-   masked inputs, so a block can hold only a token it made up; the screen `text` stays masked. **Needs owner yes.**
+   masked inputs, so a block can hold only a token it made up; the screen `text` stays masked. **Approved 2026-10-17.**
 5. **Resident copies:** Anthropic gets a `clear_at` copy after every user message of an item (beta; probe: accepted,
    tools+system prefix read; not yet shown: the history breakpoint across cleared copies — U4 test + live step 1), with
    one copy per item as the fallback; openai_compat always gets one copy per item kept in place — not §7-1's "second
-   system message", which replaced each turn would edit history. **Needs owner yes.**
+   system message", which replaced each turn would edit history. **Approved 2026-10-17.**
 6. **`read_result` output inline up to 6,000 chars**, where §7-1 gives a result 2,000: M1's store arm ran at 6,000 and
    still cost 1.5× the requests (Haiku reads one range at a time); at 2,000 a 50-item page takes three or more reads.
 7. **Piece 2 exceeds 8,000 with MCP tools** until P2's `search_tools` (M5: Notion alone breaks 8k); P1 pins native + core.
 8. **No skills index in the resident block** (§7-1 lists it): it stays in `read_skill`'s description; P4 revisits it.
 
-## Questions for the owner
+## Decisions (2026-10-17)
 
-Built in place on `build` (CLAUDE.md); U1–U7 only add, U8a is the one break point, revertible until U9.
-
-**Q2. When `loop.py`, `jobs.py`, `llm/slot.py` go.** (a) Deleted in P1 (U9), with the memory pass, `summarize` and
-`rules.judge` that run through them: the branch has no jobs until P3, no consolidation until P4, rules-only signals with
-summary notices until P5; −~900 lines, ~60 tests retired, `test_single_assembler` strict from day one. (b) Left alive
-until P5 behind a shrinking exemption list: nothing lost on the branch, but two request producers, the old `llm.stream`
-path beside the Request adapters (a second adapter entry, a 5.2 patching signal), and only Ollama on it (the urllib
-Anthropic adapter dies in U4). (c) Delete them, but port the pass and the judge onto `assemble` now (+~80 lines that
-P4/P5 rewrite). **Recommendation: (a)** — main is untouched and the branch is not deployed until P6.
-
-**Q3. The fold's summarizer.** (a) `models.summarize` = [Haiku, gemma4]: about 6–12k input and ≤ 1k output tokens per
-fold ≈ $0.001–0.002; a heavy day with ~10 folds ≈ $0.02; it runs after `turn_end`, so no turn latency. (b) gemma4 only:
-no credits, but summaries feed facts (Mark.5: "summary in, fabrication up") and gemma4 is unmeasured on it; M8 would
-run on it. (c) No model: V5's fallback index (one line per turn, handles only), $0, loses facts said only in words.
-**Recommendation: (a)**, M8 measured on Haiku.
-
-**Q4. The root waiting at a gate blocks the lane until the user decides.** (a) As written: new items wait; a
-non-approval `say` rides along as a steer. Cost: a forgotten gate silences the assistant until P2's V7 timeout bounds
-it. (b) A new item parks the gate and the root takes it; approval later resumes the parked turn. Cost: two open turns
-in one window — the parked `tool_use` needs an interim result and the real outcome as a later message, ~+60 lines in
-clone. (c) Gate = turn end for the root only (children keep V7): the call gets "waiting for approval (gate N)",
-`turn_end gate`, approval starts a new item. Cost: D16 returns for the root (§12 discards it), the budget resets per
-item, P1's "waiting root survives restart" becomes a new-item test. **Recommendation: (a)** — V7 as agreed, P3's
-children need the same mechanism, P2's timeout bounds the block; (c) is the cheap exit if live use finds it annoying.
+- **Q1:** built in place on `build` (CLAUDE.md); U1–U7 only add, U8a is the one break point, revertible until U9.
+- **Q2 = (a):** `loop.py`, `jobs.py`, `llm/slot.py`, the memory pass, `summarize` and `rules.judge` go in U9; the branch
+  has no jobs until P3, no consolidation until P4, rules-only signals with summary notices until P5.
+- **Q3 = (a):** `models.summarize` = [Haiku, gemma4]; M8 measured on Haiku.
+- **Q4 = V22 "hand-off"** (a new decision): the root never waits at a gate; the gated call is detached, the root gets the
+  waiting status and its turn ends naturally; on approval the harness runs the call and the root reports in a fresh
+  `continue` item (Behaviour). Children keep V7 (P3).
+- **Deviations 1, 4 and 5 approved.**
+- **Model IDs in measurement file names approved.** The owner's exception line for CLAUDE.md's "Hard rules" ("Exception:
+  measurement records under `docs/measurements/` carry the model ID they measured, in the JSON and in the file name.")
+  is the lead's edit to make; this contract's units do not touch CLAUDE.md.
 
 ## Units and build order
 
@@ -444,15 +454,15 @@ U8a switches; U9–U10b delete. After each: tests green, `scan_personal.py --all
 
 | # | Unit | Files | Size | After | Parallel | Done when | Calls |
 |---|---|---|---|---|---|---|---|
-| U1 | Types and the index | `ledger.py`, `state.py`, `tests/test_invariants.py` (`test_no_new_ledger_type`; state ceiling 800 with a note until U10a) (+ test_ledger, test_state) | +~120 | — | U3, U4 | new types append; `blocks` verbatim; `approvals.seq`; `rebuild` restores results, clones, gates, context | 30 |
+| U1 | Types and the index | `ledger.py`, `state.py`, `tests/test_invariants.py` (`test_no_new_ledger_type`; state ceiling 800 with a note until U10a) (+ test_ledger, test_state) | +~120 | — | U3, U4 | new types append; `blocks` verbatim; `approvals.seq`; `rebuild` restores results, clones, gates (with `reported`), context | 30 |
 | U2 | The store | `results.py` (+ test_results) | ~200 | U1 | U4, U5 | render, read (range/query/path, JSON and text), seen-set refusal, 256 KB cap, filter on the way out | 25 |
 | U3 | Neutral types, openai_compat + V21 | `llm/__init__.py`, `llm/openai_compat.py` (+ test_llm) | +~110 | — | U1, U2 | `Request`/`Response`; `to_wire` stable; the rename spec; `complete` on canned SSE; v1 `stream` kept until U9 | 30 |
 | U4 | Anthropic on the SDK | `llm/anthropic.py`, `pyproject.toml` (+ test_llm_anthropic) | ~190 | U3 | U1, U2 | fake-client tests: blocks verbatim, 3 breakpoints, resident placement + fallback constant, thinking drop on model change, refusal | 30 |
 | U5 | Router and config | `router.py`, `config.py` (+ test_router, test_config) | ~170 + ~25 | U4 | U6 | `test_fallback_chain`, semaphores, override check, `models` and `effort` validated | 25 |
 | U6 | The assembler and fold | `assemble.py`, `prompts/root.txt`, `prompts/fold.txt` (+ test_assemble) | ~330 | U1, U2, U4 | U5 | five pieces in budget, seen set, epoch strip, refused turns out, fold point/request/handle lines; its three invariant tests | 35 |
-| U7 | The clone | `clone.py` (+ test_clone) | ~380 | U5, U6 | — | the turn table with a fake router and broker: gates, interrupts, budgets, partial steps, steer, refusal, fold, restore; its three invariant tests | 35 |
+| U7 | The clone | `clone.py` (+ test_clone) | ~380 | U5, U6 | — | the turn table and the hand-off with a fake router and broker: waiting status, `decide` runs the detached call once, the report item, interrupts, budgets, partial steps, steer, refusal, fold, restore (re-list, re-enqueue, outcome unknown); its three invariant tests | 35 |
 | U8a | The switch | `daemon.py`, `broker.py` (raw result), `tools.py` (`read_file` clip → store, 1 MB cap) (+ test_daemon, test_broker, test_tools) | daemon −250/+80 | U7 | — | rewritten daemon tests pass; approve by seq; the lane survives all-blocked (the memory pass sees unclipped results until U9) | 35 |
-| U8b | The CLI and the live check | `__main__.py` (`say` exits on `gate`, `approvals` by seq), `bench/v2/p1_runs.py` | ~+30, ~120 | U8a | R1, R2 (writing) | **the live check passes**, recorded for the lead | 25 |
+| U8b | The CLI and the live check | `__main__.py` (`approvals` by seq; `approve` prints the report turn), `bench/v2/p1_runs.py` | ~+30, ~120 | U8a | R1, R2 (writing) | **the live check passes**, recorded for the lead | 25 |
 | U9 | Delete the old turn engine | deletes `loop.py`, `jobs.py`, `llm/slot.py`, `senses/jobs.py`, old prompts; edits `memory.py` (pass, summarize), `rules.py` (judge stub), `daemon.py` (memory_mgr without a pass factory) (+ retired tests) | −~1,000 | U8b | — | nothing imports the deleted modules; suite green; retired tests listed | 30 |
 | U10a | Dead state and keys | `state.py` (D52 record, v1 summaries, job rows; ceiling back to 780), `ledger.py` (TYPES removals), `config.py` (`model`, `worker_model`) (+ test_state, test_config) | −~150 | U9 | — | `test_no_new_ledger_type` final set; state ≤ 780 | 25 |
 | U10b | Clips, emits, the ceilings | `tools.py` (`LEDGER_CLIP`, `clip_for_ledger`), `broker.py` (emits), `tests/test_invariants.py` | −~40, tests +~90 | U10a | — | the invariant-table tests pass; core ≤ 6,000; live check again | 30 |

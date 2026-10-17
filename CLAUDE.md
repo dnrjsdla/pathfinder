@@ -17,6 +17,7 @@ taxonomies, extra ledgers and modules whose absence does not reduce the assistan
 - One ledger: the only writer of `events/` is `ledger.append()`; the only place that maps a time to a partition is `ledger.partition()`.
 - One config writer: `config.set()`.
 - No model IDs, secrets, emails, home paths or account names in tracked files. Model names live in config; secrets in the Keychain.
+  Exception: measurement records under `docs/measurements/` carry the model ID they measured, in the JSON and in the file name.
 - Code, comments, commits and docs in English. `ARCHITECTURE.ko.md` mirrors `ARCHITECTURE.md` in Korean and is updated in the same commit.
 - No paid API keys are available (D7). Live models are Ollama cloud models on the free plan; credits are small — never run a full benchmark without the lead's go-ahead.
 - Work on branch `build`. `main` takes finished structures only.

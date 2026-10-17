@@ -1480,3 +1480,84 @@ spent on the analysis. Decisions: D71-D74.
 One observation, not a defect of this work: the scheduled turn's answer stated a wrong time
 (a quarter past the clock line it was given) - a model error on a one-line question, the kind
 the second look does not cover because it concerns no tool.
+
+## 2026-10-17 — Partition 0 of the v2 rebuild: the pre-build measurements (M5, M9 measured; M1, M2 benches built)
+
+The v2 blueprint (decisions V1–V19) names four assumptions to measure before any product code:
+M1 (a result store with `read_result` stops fabricated IDs), M2 (a clone stopped at a gate resumes
+from a ledger-rebuilt context), M5 (harness FTS finds the right tool among 33), M9 (Ollama drops
+tool parameters named `properties`/`description`, ollama/ollama#18468). Benches live in `bench/v2/`
+(each file ≤ 200 lines, stdlib except the Anthropic SDK in the Anthropic arm), results in
+`docs/measurements/v2-m<N>-*.json`. No Anthropic key exists on the machine yet, so the two Haiku
+measurements (M1 pass line, M2) are built and self-checked but not run; gemma4 on Ollama was used
+for the M9 probes and the M1 smokes only (14 requests in all).
+
+### M5 — tool search: FAIL on both criteria
+
+33 tools (17 native + 5 memory + 11 Notion, 22,215 chars of schema in all), 20 pre-registered
+queries (10 Korean, 10 English), SQLite FTS5 over name + description + parameter names and enum
+values, bm25 ranking.
+
+| arm | EN top-3 | KO top-3 | all top-3 | max tool block |
+|---|---|---|---|---|
+| unicode61 | 10/10 | 0/10 | 10/20 | 9,062 chars |
+| trigram | 10/10 | 0/10 | 10/20 | 9,062 chars |
+| alias (hand Korean aliases, written with the queries in view; not the verdict) | 10/10 | 10/10 | 20/20 | 9,062 chars |
+
+Pass line was top-3 ≥ 18/20 and block ≤ 8,000. English search works; Korean finds nothing because
+no schema contains Hangul. The block limit is broken by the Notion specs alone: `pages` plus
+`databases` plus the five core stubs is already over 8k. Blueprint fallback is "per-server allowlist
+only"; the alias arm shows the cheaper middle (a few Korean words per tool) closes the Korean gap,
+but that number is an upper bound, not a measurement. Decision for the owner at partition 2.
+
+### M9 — Ollama drops the parameters: the schema echo says yes
+
+gemma4:31b-cloud through Ollama 0.34.4, `/v1/chat/completions`, the real `pages` and `databases`
+specs versus a control with the suspect parameters renamed. Asked to echo the parameter names, the
+real arm listed 13 of 14 `pages` parameters and 16 of 18 `databases` parameters — missing exactly
+`properties`, `properties` and `description`; the control arm listed every name including the
+renamed ones. Asked to call the tools, the model still sent `properties` (the tool descriptions
+mention it by name), never `description` (not mentioned anywhere). Pre-registered verdict:
+"partial" (schema-level drop confirmed, call-level only partly). One run per probe, one model.
+Consequence: the openai_compat adapter needs the rename (blueprint §8 "Ollama 어댑터 수선").
+
+### M1 — result store vs inline: bench built, gemma4 smoke only
+
+Fake Notion world (100 pages, one database, real better-notion specs for `workspace`, `pages`,
+`databases`), N1–N10 from the 10-14 audit pre-registered with scorers, time-ordered fabricated-ID
+check, batch stop on deny (N8 is a harness check, reported separately). Two arms: inline (results
+in the tool message, structure-aware cut at 8,000 chars, kept in history) and store (`r:N` handle +
+minimal summary with no IDs, `read_result(handle, range|query|path)`, unknown handles refused).
+
+Smoke, gemma4, task N2 ("list pages" → "archive '휴가 계획'"), request cap 8:
+
+| arm | passed | steps | prompt tokens | fabricated IDs | path |
+|---|---|---|---|---|---|
+| store | yes | 7 | 21,226 | 0 | search → read_result → re-search by title → read_result → archive the right id |
+| inline | yes | 4 | 21,773 | 0 | search → archive the right id from kept history |
+
+Two things the smoke already shows: the store arm needs about twice the requests per task
+(45–55 against about 25 for the ten tasks, by the reviewer's count), and the inline arm cannot pass
+N1 at all because the cut shows 41 of 100 items — N1 inline measures the cut, not the model. The
+Haiku run (pass line: fabricated 0, ≥ 9/10) waits for a key.
+
+### M2 — resume after restart: bench built, self-checked against a stub
+
+Four arms over the same ten gate-stopped trials: strip every thinking block (V12 as written),
+replay them verbatim from the ledger, strip with the `drop_block` binding control, strip only the
+pending turn's. Model-free check per trial: the rebuilt request is byte-identical to the one sent
+before the gate apart from the arm's removal. About 120 Haiku requests, about $0.04.
+
+### What the benches changed in the design before a line of product code
+
+- **History is append-only, on both providers.** The first store-arm draft rewrote `read_result`
+  bodies into a one-line note between turns. Anthropic's preserved-thinking check rejects any edit
+  of an earlier message (400), so a harness cannot rewrite tool results after the fact: the
+  handle + summary tool message is the compact form from the start, `read_result` outputs stay, and
+  the window is reclaimed only by folding (V5), which restarts from a summary. V3's "next-turn
+  history keeps handle + one summary line" is satisfied by never putting more than that in.
+- **Haiku 5.5 thinks by default**, so the loop must replay the model's content blocks verbatim
+  (thinking included) inside a turn; the bench does.
+
+Left open: Korean tool search (M5), the adapter rename (M9), the Haiku runs (M1, M2), and whether
+`read_result` round trips cost too much against the M4 "≤ 2× cost" line.

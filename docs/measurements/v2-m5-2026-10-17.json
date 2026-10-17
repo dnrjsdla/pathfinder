@@ -1,0 +1,781 @@
+{
+ "measurement": "M5",
+ "date": "2026-10-17",
+ "tools": 33,
+ "all_specs_chars": 22215,
+ "core_stub_chars": 2540,
+ "summary": {
+  "unicode61": {
+   "en": {
+    "n": 10,
+    "top1": 8,
+    "top3": 10
+   },
+   "ko": {
+    "n": 10,
+    "top1": 0,
+    "top3": 0
+   },
+   "all": {
+    "n": 20,
+    "top1": 8,
+    "top3": 10
+   },
+   "block_chars": {
+    "max": 9062,
+    "median": 2771.5
+   }
+  },
+  "trigram": {
+   "en": {
+    "n": 10,
+    "top1": 8,
+    "top3": 10
+   },
+   "ko": {
+    "n": 10,
+    "top1": 0,
+    "top3": 0
+   },
+   "all": {
+    "n": 20,
+    "top1": 8,
+    "top3": 10
+   },
+   "block_chars": {
+    "max": 9062,
+    "median": 2625.0
+   }
+  },
+  "alias": {
+   "en": {
+    "n": 10,
+    "top1": 8,
+    "top3": 10
+   },
+   "ko": {
+    "n": 10,
+    "top1": 9,
+    "top3": 10
+   },
+   "all": {
+    "n": 20,
+    "top1": 17,
+    "top3": 20
+   },
+   "block_chars": {
+    "max": 9062,
+    "median": 3762.0
+   }
+  }
+ },
+ "verdict": {
+  "best_fts_arm": "unicode61",
+  "top3": "10/20",
+  "top3_ko": "0/10",
+  "top3_en": "10/10",
+  "max_block_chars": 9062,
+  "pass": false,
+  "rule": "top-3 >= 18/20 and max block <= 8000 chars in the best FTS-only arm; alias arm excluded",
+  "on_fail": "per-server allowlist only (blueprint s13)"
+ },
+ "rows": [
+  {
+   "query": "archive a notion page",
+   "lang": "en",
+   "expected": [
+    "pages"
+   ],
+   "arms": {
+    "unicode61": {
+     "top3": [
+      "pages",
+      "databases",
+      "comments"
+     ],
+     "top1_hit": true,
+     "top3_hit": true,
+     "block_chars": 8850
+    },
+    "trigram": {
+     "top3": [
+      "pages",
+      "content_convert",
+      "config"
+     ],
+     "top1_hit": true,
+     "top3_hit": true,
+     "block_chars": 7378
+    },
+    "alias": {
+     "top3": [
+      "pages",
+      "databases",
+      "comments"
+     ],
+     "top1_hit": true,
+     "top3_hit": true,
+     "block_chars": 8850
+    }
+   }
+  },
+  {
+   "query": "query a notion database with a filter",
+   "lang": "en",
+   "expected": [
+    "databases"
+   ],
+   "arms": {
+    "unicode61": {
+     "top3": [
+      "workspace",
+      "databases",
+      "pages"
+     ],
+     "top1_hit": false,
+     "top3_hit": true,
+     "block_chars": 9062
+    },
+    "trigram": {
+     "top3": [
+      "workspace",
+      "databases",
+      "pages"
+     ],
+     "top1_hit": false,
+     "top3_hit": true,
+     "block_chars": 9062
+    },
+    "alias": {
+     "top3": [
+      "workspace",
+      "databases",
+      "pages"
+     ],
+     "top1_hit": false,
+     "top3_hit": true,
+     "block_chars": 9062
+    }
+   }
+  },
+  {
+   "query": "search my email",
+   "lang": "en",
+   "expected": [
+    "search_mail"
+   ],
+   "arms": {
+    "unicode61": {
+     "top3": [
+      "search_memory",
+      "search_mail",
+      "search_tools"
+     ],
+     "top1_hit": false,
+     "top3_hit": true,
+     "block_chars": 3003
+    },
+    "trigram": {
+     "top3": [
+      "search_memory",
+      "search_mail",
+      "search_tools"
+     ],
+     "top1_hit": false,
+     "top3_hit": true,
+     "block_chars": 3003
+    },
+    "alias": {
+     "top3": [
+      "search_memory",
+      "search_mail",
+      "search_tools"
+     ],
+     "top1_hit": false,
+     "top3_hit": true,
+     "block_chars": 3003
+    }
+   }
+  },
+  {
+   "query": "run a shell command",
+   "lang": "en",
+   "expected": [
+    "run_command"
+   ],
+   "arms": {
+    "unicode61": {
+     "top3": [
+      "run_command",
+      "read_skill",
+      "add_schedule"
+     ],
+     "top1_hit": true,
+     "top3_hit": true,
+     "block_chars": 3922
+    },
+    "trigram": {
+     "top3": [
+      "run_command",
+      "propose_install",
+      "config"
+     ],
+     "top1_hit": true,
+     "top3_hit": true,
+     "block_chars": 4604
+    },
+    "alias": {
+     "top3": [
+      "run_command",
+      "read_skill",
+      "add_schedule"
+     ],
+     "top1_hit": true,
+     "top3_hit": true,
+     "block_chars": 3922
+    }
+   }
+  },
+  {
+   "query": "read a note in the vault",
+   "lang": "en",
+   "expected": [
+    "read_memory"
+   ],
+   "arms": {
+    "unicode61": {
+     "top3": [
+      "read_memory",
+      "read_file",
+      "remove_schedule"
+     ],
+     "top1_hit": true,
+     "top3_hit": true,
+     "block_chars": 3109
+    },
+    "trigram": {
+     "top3": [
+      "read_memory",
+      "search_memory",
+      "list_schedules"
+     ],
+     "top1_hit": true,
+     "top3_hit": true,
+     "block_chars": 2710
+    },
+    "alias": {
+     "top3": [
+      "read_memory",
+      "read_file",
+      "remove_schedule"
+     ],
+     "top1_hit": true,
+     "top3_hit": true,
+     "block_chars": 3109
+    }
+   }
+  },
+  {
+   "query": "install an mcp server",
+   "lang": "en",
+   "expected": [
+    "propose_install"
+   ],
+   "arms": {
+    "unicode61": {
+     "top3": [
+      "propose_install",
+      "config",
+      "config__open_relay"
+     ],
+     "top1_hit": true,
+     "top3_hit": true,
+     "block_chars": 4433
+    },
+    "trigram": {
+     "top3": [
+      "propose_install",
+      "search_tools",
+      "config__open_relay"
+     ],
+     "top1_hit": true,
+     "top3_hit": true,
+     "block_chars": 3268
+    },
+    "alias": {
+     "top3": [
+      "propose_install",
+      "config",
+      "config__open_relay"
+     ],
+     "top1_hit": true,
+     "top3_hit": true,
+     "block_chars": 4433
+    }
+   }
+  },
+  {
+   "query": "add a daily schedule",
+   "lang": "en",
+   "expected": [
+    "add_schedule"
+   ],
+   "arms": {
+    "unicode61": {
+     "top3": [
+      "add_schedule",
+      "remove_schedule",
+      "add_reminder"
+     ],
+     "top1_hit": true,
+     "top3_hit": true,
+     "block_chars": 3608
+    },
+    "trigram": {
+     "top3": [
+      "add_schedule",
+      "remove_schedule",
+      "list_schedules"
+     ],
+     "top1_hit": true,
+     "top3_hit": true,
+     "block_chars": 3473
+    },
+    "alias": {
+     "top3": [
+      "add_schedule",
+      "remove_schedule",
+      "add_reminder"
+     ],
+     "top1_hit": true,
+     "top3_hit": true,
+     "block_chars": 3608
+    }
+   }
+  },
+  {
+   "query": "upload a file to notion",
+   "lang": "en",
+   "expected": [
+    "file_uploads"
+   ],
+   "arms": {
+    "unicode61": {
+     "top3": [
+      "file_uploads",
+      "write_file",
+      "read_file"
+     ],
+     "top1_hit": true,
+     "top3_hit": true,
+     "block_chars": 4733
+    },
+    "trigram": {
+     "top3": [
+      "file_uploads",
+      "help",
+      "write_file"
+     ],
+     "top1_hit": true,
+     "top3_hit": true,
+     "block_chars": 4854
+    },
+    "alias": {
+     "top3": [
+      "file_uploads",
+      "write_file",
+      "read_file"
+     ],
+     "top1_hit": true,
+     "top3_hit": true,
+     "block_chars": 4733
+    }
+   }
+  },
+  {
+   "query": "mark a reminder as done",
+   "lang": "en",
+   "expected": [
+    "complete_reminder"
+   ],
+   "arms": {
+    "unicode61": {
+     "top3": [
+      "complete_reminder",
+      "delete_reminder",
+      "add_reminder"
+     ],
+     "top1_hit": true,
+     "top3_hit": true,
+     "block_chars": 3397
+    },
+    "trigram": {
+     "top3": [
+      "complete_reminder",
+      "delete_reminder",
+      "list_reminders"
+     ],
+     "top1_hit": true,
+     "top3_hit": true,
+     "block_chars": 3267
+    },
+    "alias": {
+     "top3": [
+      "complete_reminder",
+      "delete_reminder",
+      "add_reminder"
+     ],
+     "top1_hit": true,
+     "top3_hit": true,
+     "block_chars": 3397
+    }
+   }
+  },
+  {
+   "query": "add a comment to a notion page",
+   "lang": "en",
+   "expected": [
+    "comments"
+   ],
+   "arms": {
+    "unicode61": {
+     "top3": [
+      "comments",
+      "edit_memory",
+      "pages"
+     ],
+     "top1_hit": true,
+     "top3_hit": true,
+     "block_chars": 7346
+    },
+    "trigram": {
+     "top3": [
+      "comments",
+      "help",
+      "add_reminder"
+     ],
+     "top1_hit": true,
+     "top3_hit": true,
+     "block_chars": 4034
+    },
+    "alias": {
+     "top3": [
+      "comments",
+      "edit_memory",
+      "pages"
+     ],
+     "top1_hit": true,
+     "top3_hit": true,
+     "block_chars": 7346
+    }
+   }
+  },
+  {
+   "query": "노션 페이지 보관",
+   "lang": "ko",
+   "expected": [
+    "pages"
+   ],
+   "arms": {
+    "unicode61": {
+     "top3": [],
+     "top1_hit": false,
+     "top3_hit": false,
+     "block_chars": 2540
+    },
+    "trigram": {
+     "top3": [],
+     "top1_hit": false,
+     "top3_hit": false,
+     "block_chars": 2540
+    },
+    "alias": {
+     "top3": [
+      "pages",
+      "help",
+      "config__open_relay"
+     ],
+     "top1_hit": true,
+     "top3_hit": true,
+     "block_chars": 6039
+    }
+   }
+  },
+  {
+   "query": "내일 일정 추가",
+   "lang": "ko",
+   "expected": [
+    "add_event"
+   ],
+   "arms": {
+    "unicode61": {
+     "top3": [],
+     "top1_hit": false,
+     "top3_hit": false,
+     "block_chars": 2540
+    },
+    "trigram": {
+     "top3": [],
+     "top1_hit": false,
+     "top3_hit": false,
+     "block_chars": 2540
+    },
+    "alias": {
+     "top3": [
+      "add_event",
+      "add_reminder",
+      "list_events"
+     ],
+     "top1_hit": true,
+     "top3_hit": true,
+     "block_chars": 3669
+    }
+   }
+  },
+  {
+   "query": "메일 검색",
+   "lang": "ko",
+   "expected": [
+    "search_mail"
+   ],
+   "arms": {
+    "unicode61": {
+     "top3": [],
+     "top1_hit": false,
+     "top3_hit": false,
+     "block_chars": 2540
+    },
+    "trigram": {
+     "top3": [],
+     "top1_hit": false,
+     "top3_hit": false,
+     "block_chars": 2540
+    },
+    "alias": {
+     "top3": [
+      "search_mail",
+      "list_mail",
+      "read_mail"
+     ],
+     "top1_hit": true,
+     "top3_hit": true,
+     "block_chars": 3522
+    }
+   }
+  },
+  {
+   "query": "셸 명령 실행",
+   "lang": "ko",
+   "expected": [
+    "run_command"
+   ],
+   "arms": {
+    "unicode61": {
+     "top3": [],
+     "top1_hit": false,
+     "top3_hit": false,
+     "block_chars": 2540
+    },
+    "trigram": {
+     "top3": [],
+     "top1_hit": false,
+     "top3_hit": false,
+     "block_chars": 2540
+    },
+    "alias": {
+     "top3": [
+      "run_command"
+     ],
+     "top1_hit": true,
+     "top3_hit": true,
+     "block_chars": 3058
+    }
+   }
+  },
+  {
+   "query": "메모리에서 기억 찾기",
+   "lang": "ko",
+   "expected": [
+    "search_memory"
+   ],
+   "arms": {
+    "unicode61": {
+     "top3": [],
+     "top1_hit": false,
+     "top3_hit": false,
+     "block_chars": 2540
+    },
+    "trigram": {
+     "top3": [],
+     "top1_hit": false,
+     "top3_hit": false,
+     "block_chars": 2540
+    },
+    "alias": {
+     "top3": [
+      "search_memory",
+      "read_memory",
+      "edit_memory"
+     ],
+     "top1_hit": true,
+     "top3_hit": true,
+     "block_chars": 3855
+    }
+   }
+  },
+  {
+   "query": "미리 알림 목록 보기",
+   "lang": "ko",
+   "expected": [
+    "list_reminders"
+   ],
+   "arms": {
+    "unicode61": {
+     "top3": [],
+     "top1_hit": false,
+     "top3_hit": false,
+     "block_chars": 2540
+    },
+    "trigram": {
+     "top3": [],
+     "top1_hit": false,
+     "top3_hit": false,
+     "block_chars": 2540
+    },
+    "alias": {
+     "top3": [
+      "list_reminders",
+      "add_reminder",
+      "complete_reminder"
+     ],
+     "top1_hit": true,
+     "top3_hit": true,
+     "block_chars": 3278
+    }
+   }
+  },
+  {
+   "query": "노션 데이터베이스 조회",
+   "lang": "ko",
+   "expected": [
+    "databases"
+   ],
+   "arms": {
+    "unicode61": {
+     "top3": [],
+     "top1_hit": false,
+     "top3_hit": false,
+     "block_chars": 2540
+    },
+    "trigram": {
+     "top3": [],
+     "top1_hit": false,
+     "top3_hit": false,
+     "block_chars": 2540
+    },
+    "alias": {
+     "top3": [
+      "list_events",
+      "databases",
+      "help"
+     ],
+     "top1_hit": false,
+     "top3_hit": true,
+     "block_chars": 6187
+    }
+   }
+  },
+  {
+   "query": "파일 쓰기",
+   "lang": "ko",
+   "expected": [
+    "write_file"
+   ],
+   "arms": {
+    "unicode61": {
+     "top3": [],
+     "top1_hit": false,
+     "top3_hit": false,
+     "block_chars": 2540
+    },
+    "trigram": {
+     "top3": [],
+     "top1_hit": false,
+     "top3_hit": false,
+     "block_chars": 2540
+    },
+    "alias": {
+     "top3": [
+      "write_file",
+      "read_file",
+      "file_uploads"
+     ],
+     "top1_hit": true,
+     "top3_hit": true,
+     "block_chars": 4733
+    }
+   }
+  },
+  {
+   "query": "매일 아침 알림 예약",
+   "lang": "ko",
+   "expected": [
+    "add_reminder",
+    "add_schedule"
+   ],
+   "arms": {
+    "unicode61": {
+     "top3": [],
+     "top1_hit": false,
+     "top3_hit": false,
+     "block_chars": 2540
+    },
+    "trigram": {
+     "top3": [],
+     "top1_hit": false,
+     "top3_hit": false,
+     "block_chars": 2540
+    },
+    "alias": {
+     "top3": [
+      "add_schedule",
+      "list_schedules",
+      "remove_schedule"
+     ],
+     "top1_hit": true,
+     "top3_hit": true,
+     "block_chars": 3473
+    }
+   }
+  },
+  {
+   "query": "노션에 댓글 달기",
+   "lang": "ko",
+   "expected": [
+    "comments"
+   ],
+   "arms": {
+    "unicode61": {
+     "top3": [],
+     "top1_hit": false,
+     "top3_hit": false,
+     "block_chars": 2540
+    },
+    "trigram": {
+     "top3": [],
+     "top1_hit": false,
+     "top3_hit": false,
+     "block_chars": 2540
+    },
+    "alias": {
+     "top3": [
+      "comments"
+     ],
+     "top1_hit": true,
+     "top3_hit": true,
+     "block_chars": 3304
+    }
+   }
+  }
+ ]
+}

@@ -1,0 +1,62 @@
+{
+  "provider": "ollama",
+  "model": "gemma4:31b-cloud",
+  "arm": "inline",
+  "date": "2026-10-17",
+  "max_steps": 8,
+  "results": [
+    {
+      "id": "N2",
+      "passed": true,
+      "reason": "T2 archived=['e3e70682c2094caca29f6fbed82c07cd']",
+      "error": null,
+      "final_text": "'휴가 계획' 페이지를 성공적으로 삭제(보관)했습니다.",
+      "steps": 4,
+      "calls": [
+        {
+          "turn": 0,
+          "name": "workspace",
+          "action": "search",
+          "args": {
+            "action": "search"
+          },
+          "seen_before": 1
+        },
+        {
+          "turn": 1,
+          "name": "pages",
+          "action": "archive",
+          "args": {
+            "action": "archive",
+            "page_id": "e3e70682-c209-4caca29f6fbed82c07cd"
+          },
+          "seen_before": 3
+        }
+      ],
+      "texts": [
+        "노션 워크스페이스에 다음과 같은 주요 페이지들이 있습니다. (제목이 'Untitled'인 페이지가 많아, 이름이 지정된 페이지 위주로 알려드릴게요.)\n\n**이름이 지정된 페이지:**\n* 🏃‍♂️ **운동 기록**\n* 💡 **아이디어 메모**\n* 🗓️ **주간 플래너 템플릿**\n* 📋 **프로젝트 계획**\n* ✈️ **휴가 계획**\n\n그 외에도 제목이 지정되지 않은('Untitled') 페이지들이 많이 있습니다. 특정 내용을 찾으시거나, 위 페이지 중 확인하고 싶은 내용이 있으시면 말씀해 주세요!",
+        "'휴가 계획' 페이지를 성공적으로 삭제(보관)했습니다."
+      ],
+      "prompt_tokens": 21773,
+      "completion_tokens": 226,
+      "latencies": [
+        0.54,
+        1.57,
+        0.56,
+        0.59
+      ],
+      "fabricated_ids": []
+    }
+  ],
+  "summary": {
+    "passed": 1,
+    "of": 1,
+    "model_passed": 1,
+    "model_of": 1,
+    "n8_harness": null,
+    "fabricated_total": 0,
+    "by_task": {
+      "N2": true
+    }
+  }
+}

@@ -1,0 +1,357 @@
+[
+ {
+  "type": "function",
+  "function": {
+   "name": "run_command",
+   "description": "Run a shell command in a sandboxed workspace; the network is open (curl works). Audio, GUI and Apple Events have no effect inside the sandbox (exit 0, nothing happens); escalate for those.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "command": {
+      "type": "string",
+      "description": "the shell command to run"
+     },
+     "escalate": {
+      "type": "boolean",
+      "description": "run outside the sandbox (needs the user's approval)"
+     }
+    },
+    "required": [
+     "command"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "read_file",
+   "description": "Read a UTF-8 text file.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "path": {
+      "type": "string",
+      "description": "absolute path, or ~/... for the home directory; a relative path lands in the workspace"
+     }
+    },
+    "required": [
+     "path"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "write_file",
+   "description": "Write a UTF-8 text file, creating parent directories as needed.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "path": {
+      "type": "string",
+      "description": "absolute path, or ~/... for the home directory; a relative path lands in the workspace"
+     },
+     "content": {
+      "type": "string",
+      "description": "the file content"
+     }
+    },
+    "required": [
+     "path",
+     "content"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "list_events",
+   "description": "List calendar events in a local time range.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "from": {
+      "type": "string",
+      "format": "local_datetime",
+      "description": "local time, YYYY-MM-DD HH:MM"
+     },
+     "to": {
+      "type": "string",
+      "format": "local_datetime",
+      "description": "local time, YYYY-MM-DD HH:MM"
+     }
+    },
+    "required": [
+     "from",
+     "to"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "add_event",
+   "description": "Add a calendar event.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "title": {
+      "type": "string"
+     },
+     "start": {
+      "type": "string",
+      "format": "local_datetime",
+      "description": "local time, YYYY-MM-DD HH:MM"
+     },
+     "end": {
+      "type": "string",
+      "format": "local_datetime",
+      "description": "local time, YYYY-MM-DD HH:MM"
+     }
+    },
+    "required": [
+     "title",
+     "start",
+     "end"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "search_tools",
+   "description": "Search the public MCP registry for servers by name and description (the user asks what tools exist for X). The registry is in English: search English words for what the tool does or is called.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "query": {
+      "type": "string",
+      "description": "English words for what the tool does or is called (names and descriptions are searched): gmail, brave search, weather"
+     }
+    },
+    "required": [
+     "query"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "propose_install",
+   "description": "Check and propose installing an MCP server by name (as search_tools or the registry shows it) - runs the checks and queues one approval; tell the user what it found.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "name": {
+      "type": "string",
+      "description": "the server name"
+     }
+    },
+    "required": [
+     "name"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "list_mail",
+   "description": "List recent mail headers.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "limit": {
+      "type": "integer",
+      "description": "how many, 1-20, most recent first"
+     }
+    },
+    "required": [
+     "limit"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "search_mail",
+   "description": "Search mail; newest matching headers first. On Gmail the query takes Gmail's search syntax: from:, subject:, after:2026/09/01, newer_than:7d, plain words.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "query": {
+      "type": "string",
+      "description": "the search, at most 200 characters"
+     },
+     "limit": {
+      "type": "integer",
+      "description": "how many, 1-20 (default 10)"
+     }
+    },
+    "required": [
+     "query"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "read_mail",
+   "description": "Read one mail's full body by its id.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "id": {
+      "type": "string",
+      "description": "the id from list_mail or search_mail"
+     }
+    },
+    "required": [
+     "id"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "list_reminders",
+   "description": "List incomplete reminders.",
+   "parameters": {
+    "type": "object",
+    "properties": {},
+    "required": []
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "add_reminder",
+   "description": "Add a reminder.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "title": {
+      "type": "string"
+     },
+     "due": {
+      "type": "string",
+      "format": "local_datetime",
+      "description": "local time, YYYY-MM-DD HH:MM"
+     }
+    },
+    "required": [
+     "title",
+     "due"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "complete_reminder",
+   "description": "Mark a reminder done.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "id": {
+      "type": "string",
+      "description": "the reminder's id, from list_reminders"
+     }
+    },
+    "required": [
+     "id"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "delete_reminder",
+   "description": "Delete a reminder. To mark one done, use complete_reminder.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "id": {
+      "type": "string",
+      "description": "the reminder's id, from list_reminders"
+     }
+    },
+    "required": [
+     "id"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "add_schedule",
+   "description": "Add a scheduled note PATHFINDER says at a time, once or on a repeat (not a Reminders item).",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "at": {
+      "type": "string",
+      "format": "local_datetime",
+      "description": "local time, YYYY-MM-DD HH:MM, no offset"
+     },
+     "text": {
+      "type": "string",
+      "description": "what to say when it fires"
+     },
+     "repeat": {
+      "type": "string",
+      "description": "none|daily|weekly"
+     }
+    },
+    "required": [
+     "at",
+     "text"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "list_schedules",
+   "description": "List scheduled notes.",
+   "parameters": {
+    "type": "object",
+    "properties": {},
+    "required": []
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "remove_schedule",
+   "description": "Remove a scheduled note by id.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "id": {
+      "type": "string",
+      "description": "the schedule's id, from list_schedules"
+     }
+    },
+    "required": [
+     "id"
+    ]
+   }
+  }
+ }
+]

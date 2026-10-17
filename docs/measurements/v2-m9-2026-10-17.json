@@ -1,0 +1,213 @@
+{
+ "measurement": "M9",
+ "date": "2026-10-17",
+ "ollama_version": "0.34.4",
+ "note": "Ollama version matters: #18468 may be fixed or regressed between releases; re-run after upgrades.",
+ "results": [
+  {
+   "model": "gemma4:31b-cloud",
+   "verdict": "partial",
+   "real_seen": [
+    "databases.properties",
+    "pages.properties"
+   ],
+   "control_seen": [
+    "databases.description",
+    "databases.properties",
+    "pages.properties"
+   ],
+   "probes": [
+    {
+     "arm": "real",
+     "probe": "P1",
+     "prompt": "List every top-level parameter name of the `pages` tool and of the `databases` tool exactly as given in their schemas, as JSON `{\"pages\":[...],\"databases\":[...]}`. Do not call any tool.",
+     "raw": {
+      "text": "```json\n{\n  \"pages\": [\n    \"action\",\n    \"append_content\",\n    \"archived\",\n    \"content\",\n    \"content_cursor\",\n    \"content_limit\",\n    \"cover\",\n    \"icon\",\n    \"page_id\",\n    \"page_ids\",\n    \"parent_id\",\n    \"property_id\",\n    \"title\"\n  ],\n  \"databases\": [\n    \"action\",\n    \"cover\",\n    \"data_source_id\",\n    \"database_id\",\n    \"filters\",\n    \"icon\",\n    \"is_inline\",\n    \"limit\",\n    \"page_id\",\n    \"page_ids\",\n    \"page_properties\",\n    \"pages\",\n    \"parent_id\",\n    \"search\",\n    \"sorts\",\n    \"title\"\n  ]\n}\n```",
+      "tool_calls": []
+     },
+     "found_names": {
+      "pages": [
+       "action",
+       "append_content",
+       "archived",
+       "content",
+       "content_cursor",
+       "content_limit",
+       "cover",
+       "icon",
+       "page_id",
+       "page_ids",
+       "parent_id",
+       "property_id",
+       "title"
+      ],
+      "databases": [
+       "action",
+       "cover",
+       "data_source_id",
+       "database_id",
+       "filters",
+       "icon",
+       "is_inline",
+       "limit",
+       "page_id",
+       "page_ids",
+       "page_properties",
+       "pages",
+       "parent_id",
+       "search",
+       "sorts",
+       "title"
+      ]
+     },
+     "ok": true
+    },
+    {
+     "arm": "real",
+     "probe": "P2",
+     "prompt": "Create a Notion page titled 'Bench Page' under parent page id 3f6c1d52-8a47-4e0b-9c15-2d7b6e0a94f1 with the property Status set to Done. Call the pages tool now.",
+     "raw": {
+      "text": "",
+      "tool_calls": [
+       {
+        "id": "call_n0wch4u4",
+        "index": 0,
+        "type": "function",
+        "function": {
+         "name": "pages",
+         "arguments": "{\"action\":\"create\",\"parent_id\":\"3f6c1d52-8a47-4e0b-9c15-2d7b6e0a94f1\",\"properties\":{\"Status\":\"Done\"},\"title\":\"Bench Page\"}"
+        }
+       }
+      ]
+     },
+     "found_names": {
+      "pages": [
+       "action",
+       "parent_id",
+       "properties",
+       "title"
+      ]
+     },
+     "ok": true
+    },
+    {
+     "arm": "real",
+     "probe": "P3",
+     "prompt": "Create a Notion database titled 'Bench DB' under parent page id 3f6c1d52-8a47-4e0b-9c15-2d7b6e0a94f1 with description 'bench' and one property Status (select). Call the databases tool now.",
+     "raw": {
+      "text": "",
+      "tool_calls": [
+       {
+        "id": "call_3cnyf003",
+        "index": 0,
+        "type": "function",
+        "function": {
+         "name": "databases",
+         "arguments": "{\"action\":\"create\",\"parent_id\":\"3f6c1d52-8a47-4e0b-9c15-2d7b6e0a94f1\",\"properties\":{\"Status\":{\"select\":{}},\"Title\":{\"title\":{}}},\"title\":\"Bench DB\"}"
+        }
+       }
+      ]
+     },
+     "found_names": {
+      "databases": [
+       "action",
+       "parent_id",
+       "properties",
+       "title"
+      ]
+     },
+     "ok": true
+    },
+    {
+     "arm": "control",
+     "probe": "P1",
+     "prompt": "List every top-level parameter name of the `pages` tool and of the `databases` tool exactly as given in their schemas, as JSON `{\"pages\":[...],\"databases\":[...]}`. Do not call any tool.",
+     "raw": {
+      "text": "```json\n{\n  \"pages\": [\n    \"action\",\n    \"append_content\",\n    \"archived\",\n    \"content\",\n    \"content_cursor\",\n    \"content_limit\",\n    \"cover\",\n    \"icon\",\n    \"page_id\",\n    \"page_ids\",\n    \"page_properties\",\n    \"parent_id\",\n    \"property_id\",\n    \"title\"\n  ],\n  \"databases\": [\n    \"action\",\n    \"cover\",\n    \"data_source_id\",\n    \"database_id\",\n    \"db_description\",\n    \"db_properties\",\n    \"filters\",\n    \"icon\",\n    \"is_inline\",\n    \"limit\",\n    \"page_id\",\n    \"page_ids\",\n    \"page_properties\",\n    \"pages\",\n    \"parent_id\",\n    \"search\",\n    \"sorts\",\n    \"title\"\n  ]\n}\n```",
+      "tool_calls": []
+     },
+     "found_names": {
+      "pages": [
+       "action",
+       "append_content",
+       "archived",
+       "content",
+       "content_cursor",
+       "content_limit",
+       "cover",
+       "icon",
+       "page_id",
+       "page_ids",
+       "page_properties",
+       "parent_id",
+       "property_id",
+       "title"
+      ],
+      "databases": [
+       "action",
+       "cover",
+       "data_source_id",
+       "database_id",
+       "db_description",
+       "db_properties",
+       "filters",
+       "icon",
+       "is_inline",
+       "limit",
+       "page_id",
+       "page_ids",
+       "page_properties",
+       "pages",
+       "parent_id",
+       "search",
+       "sorts",
+       "title"
+      ]
+     },
+     "ok": true
+    },
+    {
+     "arm": "control",
+     "probe": "P2",
+     "prompt": "Create a Notion page titled 'Bench Page' under parent page id 3f6c1d52-8a47-4e0b-9c15-2d7b6e0a94f1 with the property Status set to Done. Call the pages tool now.",
+     "raw": {
+      "text": "",
+      "tool_calls": [
+       {
+        "id": "call_12gy3b97",
+        "index": 0,
+        "type": "function",
+        "function": {
+         "name": "pages",
+         "arguments": "{\"action\":\"create\",\"page_properties\":{\"Status\":\"Done\"},\"parent_id\":\"3f6c1d52-8a47-4e0b-9c15-2d7b6e0a94f1\",\"title\":\"Bench Page\"}"
+        }
+       }
+      ]
+     },
+     "found_names": {
+      "pages": [
+       "action",
+       "page_properties",
+       "parent_id",
+       "title"
+      ]
+     },
+     "ok": true
+    },
+    {
+     "arm": "control",
+     "probe": "P3",
+     "prompt": "Create a Notion database titled 'Bench DB' under parent page id 3f6c1d52-8a47-4e0b-9c15-2d7b6e0a94f1 with description 'bench' and one property Status (select). Call the databases tool now.",
+     "raw": {
+      "text": "",
+      "tool_calls": []
+     },
+     "found_names": {
+      "null": []
+     },
+     "ok": false
+    }
+   ]
+  }
+ ]
+}

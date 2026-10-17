@@ -1,0 +1,94 @@
+{
+  "provider": "ollama",
+  "model": "gemma4:31b-cloud",
+  "arm": "store",
+  "date": "2026-10-17",
+  "max_steps": 8,
+  "results": [
+    {
+      "id": "N2",
+      "passed": true,
+      "reason": "T2 archived=['e3e70682c2094caca29f6fbed82c07cd']",
+      "error": null,
+      "final_text": "'휴가 계획' 페이지를 성공적으로 삭제(보관)했습니다.",
+      "steps": 7,
+      "calls": [
+        {
+          "turn": 0,
+          "name": "workspace",
+          "action": "search",
+          "args": {
+            "action": "search",
+            "limit": 10
+          },
+          "seen_before": 1
+        },
+        {
+          "turn": 0,
+          "name": "read_result",
+          "action": null,
+          "args": {
+            "handle": "r:1"
+          },
+          "seen_before": 2
+        },
+        {
+          "turn": 1,
+          "name": "workspace",
+          "action": "search",
+          "args": {
+            "action": "search",
+            "query": "휴가 계획"
+          },
+          "seen_before": 4
+        },
+        {
+          "turn": 1,
+          "name": "read_result",
+          "action": null,
+          "args": {
+            "handle": "r:2"
+          },
+          "seen_before": 5
+        },
+        {
+          "turn": 1,
+          "name": "pages",
+          "action": "archive",
+          "args": {
+            "action": "archive",
+            "page_id": "e3e70682-c209-4cac-a29f-6fbed82c07cd"
+          },
+          "seen_before": 6
+        }
+      ],
+      "texts": [
+        "현재 노션 워크스페이스에서 확인되는 페이지들이 대부분 제목이 **\"Untitled\"**(제목 없음)로 되어 있어 정확히 어떤 내용인지 파악하기 어렵습니다.\n\n혹시 특정 키워드로 찾으시는 페이지가 있거나, 최근에 작업하신 내용이 있다면 말씀해 주세요! 더 자세히 찾아봐 드리겠습니다.",
+        "'휴가 계획' 페이지를 성공적으로 삭제(보관)했습니다."
+      ],
+      "prompt_tokens": 21226,
+      "completion_tokens": 233,
+      "latencies": [
+        0.54,
+        0.46,
+        0.76,
+        0.53,
+        1.03,
+        0.93,
+        0.65
+      ],
+      "fabricated_ids": []
+    }
+  ],
+  "summary": {
+    "passed": 1,
+    "of": 1,
+    "model_passed": 1,
+    "model_of": 1,
+    "n8_harness": null,
+    "fabricated_total": 0,
+    "by_task": {
+      "N2": true
+    }
+  }
+}

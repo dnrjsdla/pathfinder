@@ -183,6 +183,15 @@ class BrokerTest(unittest.TestCase):
             [event] = [e for e in led.read() if e["type"] == "tool_result"]
         self.assertEqual(event["result"], raw)
 
+    def test_raw_broker_returns_the_unclipped_unfiltered_result(self):
+        """The clone's path (U7): the store caps and the renderer filters, so the broker hands back the value."""
+        raw = {"text": "\x1b[31mred\x1b[0m" + "x" * 20000}
+        failing = _spec("f", handler=lambda control=None: (_ for _ in ()).throw(RuntimeError("\x07" + "y" * 9000)))
+        b = Broker({"t": _spec("t", handler=lambda control=None: raw), "f": failing}, "user", {}, control=None,
+                   emit=lambda kind, payload: None, raw=True)
+        self.assertEqual(b.call("c1", "t", {}), {"ok": True, "result": raw})
+        self.assertEqual(b.call("c2", "f", {}), {"ok": False, "error": "\x07" + "y" * 9000})
+
 
 WAY_OUT = " - if you meant something else, say it again · 다른 뜻이었다면 다시 말해 주세요"
 

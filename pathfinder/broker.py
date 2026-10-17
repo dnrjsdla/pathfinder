@@ -37,8 +37,9 @@ class Gate(Exception):
 
 
 class Broker:
-    def __init__(self, tools, origin, grants, *, control, emit, approved=None, denied=frozenset()):
+    def __init__(self, tools, origin, grants, *, control, emit, approved=None, denied=frozenset(), raw=False):
         self.tools = tools
+        self.raw = raw  # v2: the clone caps and records the raw result itself; the clip below is v1's until U8a
         self.origin = origin
         self.grants = grants
         self.control = control
@@ -92,6 +93,8 @@ class Broker:
             result = str(e)
             ok = False
         self.emit("tool_result", {"id": id, "name": name, "ok": ok, "result": result})
+        if self.raw:
+            return {"ok": True, "result": result} if ok else {"ok": False, "error": result}
         clipped = _clip_for_model(result)
         return {"ok": True, "result": clipped} if ok else {"ok": False, "error": clipped}
 

@@ -187,7 +187,8 @@ async def complete(endpoint, req, on_text=None, cancel=None):
     text blocks when it records or replays such a step (no reasoning, text marked partial). `Response.model` is
     the bare endpoint model; the ROUTER overwrites it with the `provider:model` ref before anyone records it."""
     loop = asyncio.get_running_loop()
-    emit = (lambda s: loop.call_soon_threadsafe(on_text, s)) if on_text else (lambda s: None)
+    emit = (lambda s: loop.call_soon_threadsafe(  # no delta lands after an interrupt set `cancel`
+        lambda: None if cancel is not None and cancel.is_set() else on_text(s))) if on_text else (lambda s: None)
     return await asyncio.to_thread(_run, endpoint, req, emit, cancel)
 
 

@@ -1,22 +1,10 @@
 """The one door every tool call goes through. The broker never writes the
-ledger itself - it emits, and the daemon records tool_call/tool_result on the
-event-loop thread, so the single-writer rule from partition 1 still holds."""
-import json
+ledger itself - it returns the raw result (the clone caps and records it; the
+store's renderer filters it on the way to the model) and emits for a job."""
 import unicodedata
 
 from . import policy
-from .tools import OFF_TOOLS, READ_CLIP, clean, clip, coerce, map_strings
-
-
-def _clip_for_model(value):
-    """Every tool result reaches `loop.settle` as `json.dumps(this)` - filter and clip here, the
-    one place, so no tool (or a future one) can push control characters or an unbounded blob into
-    the model's context (D62). The ledger's `tool_result` was emitted before, with the raw value."""
-    value = map_strings(value, clean)
-    if isinstance(value, str):
-        return clip(value)
-    text = json.dumps(value, ensure_ascii=False)
-    return value if len(text) <= READ_CLIP else clip(text)
+from .tools import OFF_TOOLS, coerce
 
 
 USER_DENIED_TEXT = ("The user looked at this call and declined it. This is their decision, not an "
@@ -37,9 +25,8 @@ class Gate(Exception):
 
 
 class Broker:
-    def __init__(self, tools, origin, grants, *, control, emit, approved=None, denied=frozenset(), raw=False):
+    def __init__(self, tools, origin, grants, *, control, emit, approved=None, denied=frozenset()):
         self.tools = tools
-        self.raw = raw  # v2: the clone caps and records the raw result itself; the clip below is v1's until U8a
         self.origin = origin
         self.grants = grants
         self.control = control
@@ -93,10 +80,7 @@ class Broker:
             result = str(e)
             ok = False
         self.emit("tool_result", {"id": id, "name": name, "ok": ok, "result": result})
-        if self.raw:
-            return {"ok": True, "result": result} if ok else {"ok": False, "error": result}
-        clipped = _clip_for_model(result)
-        return {"ok": True, "result": clipped} if ok else {"ok": False, "error": clipped}
+        return {"ok": True, "result": result} if ok else {"ok": False, "error": result}
 
 
 def _said(text: str) -> str:
@@ -115,10 +99,15 @@ CHAT_APPROVAL = tuple(map(_said, (
 
 def chat_approval(state, session, text, max_age_s):
     """D52: an approval phrase typed while a gate is open is answered by the harness, one line per
-    open gate, and the gate stays pending. None: the message goes to the model."""
+    open gate (the root's undecided gates of this session by seq, then v1 approvals), and the gate
+    stays pending. A gate counts while it is newer than the session's last user message. None: the
+    message goes to the model."""
     if _said(text) not in CHAT_APPROVAL:
         return None
-    lines = "\n".join(f"승인은 채팅으로 받지 않습니다 · approvals are not taken in chat: /approve {p['id']} or /deny "
-                      f"{p['id']} ({p['tool']}; shell: pathfinder approve|deny {p['id']})"
-                      for p in state.open_approvals(session, max_age_s))
+    last = state.last_user_seq(session) or 0
+    gates = [(g["seq"], g["tool"]) for g in state.open_gates()
+             if g["session"] == session and g["decision"] is None and g["seq"] > last]
+    lines = "\n".join(f"승인은 채팅으로 받지 않습니다 · approvals are not taken in chat: /approve {id} or /deny "
+                      f"{id} ({tool}; shell: pathfinder approve|deny {id})"
+                      for id, tool in gates + [(p["id"], p["tool"]) for p in state.open_approvals(session, max_age_s)])
     return f"{lines} - if you meant something else, say it again · 다른 뜻이었다면 다시 말해 주세요" if lines else None

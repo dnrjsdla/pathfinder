@@ -5,7 +5,7 @@ from pathlib import Path
 from unittest import mock
 
 from pathfinder import config
-from pathfinder.broker import _clip_for_model
+from pathfinder.tools import clean, map_strings
 from pathfinder.senses import mail as mail_sense
 
 _KEY = ("imap.example.com", "me@example.com", "INBOX", b"1")  # what FakeIMAP's defaults connect to
@@ -262,9 +262,9 @@ class MailToolsTest(unittest.TestCase):
             self.assertNotIn("[31m", row["from"])  # the ANSI sequence goes whole
             self.assertTrue(row["subject"].startswith("gnp.exe x"))
             self.assertEqual(row["date"], "Tue, 29 Sep 2026 10:00:00 +0900")
-        # the body reaches the model as a tool result, through the broker's filter (D62): newlines kept,
+        # the body reaches the model through the store's filter on the way out (D62): newlines kept,
         # a CRLF pair one newline, controls, bidi and zero-width gone
-        self.assertEqual(_clip_for_model(rows[2])["body"], "line one\n\nline three\n")
+        self.assertEqual(map_strings(rows[2], clean)["body"], "line one\n\nline three\n")
 
     def test_hostile_header_degrades_to_its_own_row(self):
         """Review: an encoded-word From that decodes to CR/LF made `msg.get` raise, failing every

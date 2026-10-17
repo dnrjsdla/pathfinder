@@ -1,4 +1,6 @@
+import tempfile
 import unittest
+from pathlib import Path
 from unittest import mock
 
 from pathfinder import jobs  # noqa: F401 - import side effect: registers start_job into tools.TOOLS
@@ -137,6 +139,16 @@ class CleanTest(unittest.TestCase):
                 self.assertEqual(tools_mod.oneline(text, n), " ".join(tools_mod.clean(text).split())[:n])
         self.assertEqual(tools_mod.clean("a\u200d\tb\r\n  c\x1b[1m\rd"), "a\tb\n  c d")
         self.assertEqual(tools_mod.clean("👩\u200d💻"), "👩💻")  # D62's reversal clause: the joiner goes
+
+    def test_read_file_returns_the_file_up_to_its_hard_cap(self):
+        """v2: no 8,000-char clip (the store keeps and renders the result); a hard cap still bounds a read."""
+        read = tools_mod.TOOLS["read_file"].handler
+        with tempfile.TemporaryDirectory() as tmp:
+            page, huge = Path(tmp) / "page.json", Path(tmp) / "huge.txt"
+            page.write_text("x" * 20000, encoding="utf-8")
+            huge.write_text("y" * (tools_mod.READ_CAP + 5), encoding="utf-8")
+            self.assertEqual(read(str(page)), "x" * 20000)
+            self.assertEqual(read(str(huge)), "y" * tools_mod.READ_CAP)
 
 
 if __name__ == "__main__":

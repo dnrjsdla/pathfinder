@@ -79,6 +79,21 @@ class ResultsTest(unittest.TestCase):
         self.assertLessEqual(len(results.render(wide)), results.RENDER_CAP)
         self.assertEqual(json.loads(results.render(wide))["summary"], {"type": "object"})
 
+    def test_tool_result_loses_bidi_zero_width_ansi_and_controls(self):
+        """D62, moved from the broker (U8a): a web page, a mail body or an MCP server's text reaches the model
+        through `render` cleaned, in a text summary and an object summary alike."""
+        hostile = "\x1b[31mred\x1b[0m ‮gnp.exe​\x07\x00 \x1b]8;;https://example.com\x07link\x1b]8;;\x07﻿"
+        for body in (hostile, {"k​": hostile, "note": hostile, "n": None}):
+            with self.subTest(body=type(body).__name__):
+                shown = json.dumps(json.loads(results.render(self._result(body))), ensure_ascii=False)
+                self.assertIn("red gnp.exe link", shown)
+                self.assertNotRegex(shown, "[\x1b‮​\x07\x00﻿]")
+
+    def test_error_text_passes_the_filter(self):
+        """D62, moved from the broker (U8a): a failed call's error goes inline, cleaned; newline and tab kept."""
+        event = self._result("\x1b[31mka‮boom​\x07\n\tat line 2", ok=False)
+        self.assertEqual(json.loads(results.render(event))["error"], "kaboom\n\tat line 2")
+
     def test_render_failed_result_inline_within_budget(self):
         event = self._result('boom "quoted"\n' * 500, ok=False)
         text = results.render(event)

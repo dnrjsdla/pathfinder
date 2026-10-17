@@ -1,10 +1,7 @@
-import tempfile
 import unittest
-from pathlib import Path
 
 from pathfinder import policy
 from pathfinder.broker import CHAT_APPROVAL, USER_DENIED_TEXT, Broker, Gate, chat_approval
-from pathfinder.ledger import Ledger
 from pathfinder.tools import ToolSpec
 
 
@@ -126,69 +123,17 @@ class BrokerTest(unittest.TestCase):
         result = b.call("c1", "boom_thing", {})
         self.assertEqual(result, {"ok": False, "error": "kaboom"})
 
-    def test_broker_clips_a_huge_result_before_returning_it(self):
-        """Should-fix 7: loop.py appends `json.dumps(result)` unclipped - the broker is the
-        one place every tool's result passes through, so it clips there."""
-        huge = _spec("huge_thing", handler=lambda control=None: {"text": "x" * 20000})
-        b, emitted = self._broker()
-        b.tools = {**TOOLS, "huge_thing": huge}
-        result = b.call("c1", "huge_thing", {})
-        self.assertTrue(result["ok"])
-        serialized = str(result["result"])
-        self.assertLess(len(serialized), 20000)
-        self.assertIn("omitted", serialized)
-        # the ledger's own ("tool_result") emit still carries the full, unclipped result -
-        # only what reaches the model (the return value) is bounded
-        self.assertEqual(len(emitted[1][1]["result"]["text"]), 20000)
-
     def test_broker_small_result_passes_through_unclipped(self):
         b, emitted = self._broker()
         result = b.call("c1", "read_thing", {})
         self.assertEqual(result, {"ok": True, "result": {"done": True}})
 
-    def _result_of(self, handler):
-        b, emitted = self._broker()
-        b.tools = {**TOOLS, "t": _spec("t", handler=handler)}
-        return b.call("c1", "t", {}), emitted
-
-    def test_tool_result_loses_bidi_zero_width_ansi_and_controls(self):
-        """D62: a web page, a mail body or an MCP server's text reached the model as it came."""
-        hostile = "\x1b[31mred\x1b[0m \u202egnp.exe\u200b\x07\x00 \x1b]8;;https://example.com\x07link\x1b]8;;\x07\ufeff"
-        result, _ = self._result_of(lambda control=None: hostile)
-        self.assertEqual(result, {"ok": True, "result": "red gnp.exe link"})
-        result, _ = self._result_of(lambda control=None: {"k\u200b": [hostile, (hostile, 1)], "n": None})
-        self.assertEqual(result["result"], {"k": ["red gnp.exe link", ["red gnp.exe link", 1]], "n": None})
-
-    def test_tool_result_keeps_newlines_tabs_and_spacing(self):
-        code = 'def f():\n\tif x:\n        return {"a":  1}\n\n# 한국어  주석 👍\n'
-        result, _ = self._result_of(lambda control=None: code)
-        self.assertEqual(result["result"], code)  # code and a page keep their shape
-        result, _ = self._result_of(lambda control=None: {"text": "a\r\nb\u00a0 c\u2028d\re\r\n"})
-        self.assertEqual(result["result"], {"text": "a\nb  c d e\n"})  # CRLF a newline; other whitespace one space
-
-    def test_error_text_passes_the_filter(self):
-        def boom(control=None):
-            raise RuntimeError("\x1b[31mka\u202eboom\u200b\x07\n\tat line 2")
-        result, _ = self._result_of(boom)
-        self.assertEqual(result, {"ok": False, "error": "kaboom\n\tat line 2"})
-
-    def test_ledger_keeps_the_raw_result(self):
-        """The filter is on the way to the model; the ledger holds what the tool returned."""
-        raw = {"text": "\x1b[31mred\x1b[0m\u202e\u200b\x07\r\n"}
-        with tempfile.TemporaryDirectory() as tmp:
-            led = Ledger(Path(tmp))
-            b = Broker({"t": _spec("t", handler=lambda control=None: raw)}, "user", {}, control=None,
-                       emit=lambda kind, payload: led.append(kind, origin="user", **payload))
-            self.assertEqual(b.call("c1", "t", {})["result"], {"text": "red\n"})  # what the model sees
-            [event] = [e for e in led.read() if e["type"] == "tool_result"]
-        self.assertEqual(event["result"], raw)
-
-    def test_raw_broker_returns_the_unclipped_unfiltered_result(self):
+    def test_broker_returns_the_unclipped_unfiltered_result(self):
         """The clone's path (U7): the store caps and the renderer filters, so the broker hands back the value."""
         raw = {"text": "\x1b[31mred\x1b[0m" + "x" * 20000}
         failing = _spec("f", handler=lambda control=None: (_ for _ in ()).throw(RuntimeError("\x07" + "y" * 9000)))
         b = Broker({"t": _spec("t", handler=lambda control=None: raw), "f": failing}, "user", {}, control=None,
-                   emit=lambda kind, payload: None, raw=True)
+                   emit=lambda kind, payload: None)
         self.assertEqual(b.call("c1", "t", {}), {"ok": True, "result": raw})
         self.assertEqual(b.call("c2", "f", {}), {"ok": False, "error": "\x07" + "y" * 9000})
 
@@ -198,11 +143,28 @@ WAY_OUT = " - if you meant something else, say it again · 다른 뜻이었다�
 
 class ChatApprovalTest(unittest.TestCase):
     class Open:
-        def __init__(self, rows):
-            self.rows = rows
+        def __init__(self, rows, gates=(), last=None):
+            self.rows, self.gates, self.last = rows, list(gates), last
 
         def open_approvals(self, session, max_age_s):
             return self.rows
+
+        def open_gates(self):
+            return self.gates
+
+        def last_user_seq(self, session):
+            return self.last
+
+    def test_chat_approval_lists_the_roots_open_gates_by_seq(self):
+        """V22: an undecided gate of this session newer than its last user message gets a line by its seq,
+        before the v1 rows; a decided one, another session's, or one talked past gets none."""
+        gate = {"seq": 40, "session": "s", "decision": None, "tool": "write_file"}
+        gates = [gate, {**gate, "seq": 41, "decision": "approved"}, {**gate, "seq": 42, "session": "t"},
+                 {**gate, "seq": 9}]
+        lines = chat_approval(self.Open([{"id": "a1", "tool": "edit_memory"}], gates, last=10), "s", "yes",
+                              7200).splitlines()
+        self.assertEqual([line.split(": /approve ")[1].split()[0] for line in lines], ["40", "a1"])
+        self.assertIsNone(chat_approval(self.Open([], [{**gate, "decision": "denied"}]), "s", "yes", 7200))
 
     def test_chat_approval_phrases(self):
         """D52 part 2: the whole message, normalized, is one of the closed phrases."""

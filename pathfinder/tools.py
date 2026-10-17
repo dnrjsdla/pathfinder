@@ -15,6 +15,7 @@ from . import clock
 from . import exec as _exec
 
 READ_CLIP = 8000
+READ_CAP = 1 << 20  # read_file's hard cap in characters; the store (results.cap) keeps 256 KB of it
 LEDGER_CLIP = 2000  # what a recorded tool_call/tool_result (a job's own copies too) keeps
 
 
@@ -122,8 +123,7 @@ def coerce(spec: ToolSpec, args: dict) -> tuple:
 
 
 def clip(text: str, limit: int = READ_CLIP) -> str:
-    """The one clip helper - `_read_file` uses it directly; `broker.call` reuses it to bound
-    every tool result the model ever sees, regardless of which tool produced it."""
+    """The one head+tail clip helper (read_skill, memory's reads)."""
     if len(text) <= limit:
         return text
     head = tail = limit // 2
@@ -206,7 +206,8 @@ def _read_file(path, control=None):
     p = Path(path)
     if _exec.is_secret(p):
         raise ValueError(f"refused: {path} is a secret path")
-    return clip(p.read_text(encoding="utf-8"))
+    with p.open(encoding="utf-8") as f:
+        return f.read(READ_CAP)
 
 
 def _write_file(path, content, control=None):

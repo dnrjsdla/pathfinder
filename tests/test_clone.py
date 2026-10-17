@@ -447,6 +447,42 @@ class CloneTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.events("summary")), 1)
         self.assertEqual(self.events("error")[-1]["status"], 402)
 
+    async def test_a_blank_stream_before_an_error_records_no_text_block(self):
+        """U8a review: what streamed is recorded, but a blank text block would be replayed in every later
+        request (Anthropic: a 400), so the step keeps its text and no block."""
+        async def blank(req, on_text, cancel):
+            on_text("  ")
+            error = LLMError(500, "the stream broke")
+            error.fallbacks = []
+            raise error
+
+        c = self.clone(blank)
+        self.assertEqual(await c.run(Item("user", "Hi.", "s1")), "error")
+        [said] = self.events("assistant")
+        self.assertEqual((said["text"], said["blocks"]), ("  ", []))
+
+    async def test_shutdown_mid_fold_records_no_summary(self):
+        """U8a review: the Anthropic adapter answers a cancel with stop_reason `interrupted`; mid-fold that is a
+        shutdown, so the fold re-raises instead of recording a half summary (and close() is not held up)."""
+        started = asyncio.Event()
+
+        async def folding(req, on_text, cancel):
+            started.set()
+            try:
+                await asyncio.sleep(5)
+            except asyncio.CancelledError:  # what llm.anthropic.complete does
+                return resp(text("half a summ"), stop="interrupted")
+
+        c = self.clone(resp(text("one")), resp(text("two")), folding)
+        with mock.patch.object(assemble, "HISTORY_BUDGET", 50), mock.patch.object(assemble, "FOLD_KEEP", 10):
+            await c.run(Item("user", "First.", "s1"))
+            task = asyncio.create_task(c.run(Item("user", "Second.", "s1")))
+            await started.wait()
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+        self.assertEqual(self.events("summary"), [])
+
     async def test_refused_or_empty_fold_is_a_failed_fold(self):
         c = self.clone(resp(text("one")), resp(text("two")), resp(stop="refusal"), resp(text("three")),
                        resp(text("  ")))

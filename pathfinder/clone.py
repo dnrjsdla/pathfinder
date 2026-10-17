@@ -97,7 +97,7 @@ class Clone:
     def steer(self, session: str, text: str) -> None:
         """A say while a turn runs: recorded as `user {steer: true}` right before the next request of an item of
         `session` is assembled, so seq order is the order the model saw; one of the running item's session left
-        at its turn's end becomes a `continue` item. Another session's say waits for that session's next item."""
+        at its turn's end becomes a `continue` item. The daemon steers only a say of the running item's session."""
         self._steers.append((session, text))
 
     def _take(self, session) -> list[str]:
@@ -161,7 +161,7 @@ class Clone:
                 parts = []
             start = self.record("turn_start", **ev, item=item.kind, resident=assemble.resident(parts))["seq"]
             self.send(item.session, {"type": "turn.start", "turn": turn})
-            kind = await self._turn(item, ev, start, event)
+            kind = await self._turn(item, ev, start, event, {g["result"] for g in gates} - {None})
         finally:
             self._task = None
             self._events.discard(event)
@@ -173,12 +173,14 @@ class Clone:
         await self._fold(item.session)
         return kind
 
-    async def _turn(self, item, ev, start, event) -> str:
+    async def _turn(self, item, ev, start, event, reported) -> str:
+        """`reported`: the results a report turn's opening message names, seen by the model even when the
+        turn they were recorded under is out of the window (a refused turn)."""
         cfg = config.load(self.home)
         registry = tools.for_origin(item.origin)
         specs = [spec.schema()["function"] for spec in registry.values()]
-        broker = Broker(registry, item.origin, cfg["grants"], control=SimpleNamespace(interrupt=event), emit=_drop,
-                        raw=True)
+        broker = Broker(registry, item.origin, cfg["grants"],  # `session`: start_job's report, edit_memory's evidence
+                        control=SimpleNamespace(interrupt=event, session=item.session), emit=_drop)
         end = ""  # set once the turn must end: the next step is its last, and its calls do not run
         while True:
             steps, tokens, _ = _spent(self._rows(item.session, ev["turn"], start))
@@ -204,13 +206,18 @@ class Clone:
                 resp = None
             except LLMError as e:
                 self._errors(ev, step, _failed(e))
+                if streamed:  # §11 invariant 2: what reached the screen is in the ledger, whatever the ending
+                    said = "".join(streamed)
+                    blocks = [{"type": "text", "text": said}] if said.strip() else []  # a blank text block: 400
+                    self.record("assistant", **ev, step=step, model="", blocks=blocks, stop_reason="error", usage={},
+                                text=said, final=True)
                 self.send(item.session, {"type": "error", "message": e.message[:300]})
                 return "error"
             if resp is None or resp.stop_reason == "interrupted":
                 if not self._flag and asyncio.current_task().cancelling():
                     raise asyncio.CancelledError  # a shutdown: the adapter returned, the daemon is going
-                blocks = [b for b in resp.blocks if b["type"] == "text" and b.get("text")] if resp else (
-                    [{"type": "text", "text": "".join(streamed)}] if streamed else [])
+                blocks = [b for b in resp.blocks if b["type"] == "text" and b.get("text", "").strip()] if resp else (
+                    [{"type": "text", "text": "".join(streamed)}] if "".join(streamed).strip() else [])
                 if blocks:  # only complete text blocks: no unsigned thinking, no half tool_use
                     self.record("assistant", **ev, step=step, model=resp.model if resp else "", blocks=blocks,
                                 stop_reason="interrupted", usage=resp.usage if resp else {}, text="".join(streamed),
@@ -218,9 +225,11 @@ class Clone:
                 return self._interrupted(ev, step)
             self._errors(ev, step, resp.fallbacks)
             calls = [b for b in resp.blocks if b["type"] == "tool_use"]
+            said = "".join(b["text"] for b in resp.blocks if b["type"] == "text")
             self.record("assistant", **ev, step=step, model=resp.model, blocks=resp.blocks,
                         stop_reason=resp.stop_reason, usage=resp.usage,
-                        text="".join(b["text"] for b in resp.blocks if b["type"] == "text"),
+                        # a fallback after a partial stream: the screen got both attempts, so `text` holds both
+                        text="".join(streamed) if resp.fallbacks and streamed else said,
                         final=bool(end) or resp.stop_reason != "tool_use")
             if resp.stop_reason == "refusal":
                 self.send(item.session, {"type": "error", "message": REFUSED_LINE})
@@ -234,7 +243,7 @@ class Clone:
                 return why
             if not calls:
                 return end or "answer"
-            if await self._batch(item, ev, step, calls, broker) == "interrupted":
+            if await self._batch(item, ev, step, calls, broker, reported) == "interrupted":
                 return self._interrupted(ev, step)
             if tool := _failing(self._rows(item.session, ev["turn"], start)):
                 end = "error"
@@ -246,7 +255,7 @@ class Clone:
             asyncio.current_task().uncancel()  # our own cancel, handled: the lane goes on
         return "interrupted"
 
-    async def _batch(self, item, ev, step, calls, broker) -> str:
+    async def _batch(self, item, ev, step, calls, broker, reported) -> str:
         """The step's calls in order. A deny or a second error in a row skips the rest; a gate hands its call off.
         Returns "interrupted" when interrupt() stopped a running call (it and the later ones are recorded)."""
         errors, skip = 0, False
@@ -257,8 +266,8 @@ class Clone:
                 continue
             denied = False
             if name == results.READ_RESULT["name"]:
-                ok, body = results.read(self.db, assemble.window_handles(self.db, self._view(item.session)),
-                                        call["input"])
+                seen = assemble.window_handles(self.db, self._view(item.session)) | reported
+                ok, body = results.read(self.db, seen, call["input"])
             else:
                 try:
                     out = await asyncio.to_thread(broker.call, call_id, name, call["input"])
@@ -297,6 +306,8 @@ class Clone:
         except LLMError as e:
             self._errors(ev, 0, _failed(e))
             return
+        if resp.stop_reason == "interrupted" and asyncio.current_task().cancelling():
+            raise asyncio.CancelledError  # a shutdown mid-fold: the adapter returned, no half summary
         self._errors(ev, 0, resp.fallbacks)
         text = "".join(b["text"] for b in resp.blocks if b["type"] == "text")
         if resp.stop_reason == "refusal" or not text.strip():  # a failed fold: the window stays as it is
@@ -335,10 +346,12 @@ class Clone:
         event = threading.Event()
         self._events.add(event)
         broker = Broker(tools.for_origin("user"), "user", config.load(self.home)["grants"],
-                        control=SimpleNamespace(interrupt=event), emit=_drop,
-                        approved={gate["call_id"]: (gate["tool"], gate["args"])}, raw=True)
+                        control=SimpleNamespace(interrupt=event, session=gate["session"]), emit=_drop,
+                        approved={gate["call_id"]: (gate["tool"], gate["args"])})
         try:
             out = await asyncio.to_thread(broker.call, gate["call_id"], gate["tool"], gate["args"])
+        except Exception as e:  # past the handler's own catch (coerce, normalize): the gate still gets an outcome
+            out = {"ok": False, "error": f"{type(e).__name__}: {e}"}
         finally:
             self._events.discard(event)
         ok = bool(out["ok"]) and not event.is_set()

@@ -44,7 +44,7 @@ stop()  { kill "${1:--TERM}" "$(cat /tmp/pf1/check/pid)"; while kill -0 "$(cat /
 3. `stop; rm -f /tmp/pf1/state.db*; start && $PF approvals` → the same gate, rebuilt from the ledger. `$PF approve
    "$($PF approvals | awk 'NR==1{print $1}')"` → the call runs and the root reports it (printed until that turn's
    `turn.end`). `$CHK restart ...`: `resume {approved}`, `result {gate: N}` `ok: true`, `answer.txt` = the id, then
-   `user {origin: system, gate: N}`, `turn_start`, an `assistant`, `turn_end answer`; no `interrupted`, no HTTP 400; it
+   `user {origin: system, gate: [N]}`, `turn_start`, an `assistant`, `turn_end answer`; no `interrupted`, no HTTP 400; it
    prints `thinking blocks before the restart: k` — k = 0 means the post-restart strip is untested, not passed.
 4. `$PF say "Run the shell command: sleep 30" & until grep -q '"name": "run_command"' /tmp/pf1/events/*.jsonl;
    do sleep 0.2; done; stop -9; start && $CHK interrupted /tmp/pf1`: `interrupted {why: restart}` and `turn_end
@@ -126,7 +126,7 @@ untouched until policy is rewritten (P2).
 |---|---|---|
 | `assistant` (extended) | clone (1), one per model step | `clone, step, model, blocks, stop_reason, usage, text, final` |
 | `result` | clone (1), one per run call | `clone, step, call_id, tool, ok, body` (raw, ≤ cap; trust third_party), `cut` when capped, `gate` for a handed-off call |
-| `user` (extended) | daemon (a say), clone (report item, budget note) | `clone`, `steer` (a say during a running turn), `gate` (a report item) |
+| `user` (extended) | daemon (a say), clone (report item, budget note) | `clone`, `steer` (a say during a running turn), `gate` (a report turn: the list of gate seqs it reports) |
 | `gate` | clone (1), instead of a `result` | `clone, step, call_id, tool, args, effect, brief` |
 | `resume` | clone (1) | `clone, gate` (its seq), `decision` (`approved|denied`), `by` (`socket|chat`) |
 | `interrupted` (extended) | clone (1) | `clone, step, why` (`user|restart`) |
@@ -172,7 +172,7 @@ CREATE TABLE IF NOT EXISTS context (seq INTEGER PRIMARY KEY, clone TEXT, session
 CREATE INDEX IF NOT EXISTS context_by_clone ON context (clone, session, seq);
 -- approvals gains `seq INTEGER` (ALTER TABLE, the existing pattern)
 ```
-Projection: `turn_start` → clone `running`; `gate` → `gates` row (no root state change); `resume` → decision; `user {gate}` → `reported`;
+Projection: `turn_start` → clone `running`; `gate` → `gates` row (no root state change); `resume` → decision; `user {gate: [...]}` → `reported` on each listed gate;
 `turn_end`/`interrupted` → `parked`; `spawn` → insert. v1's session-keyed `summaries` table goes in U10a with
 `session_summary`. `messages` keeps feeding `session_messages` (screens) from `final` assistant text.
 
@@ -249,7 +249,7 @@ restart never resets them; a hand-off report is a new item with its own budget. 
 | `Broker.call` raises `Gate` | `gate {clone, step, call_id, tool, args, effect, brief}`; no `result` | that `tool_use`'s `tool_result` = `{"status": "waiting for approval", "gate": N}`, rendered from the `gate` event (no body, no handle); the turn goes on and ends as any turn |
 | `approve N` (socket, or chat approval) | `resume {gate: N, decision: approved, by}`; the call runs in a thread through `Broker(approved={call_id: (tool, args)})` (coerce, normalize; policy satisfied for that exact call only); `result {clone, gate: N, call_id, tool, ok, body}` = r:M | — |
 | `deny N` | `resume {gate: N, decision: denied, by}` | — |
-| the report item | `user {clone: root, origin: system, trust: self, gate: N, text}`, then `turn_start` … as any item | opening user message: `gate N (write_file) approved → ` + `results.render(r:M)`, or `… approved → failed: <error ≤ 2,000>`, or `gate N (write_file) denied by the user` |
+| the report item | `user {clone: root, origin: system, trust: self, gate: [N, …], text}`, then `turn_start` … as any item | opening user message: `gate N (write_file) approved → ` + `results.render(r:M)`, or `… approved → failed: <error ≤ 2,000>`, or `gate N (write_file) denied by the user` |
 
 A `result` with `gate` is never rendered as a `tool_result` (its `tool_use` was answered by the status); it reaches the
 model through the report and `read_result` (r:M is in the window, so in the seen set). `decide` enqueues
@@ -259,6 +259,10 @@ open gates open — it stops what runs now, and a gate is a decision the user ha
 it does kill a handed-off call already running after approval: `result {gate: N}` "outcome unknown: interrupted by the
 user while it ran". Children (P3) keep V7's waiting in place, so M2's in-place resume path is deferred to them; in P3 a
 detached call is simply a child clone.
+
+Reports are merged: when the root takes a gate report item it drains every other queued report item of the same session
+into the same turn — one opening user message with one line per gate in gate order (`gate N (tool) approved → r:M …` /
+`denied` / `failed`), one `user {gate: [N, …]}` event, one turn, one budget. A new user `say` is never merged with reports.
 
 **What the model sees** (§7-1; chars of rendered text, thinking excluded):
 
@@ -459,8 +463,8 @@ U8a switches; U9–U10b delete. After each: tests green, `scan_personal.py --all
 | U3 | Neutral types, openai_compat + V21 | `llm/__init__.py`, `llm/openai_compat.py` (+ test_llm) | +~110 | — | U1, U2 | `Request`/`Response`; `to_wire` stable; the rename spec; `complete` on canned SSE; v1 `stream` kept until U9 | 30 |
 | U4 | Anthropic on the SDK | `llm/anthropic.py`, `pyproject.toml` (+ test_llm_anthropic) | ~190 | U3 | U1, U2 | fake-client tests: blocks verbatim, 3 breakpoints, resident placement + fallback constant, thinking drop on model change, refusal | 30 |
 | U5 | Router and config | `router.py`, `config.py` (+ test_router, test_config) | ~170 + ~25 | U4 | U6 | `test_fallback_chain`, semaphores, override check, `models` and `effort` validated | 25 |
-| U6 | The assembler and fold | `assemble.py`, `prompts/root.txt`, `prompts/fold.txt` (+ test_assemble) | ~330 | U1, U2, U4 | U5 | five pieces in budget, seen set, epoch strip, refused turns out, fold point/request/handle lines; its three invariant tests | 35 |
-| U7 | The clone | `clone.py` (+ test_clone) | ~380 | U5, U6 | — | the turn table and the hand-off with a fake router and broker: waiting status, `decide` runs the detached call once, the report item, interrupts, budgets, partial steps, steer, refusal, fold, restore (re-list, re-enqueue, outcome unknown); its three invariant tests | 35 |
+| U6 | The assembler and fold | `assemble.py`, `prompts/root.txt`, `prompts/fold.txt` (+ test_assemble) | ~330 | U1, U2, U4 | U5 | five pieces in budget, seen set, epoch strip, refused turns out, fold point/request/handle lines; its three invariant tests; `prompts/root.txt` teaches the waiting status — a handed-off call is "requested, not done", never reported as done until its report item arrives | 35 |
+| U7 | The clone | `clone.py` (+ test_clone) | ~380 | U5, U6 | — | the turn table and the hand-off with a fake router and broker: waiting status, `decide` runs the detached call once, the report item (queued reports of one session merged into one turn, never with a say), interrupts, budgets, partial steps, steer, refusal, fold, restore (re-list, re-enqueue, outcome unknown); its three invariant tests | 35 |
 | U8a | The switch | `daemon.py`, `broker.py` (raw result), `tools.py` (`read_file` clip → store, 1 MB cap) (+ test_daemon, test_broker, test_tools) | daemon −250/+80 | U7 | — | rewritten daemon tests pass; approve by seq; the lane survives all-blocked (the memory pass sees unclipped results until U9) | 35 |
 | U8b | The CLI and the live check | `__main__.py` (`approvals` by seq; `approve` prints the report turn), `bench/v2/p1_runs.py` | ~+30, ~120 | U8a | R1, R2 (writing) | **the live check passes**, recorded for the lead | 25 |
 | U9 | Delete the old turn engine | deletes `loop.py`, `jobs.py`, `llm/slot.py`, `senses/jobs.py`, old prompts; edits `memory.py` (pass, summarize), `rules.py` (judge stub), `daemon.py` (memory_mgr without a pass factory) (+ retired tests) | −~1,000 | U8b | — | nothing imports the deleted modules; suite green; retired tests listed | 30 |

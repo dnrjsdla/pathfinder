@@ -29,8 +29,8 @@ def parse_sse(lines):
 
 
 def _assemble(chunks, cancel=None):
-    """Turn parsed SSE chunks into the (kind, payload) tuples `stream`
-    yields. Split out from the network call so tool-call assembly can be
+    """Turn parsed SSE chunks into the (kind, payload) tuples `_run`
+    reads. Split out from the network call so tool-call assembly can be
     tested against canned chunks, no server needed.
 
     `cancel` is checked between chunks (not mid-chunk): when set, stop and
@@ -105,14 +105,6 @@ def _post(endpoint, body, timeout=120):
         # (the timeout is per read, not total), a reset, an incomplete read. They must all be
         # LLMError, or a stalled model surfaces as "internal error" instead of a blocked model.
         raise LLMError(0, f"{type(e).__name__}: {e}"[:300])
-
-
-def stream(endpoint, messages, tools=None, cancel=None, timeout=120):
-    body = {"model": endpoint.model, "messages": messages, "stream": True,
-            "stream_options": {"include_usage": True}}
-    if tools:
-        body["tools"] = tools
-    yield from _assemble(_post(endpoint, body, timeout), cancel=cancel)
 
 
 def to_wire(req, endpoint):

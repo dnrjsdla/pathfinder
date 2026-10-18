@@ -198,25 +198,6 @@ def decide(signal, rules: Rules, user_lists: dict, today, now: float) -> tuple:
     return "ask_model", "no rule matched"
 
 
-_JUDGE_SYSTEM = ('You decide whether a resident assistant should interrupt its user now. Answer only '
-                'JSON: {"speak": true|false, "reason": "..."}')
-
 def judge(signal, cfg: dict) -> tuple:
-    """D13: one request, no tools, no history, strict JSON - the only llm import here (see test_invariants)."""
-    from . import signals as _signals
-    from .llm import LLMError, resolve, stream
-    try:
-        endpoint = resolve(cfg, cfg.get("worker_model") or cfg.get("model") or "")
-        messages = [{"role": "system", "content": _JUDGE_SYSTEM},
-                    {"role": "user", "content": _signals.render_envelope([signal])}]
-        text = "".join(p for k, p in stream(endpoint, messages, tools=None) if k == "text")
-    except LLMError:
-        return False, "model unavailable"
-    text = text.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
-    try:
-        data = json.loads(text)
-    except (TypeError, ValueError):
-        return False, "unparseable"
-    if not (isinstance(data, dict) and isinstance(data.get("speak"), bool) and isinstance(data.get("reason"), str)):
-        return False, "unparseable"
-    return data["speak"], data["reason"]
+    """D13's model triage, stubbed until partition 5 (v2 partition 1, Q2 = a): an ask_model signal is silenced."""
+    return False, "model triage returns in partition 5"

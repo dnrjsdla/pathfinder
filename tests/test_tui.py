@@ -469,8 +469,7 @@ class TuiCase(unittest.TestCase):
         """D51: the withdrawal is one dim harness line on the screen and on `say`'s stderr; the
         verifier's own `why` is never shown."""
         from pathfinder import __main__ as cli
-        from pathfinder.loop import FLAG_WORDS
-        msg = {"type": "retract", "what": FLAG_WORDS["unsupported_state"], "why": "MODEL-WHY"}
+        msg = {"type": "retract", "what": "says what the calendar, reminders, memory or registry hold", "why": "MODEL-WHY"}
         line = ("철회 · withdrawn: the answer above says what the calendar, reminders, memory or registry "
                 "hold without calling a tool - trying again with the tools")
         self.assertEqual(tui.render(msg), tui.NOTICE_DIM + line + tui.RESET)

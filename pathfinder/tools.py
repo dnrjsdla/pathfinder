@@ -16,7 +16,7 @@ from . import exec as _exec
 
 READ_CLIP = 8000
 READ_CAP = 1 << 20  # read_file's hard cap in characters; the store (results.cap) keeps 256 KB of it
-LEDGER_CLIP = 2000  # what a recorded tool_call/tool_result (a job's own copies too) keeps
+LEDGER_CLIP = 2000  # what a recorded tool_call/tool_result keeps
 
 
 @dataclass(frozen=True)
@@ -51,10 +51,10 @@ class ToolSpec:
 
 
 def for_origin(origin: str) -> dict:
-    """The registry a turn of this origin may call - `start_job` declares `origins={"user"}`, so
-    a job's own registry (origin "job") and a signal turn's (origin "signal") never contain it:
-    "a worker cannot make a worker" and "a mail cannot start a job" are structure, not policy."""
-    # list(): an MCP reload mutates TOOLS on the loop thread while a job or a pass iterates here
+    """The registry a turn of this origin may call: only the specs whose `origins` name it - a tool
+    declared `origins={"user"}` never reaches a signal turn's registry (origin "signal"), which is
+    structure, not policy."""
+    # list(): an MCP reload mutates TOOLS on the loop thread while a tool thread iterates here
     return {name: spec for name, spec in list(TOOLS.items()) if origin in spec.origins}
 
 

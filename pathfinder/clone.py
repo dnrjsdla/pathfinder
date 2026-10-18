@@ -179,7 +179,7 @@ class Clone:
         cfg = config.load(self.home)
         registry = tools.for_origin(item.origin)
         specs = [spec.schema()["function"] for spec in registry.values()]
-        broker = Broker(registry, item.origin, cfg["grants"],  # `session`: start_job's report, edit_memory's evidence
+        broker = Broker(registry, item.origin, cfg["grants"],  # `session`: edit_memory's evidence
                         control=SimpleNamespace(interrupt=event, session=item.session), emit=_drop)
         end = ""  # set once the turn must end: the next step is its last, and its calls do not run
         while True:

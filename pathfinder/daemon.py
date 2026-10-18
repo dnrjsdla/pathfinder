@@ -17,7 +17,7 @@ import time
 import uuid
 from pathlib import Path
 
-from . import clock, config, jobs, keychain, memory, rules as rules_mod, signals, skills, tools
+from . import clock, config, keychain, memory, rules as rules_mod, signals, skills, tools
 from .broker import chat_approval
 from .clone import Clone, Item
 from .deliver import Notice, Outbox
@@ -28,7 +28,6 @@ from .router import Router
 from .state import State
 
 SOCKET = "pathfinder.sock"
-PROMPT = Path(__file__).parent / "prompts" / "system.txt"  # v1's prompt: only bench/m10 reads it (goes in U9)
 LINE_LIMIT = 1 << 20  # one NDJSON line; asyncio's 64 KiB default is too small for a pasted file
 ROOT = "root"  # the root clone's id and preset
 
@@ -68,13 +67,11 @@ class Session:
 
 
 class Daemon:
-    def __init__(self, home, router=None, job_step_factory=None, pass_step_factory=None):
+    def __init__(self, home, router=None):
         self.home = Path(home)
         self.ledger = Ledger(self.home)
         self.state = State(self.home / "state.db")
         self.state.catch_up(self.ledger)  # a deleted or stale DB heals itself here
-        self.job_step_factory = job_step_factory or jobs.default_job_step_factory
-        self.pass_step_factory = pass_step_factory or memory.default_pass_step_factory
         self.sessions = {}
         self.writers = set()  # every open connection, attached or not: close() closes them all
         self.server = None
@@ -99,12 +96,8 @@ class Daemon:
         self.outbox.rebuild()
         self.sense_loop = signals.SenseLoop(list(self.senses.values()), push=self.push_signal,
                                             on_error=self._sense_error)
-        self.jobs_mgr = jobs.Manager(self.home, self.record, self.push_signal, self.job_step_factory, self.rules,
-                                     send=self._send_all, job_state=self.state.job)
-        jobs.bind(self.jobs_mgr)
-        self.memory_mgr = memory.Manager(self.home, self.record, self.push_signal, self.pass_step_factory,
-                                         self.rules, list(self.senses.values()), is_busy=self._is_busy)
-        # `Manager.apply` runs on a worker thread (the pass thread or a tool's thread);
+        self.memory_mgr = memory.Manager(self.home, self.record, list(self.senses.values()))
+        # `Manager.apply` runs on a worker thread (a tool's thread);
         # `record` is loop-thread-only, so marshal through `dispatch` like every other callback.
         self.memory_mgr.on_rules_changed = lambda: self.memory_mgr.dispatch(self.reload_rules)
         memory.bind(self.memory_mgr)
@@ -113,12 +106,6 @@ class Daemon:
         # keyed by tool.
         self.PROPOSALS = {"edit_memory": self.memory_mgr.decide, "accept_pins": self.mcp.accept_pins,
                           "install_server": self.installer.decide}
-
-    def _is_busy(self) -> bool:
-        """The memory trigger's own gate: the root running a turn, or a job holding the slot.
-        `running` only - a job waiting days at a gate holds nothing. Called from the trigger's
-        own thread."""
-        return self.root.state == "running" or any(j.state == "running" for j in self.jobs_mgr.jobs.values())
 
     def reload_rules(self) -> None:
         """Re-parses RULES.md and rebinds it everywhere it's held. Called after an approved
@@ -134,8 +121,6 @@ class Daemon:
             return
         self.rules = rules
         self.outbox.rules = rules
-        self.jobs_mgr.rules = rules
-        self.memory_mgr.rules = rules
 
     # -- recording: ledger first, then the same event into the state. Loop thread only:
     #    the SQLite connection belongs to it, and tools run in worker threads.
@@ -162,21 +147,19 @@ class Daemon:
 
     # -- socket ------------------------------------------------------------------------
     async def start(self):
-        # From here, jobs.Manager marshals record()/push() onto this loop thread - state.apply
-        # and a socket write are this thread's alone, and a job calls from a worker thread.
+        # From here, a worker thread's record()/push() is marshalled onto this loop thread - state.apply
+        # and a socket write are this thread's alone.
         aio = asyncio.get_running_loop()
 
         def dispatch(fn):
             try:
                 aio.call_soon_threadsafe(fn)
             except RuntimeError:
-                pass  # loop already closed: a job's late call has nothing left to report to
-        self.jobs_mgr.dispatch = dispatch
+                pass  # loop already closed: a late call has nothing left to report to
         self.memory_mgr.dispatch = dispatch
         self.mcp.dispatch = dispatch
         self.installer.dispatch = dispatch
         self.dispatch = dispatch
-        self.jobs_mgr.sweep()  # a job the last daemon died under is closed and announced here
         path = self.home / SOCKET
         if path.exists():
             if _answers(path):
@@ -201,7 +184,6 @@ class Daemon:
     async def serve(self):
         await self.start()
         self.sense_loop.start()
-        self.memory_mgr.start()
         self.outbox.release()  # flush anything a previous crash left pending, now that we can
         loop = asyncio.get_running_loop()
         # launchd's `service stop` sends SIGTERM: the same shutdown Ctrl-C runs below (`close()`:
@@ -217,8 +199,7 @@ class Daemon:
             await self.close()
 
     async def close(self):
-        self.jobs_mgr.dispatch = lambda fn: None  # drop a job's late calls, not race a closing state
-        self.memory_mgr.dispatch = lambda fn: None
+        self.memory_mgr.dispatch = lambda fn: None  # drop late calls, not race a closing state
         self.mcp.dispatch = lambda fn: None
         self.installer.close()  # no late record; a re-proposal in flight is cancelled, not awaited
         self.dispatch = lambda fn: None
@@ -236,8 +217,6 @@ class Daemon:
             self.server.close()
             await self.server.wait_closed()
         (self.home / SOCKET).unlink(missing_ok=True)
-        self.jobs_mgr.close()
-        self.memory_mgr.stop()
         self.memory_mgr.close()
         self.mcp.close()
         self.state.close()
@@ -264,7 +243,7 @@ class Daemon:
         if s is not None:
             self.send(s, msg)
 
-    def _send_all(self, msg) -> None:  # every screen: D41 may have moved one away from the job's session
+    def _send_all(self, msg) -> None:  # every screen, whichever session D41 left it attached to
         for s in list(self.sessions.values()):
             self.send(s, msg)
 
@@ -325,12 +304,6 @@ class Daemon:
                             target.conns.add(writer)
                             session = target
                         continue
-                    if row.get("job"):  # a job's own thread (D24), not a session turn
-                        self.record("approval", session=row["session"], turn=row["turn"], origin="user",
-                                    id=row["id"], decision=decision, job=row["job"])
-                        self.jobs_mgr.resume(row["id"], decision)
-                        _write(writer, {"type": "turn.end", "turn": "", "kind": "resumed"})
-                        continue
                     # A queued proposal (empty `messages` - Manager.edit's and Attach.register's
                     # shape) routes by tool through PROPOSALS; a v1 turn's gate has no turn to resume.
                     if row["tool"] not in self.PROPOSALS or row["messages"]:
@@ -342,21 +315,6 @@ class Daemon:
                     if inspect.isawaitable(result):  # an async handler (mcp.accept_pins) blocks nothing
                         await result
                     _write(writer, {"type": "turn.end", "turn": "", "kind": "resumed"})
-                elif kind == "job.stop":
-                    id = msg.get("id")
-                    if not isinstance(id, str) or not id:
-                        _write(writer, {"type": "error", "message": "job.stop needs an \"id\""})
-                        continue
-                    self.jobs_mgr.stop(id)
-                elif kind == "job.steer":
-                    id, text = msg.get("id"), msg.get("text")
-                    if not isinstance(id, str) or not id or not isinstance(text, str) or not text.strip():
-                        _write(writer, {"type": "error", "message": "job.steer needs an \"id\" and non-empty \"text\""})
-                        continue
-                    self.jobs_mgr.steer(id, text)
-                elif kind == "memory.run":
-                    result = await asyncio.to_thread(self.memory_mgr.run_pass, True)
-                    _write(writer, {"type": "memory.run", "result": result})
                 elif kind in ("install", "uninstall"):
                     _write(writer, await self.installer.handle(msg))
                 elif kind == "secret":  # D53: stored, never recorded
@@ -499,8 +457,8 @@ class Daemon:
 
     # -- signals (D20) -------------------------------------------------------------------
     def push_signal(self, signal) -> None:
-        """The push door: a hook client's `signal`, a poll sense's SenseLoop, and `jobs.Manager`
-        (direct, never the socket) all land here. `state.seen` is checked against disk *before*
+        """The push door: a hook client's `signal` and a poll sense's SenseLoop
+        both land here. `state.seen` is checked against disk *before*
         this call, so only a repeat of the same key within 24 h is silenced."""
         now = time.time()
         dup = signals.seen_recently(self.state, signal.key, now)

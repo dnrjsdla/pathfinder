@@ -1,4 +1,4 @@
-"""No network for the pure-parsing tests. `stream` is exercised against a
+"""No network for the pure-parsing tests. `complete` is exercised against a
 tiny local http.server bound to 127.0.0.1 on an OS-assigned port, running in
 a background thread - loopback inside this test process, not an external
 request."""
@@ -14,8 +14,7 @@ from pathlib import Path
 from unittest import mock
 
 from pathfinder.llm import Endpoint, LLMError, Request, Response, resolve
-from pathfinder.llm import stream as llm_stream
-from pathfinder.llm.openai_compat import complete, parse_sse, stream, to_wire, _assemble
+from pathfinder.llm.openai_compat import complete, parse_sse, to_wire, _assemble
 from pathfinder.llm.rename import rename_args_out, rename_in, rename_out
 
 NOTION = Path(__file__).resolve().parent.parent / "bench" / "v2" / "fixtures" / "notion_tools.json"
@@ -110,12 +109,6 @@ class TestResolve(unittest.TestCase):
         with self.assertRaises(LLMError):
             resolve(cfg, "p:m")
 
-    def test_v1_stream_refuses_api_anthropic(self):
-        endpoint = Endpoint(base_url="http://x", api_key="", model="m", api="anthropic")
-        with self.assertRaises(LLMError) as caught:
-            list(llm_stream(endpoint, [{"role": "user", "content": "hi"}]))
-        self.assertEqual(caught.exception.status, 0)
-
     def test_resolve_carries_effort(self):
         cfg = {"providers": {"p": {"base_url": "http://x", "api_key_env": "FAKE_PF_KEY", "api": "anthropic",
                                    "effort": "xhigh"}, "q": {"base_url": "http://y", "api_key_env": ""}}}
@@ -155,47 +148,6 @@ class TestResolveKeychain(unittest.TestCase):
         self.assertEqual(calls[0][:6], ["security", "find-generic-password", "-s", "pathfinder-p", "-a", "api"])
 
 
-class TestStream(unittest.TestCase):
-    def test_stream_end_to_end(self):
-        body = (
-            b'data: {"choices":[{"delta":{"content":"Hello"}}]}\n\n'
-            b'data: {"choices":[{"delta":{"content":" world"}}]}\n\n'
-            b'data: {"choices":[],"usage":{"prompt_tokens":5,"completion_tokens":2}}\n\n'
-            b'data: [DONE]\n\n'
-        )
-        with _server(body) as base_url:
-            endpoint = Endpoint(base_url=base_url, api_key="", model="fake-test-model")
-            events = list(stream(endpoint, [{"role": "user", "content": "hi"}]))
-        self.assertEqual(events[0], ("text", "Hello"))
-        self.assertEqual(events[1], ("text", " world"))
-        self.assertEqual(events[-1], ("usage", {"prompt_tokens": 5, "completion_tokens": 2}))
-
-    def test_stream_blocked_on_402(self):
-        err_body = json.dumps({"error": {"message": "insufficient credit"}}).encode("utf-8")
-        with _server(err_body, status=402, content_type="application/json") as base_url:
-            endpoint = Endpoint(base_url=base_url, api_key="", model="fake-test-model")
-            with self.assertRaises(LLMError) as cm:
-                list(stream(endpoint, [{"role": "user", "content": "hi"}]))
-        self.assertEqual(cm.exception.status, 402)
-        self.assertTrue(cm.exception.blocked)
-
-    def test_stream_cancelled(self):
-        body = (
-            b'data: {"choices":[{"delta":{"content":"Hello"}}]}\n\n'
-            b'data: {"choices":[{"delta":{"content":" world"}}]}\n\n'
-            b'data: [DONE]\n\n'
-        )
-        with _server(body) as base_url:
-            endpoint = Endpoint(base_url=base_url, api_key="", model="fake-test-model")
-            cancel = threading.Event()
-            gen = stream(endpoint, [{"role": "user", "content": "hi"}], cancel=cancel)
-            self.assertEqual(next(gen), ("text", "Hello"))
-            cancel.set()
-            self.assertEqual(next(gen), ("cancelled", None))
-            with self.assertRaises(StopIteration):
-                next(gen)
-
-
 class TestStreamFailuresAreLLMErrors(unittest.TestCase):
     def test_mid_stream_failures_become_llm_errors(self):
         """A read timeout, a reset and an incomplete read are not URLError. If they escape as
@@ -206,7 +158,7 @@ class TestStreamFailuresAreLLMErrors(unittest.TestCase):
         for boom in (TimeoutError("timed out"), ConnectionResetError("reset"), http.client.IncompleteRead(b"")):
             with mock.patch("urllib.request.urlopen", side_effect=boom):
                 with self.assertRaises(LLMError) as caught:
-                    list(stream(endpoint, [{"role": "user", "content": "hi"}]))
+                    asyncio.run(complete(endpoint, Request("root", "S")))
             self.assertEqual(caught.exception.status, 0)
 
 

@@ -2,7 +2,6 @@ import unittest
 from unittest import mock
 
 from pathfinder import rules
-from pathfinder.llm import LLMError
 from pathfinder.signals import Signal
 
 
@@ -82,7 +81,7 @@ class NoRowTest(unittest.TestCase):
             home = Path(tmp)
             stale = "---\nquiet_hours: 23-8\n---\n\n# RULES\n\n## command_failed\n\n| condition | value | action | note |\n| --- | --- | --- | --- |\n| `always` | `-` | `speak` | |\n"
             (home / "RULES.md").write_text(stale, encoding="utf-8")
-            loaded = rules.load(home, load_senses({"senses": {"jobs": {}}}, home))
+            loaded = rules.load(home, load_senses({"senses": {}}, home))
             self.assertEqual([(r[0], r[2]) for r in loaded.by_kind["job_done"]], [("always", "speak")])
             self.assertEqual((home / "RULES.md").read_text(encoding="utf-8"), stale)
 
@@ -126,50 +125,6 @@ class ResolveAndJudgeTest(unittest.TestCase):
         self.assertIsNone(rules.resolve("-", {}))
         self.assertEqual(rules.resolve("true", {}), True)
         self.assertEqual(rules.resolve("3", {}), 3)
-
-
-class JudgeTest(unittest.TestCase):
-    """D13's model call - one request, no tools, no history, strict JSON."""
-
-    CFG = {"model": "p:m", "providers": {"p": {"base_url": "http://x", "api_key_env": ""}}}
-
-    def test_judge_strict_json(self):
-        with mock.patch("pathfinder.llm.openai_compat.stream",
-                        return_value=iter([("text", '{"speak": true, "reason": "waiting for this"}')])):
-            self.assertEqual(rules.judge(_signal(), self.CFG), (True, "waiting for this"))
-
-    def test_judge_strips_a_json_fence(self):
-        """Note 8: a model that wraps its answer in a ```json fence must still parse."""
-        fenced = '```json\n{"speak": true, "reason": "fenced"}\n```'
-        with mock.patch("pathfinder.llm.openai_compat.stream", return_value=iter([("text", fenced)])):
-            self.assertEqual(rules.judge(_signal(), self.CFG), (True, "fenced"))
-
-    def test_judge_garbage_is_false(self):
-        with mock.patch("pathfinder.llm.openai_compat.stream", return_value=iter([("text", "not json at all")])):
-            self.assertEqual(rules.judge(_signal(), self.CFG), (False, "unparseable"))
-
-    def test_judge_missing_fields_is_false(self):
-        with mock.patch("pathfinder.llm.openai_compat.stream", return_value=iter([("text", '{"speak": true}')])):
-            self.assertEqual(rules.judge(_signal(), self.CFG), (False, "unparseable"))
-
-    def test_judge_llm_error_is_false(self):
-        with mock.patch("pathfinder.llm.openai_compat.stream", side_effect=LLMError(402, "no credit")):
-            self.assertEqual(rules.judge(_signal(), self.CFG), (False, "model unavailable"))
-
-    def test_judge_no_model_configured_is_false(self):
-        self.assertEqual(rules.judge(_signal(), {}), (False, "model unavailable"))
-
-    def test_judge_uses_worker_model_when_set(self):
-        cfg = {**self.CFG, "worker_model": "p:worker"}
-        seen = {}
-
-        def fake_stream(endpoint, messages, tools=None, cancel=None, timeout=120):
-            seen["model"] = endpoint.model
-            return iter([("text", '{"speak": false, "reason": "not urgent"}')])
-
-        with mock.patch("pathfinder.llm.openai_compat.stream", side_effect=fake_stream):
-            rules.judge(_signal(), cfg)
-        self.assertEqual(seen["model"], "worker")
 
 
 if __name__ == "__main__":

@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest import mock
 
 from pathfinder import exec as pexec, tools
-from pathfinder.loop import TurnControl
+from types import SimpleNamespace
 
 
 class ExecTest(unittest.TestCase):
@@ -37,7 +37,7 @@ class ExecTest(unittest.TestCase):
     def test_exec_interrupt_kills_process_group(self):
         """Runs everywhere (no sandbox needed): a direct Popen via escalate=True,
         proving a `sleep 30` child is gone within 1 s of control.interrupt."""
-        control = TurnControl()
+        control = SimpleNamespace(interrupt=threading.Event())
         threading.Thread(target=lambda: (time.sleep(0.1), control.interrupt.set())).start()
 
         start = time.monotonic()
@@ -56,7 +56,7 @@ class ExecTest(unittest.TestCase):
         import uuid
         tag = f"pf-test-{uuid.uuid4().hex}"
         alive = lambda: subprocess.run(["pgrep", "-f", f"^{tag} 31"], capture_output=True).returncode == 0
-        control, seen = TurnControl(), []
+        control, seen = SimpleNamespace(interrupt=threading.Event()), []
 
         def interrupt_once_running():
             for _ in range(20):

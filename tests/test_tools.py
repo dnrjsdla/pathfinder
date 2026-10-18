@@ -3,7 +3,6 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from pathfinder import jobs  # noqa: F401 - import side effect: registers start_job into tools.TOOLS
 from pathfinder import tools as tools_mod
 from pathfinder.tools import ToolSpec, coerce, normalize_local_datetime
 
@@ -67,14 +66,8 @@ class LocalDatetimeNormalizeTest(unittest.TestCase):
 
 class OriginRegistryTest(unittest.TestCase):
     def test_tools_for_origin(self):
-        """`start_job` is user-only: a job cannot start a worker, and a signal turn cannot
-        either - structure, not policy (the model never even sees the schema)."""
-        user_names = set(tools_mod.for_origin("user"))
         job_names = set(tools_mod.for_origin("job"))
         signal_names = set(tools_mod.for_origin("signal"))
-        self.assertIn("start_job", user_names)
-        self.assertNotIn("start_job", job_names)
-        self.assertNotIn("start_job", signal_names)
         # the read and write tools are still there for a job and a signal turn - policy (not
         # this registry) is what turns "write" into a gate for them.
         for names in (job_names, signal_names):

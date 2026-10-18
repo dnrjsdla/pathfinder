@@ -400,7 +400,7 @@ fold replaces them); `llm/slot.py` (D25); lazy imports in `llm/__init__` and `ru
 (→ the budget note, same tools: a changed tool list misses the whole cache).
 
 Stubbed: `rules.judge` returns `(False, "model triage returns in partition 5")`, signals end at rules + summary notice
-(5); the consolidation pass (4); clone gates and proposals coexist in `approve` (one seq namespace) until P2; gate
+(5); the consolidation pass (4) and its 3-day stall alarm (§11); clone gates and proposals coexist in `approve` (one seq namespace) until P2; gate
 title/recipient (3); gate timeout and piece 2 over 8,000 with MCP tools (2); the mid-stream steer cut (D19) waits for
 the TUI (6); ARCHITECTURE(.ko) rewrite (6, §14); nothing added to ToolSpec for V20 until P2.
 

@@ -2,8 +2,8 @@
 config set KEY VALUE | config set senses.NAME JSON|off |
 approvals | approve ID | deny ID | interrupt |
 listen | signal SENSE JSON | react up|down [ID] | rules | tools |
-jobs | job stop ID | job steer ID TEXT |
-memory | memory run | memory undo [N] |
+jobs |
+memory | memory undo [N] |
 install NAME | uninstall ID | search TEXT | secret ID NAME |
 init | service start|stop|restart|status | tui"""
 from __future__ import annotations
@@ -346,24 +346,6 @@ def jobs_list(home):
     return 0
 
 
-def job_stop(home, id):
-    sock = _connect(home)
-    if sock is None:
-        return 1
-    with sock:
-        sock.sendall((json.dumps({"type": "job.stop", "id": id}) + "\n").encode())
-    return 0
-
-
-def job_steer(home, id, text):
-    sock = _connect(home)
-    if sock is None:
-        return 1
-    with sock:
-        sock.sendall((json.dumps({"type": "job.steer", "id": id, "text": text}) + "\n").encode())
-    return 0
-
-
 def memory_status(home):
     """`pathfinder memory`: cursor, passes/lines-read/applied for today and the two days before,
     pending proposals, judgments per day (seven days, today first), and the latest session's
@@ -386,27 +368,6 @@ def memory_status(home):
     return 0
 
 
-def memory_run(home):
-    """`pathfinder memory run`: force a pass over the socket, print its result line."""
-    sock = _connect(home)
-    if sock is None:
-        return 1
-    with sock:
-        f = sock.makefile("rwb")
-        f.write((json.dumps({"type": "memory.run"}) + "\n").encode())
-        f.flush()
-        line = f.readline()
-        if not line:
-            print("pathfinder: no reply", file=sys.stderr)
-            return 1
-        msg = json.loads(line)
-        if msg["type"] == "error":
-            print(f"pathfinder: {msg['message']}", file=sys.stderr)
-            return 1
-        print(msg["result"])
-    return 0
-
-
 def memory_undo(home, n=1):
     """`pathfinder memory undo [N]`: refuses while a daemon is serving (like `reindex`); builds
     its own Ledger/State/Manager, the same pattern `reindex` uses for a standalone run."""
@@ -420,7 +381,7 @@ def memory_undo(home, n=1):
         state.apply(event)
         return event
 
-    mgr = memory.Manager(home, record, lambda signal: None, None, None, [], is_busy=lambda: False)
+    mgr = memory.Manager(home, record, [])
     try:
         for line in mgr.undo(n):
             print(line)
@@ -520,14 +481,8 @@ def main(argv=None):
         return secret_cmd(home, *args[1:3], *args[4:])
     if args == ["jobs"]:
         return jobs_list(home)
-    if len(args) == 3 and args[0] == "job" and args[1] == "stop":
-        return job_stop(home, args[2])
-    if len(args) == 4 and args[0] == "job" and args[1] == "steer":
-        return job_steer(home, args[2], args[3])
     if args == ["memory"]:
         return memory_status(home)
-    if args == ["memory", "run"]:
-        return memory_run(home)
     if len(args) in (2, 3) and args[:2] == ["memory", "undo"]:
         if len(args) == 3 and not args[2].isdigit():
             print(USAGE, file=sys.stderr)

@@ -2,10 +2,10 @@
 due, a command that failed) into a `Signal`; the daemon bundles, dedupes and rate-limits them
 before `rules.decide` ever sees one (D8: cheap, certain cases never reach the model).
 
-`SIGNAL_ENVELOPE` and `SIGNAL_TURNS_CLAUSE` are copied verbatim from `bench/m3_injection.py` -
-m3 measured that this exact wording is what keeps the model reading a signal's data without
-acting on an instruction hidden inside it (HISTORY.md, m3). `test_invariants` checks the two
-texts stay byte-identical to the bench's."""
+`SIGNAL_ENVELOPE` and `SIGNAL_TURNS_CLAUSE` are the exact text m3 measured (`bench/m3_injection.py`,
+retired in v2 partition 1; git keeps it) - this wording is what keeps the model reading a signal's
+data without acting on an instruction hidden inside it (HISTORY.md, m3). `test_invariants` checks
+the two texts stay byte-identical to the measured literals it holds."""
 from __future__ import annotations
 
 import asyncio

@@ -1,5 +1,5 @@
 """LLM adapter surface: resolve a "provider:model" reference to a concrete
-Endpoint. Adding a provider is a config entry, not a new module - the loop
+Endpoint. Adding a provider is a config entry, not a new module - the clone
 and daemon never see a model name."""
 import os
 from dataclasses import dataclass
@@ -76,13 +76,3 @@ def resolve(cfg, ref):
     if not api_key and api == "anthropic":  # a local (openai-style) provider needs no key: never ask the Keychain
         api_key = keychain.secret(f"pathfinder-{provider}", "api") or ""
     return Endpoint(base_url=p["base_url"], api_key=api_key, model=model, api=api, effort=p.get("effort", ""))
-
-
-def stream(endpoint, messages, tools=None, cancel=None, timeout=120):
-    """Delegate to the adapter named by `endpoint.api` (D2: two adapters, one (kind, payload)
-    contract - the loop and the slot never know which). v1 path, gone in U9: the Anthropic
-    adapter has no `stream` any more; from U5 on the router serves `api: anthropic`."""
-    if endpoint.api == "anthropic":
-        raise LLMError(0, "api anthropic is served by the router (v2)")
-    from . import openai_compat as mod
-    yield from mod.stream(endpoint, messages, tools=tools, cancel=cancel, timeout=timeout)

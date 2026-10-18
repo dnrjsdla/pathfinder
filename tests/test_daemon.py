@@ -121,10 +121,9 @@ class DaemonHarness(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def run_with(self, router, scenario, job_factory=None, pass_factory=None):
+    def run_with(self, router, scenario):
         async def main():
-            daemon = Daemon(self.home, router=router, job_step_factory=job_factory,
-                            pass_step_factory=pass_factory)
+            daemon = Daemon(self.home, router=router)
             await daemon.start()
             try:
                 return await scenario(daemon)
@@ -209,29 +208,6 @@ class DaemonTest(DaemonHarness):
             second.state.close()
 
         self.run_with(fake_model(), scenario)
-
-class RealStepFactoryTest(unittest.TestCase):
-    def test_job_step_factory_uses_worker_model_and_job_tools(self):
-        """The job step resolves `worker_model` over `model`, and shows the model only the
-        job registry (no `start_job` - a worker cannot make a worker)."""
-        from pathfinder import jobs
-        from pathfinder.llm import openai_compat
-        seen = {}
-
-        def fake_stream(endpoint, messages, tools=None, cancel=None, timeout=120):
-            seen["model"], seen["tools"] = endpoint.model, tools
-            return iter([("text", "ok")])
-
-        original = openai_compat.stream
-        openai_compat.stream = fake_stream
-        self.addCleanup(setattr, openai_compat, "stream", original)
-        cfg = {"model": "p:big", "worker_model": "p:small",
-              "providers": {"p": {"base_url": "http://x", "api_key_env": ""}}}
-        job_tools = tools_mod.for_origin("job")
-        list(jobs.default_job_step_factory(cfg, None, job_tools)([]))
-        self.assertEqual(seen["model"], "small")
-        self.assertEqual({t["function"]["name"] for t in seen["tools"]}, set(job_tools))
-        self.assertNotIn("start_job", {t["function"]["name"] for t in seen["tools"]})
 
 
 def _never_quiet(daemon):
@@ -818,38 +794,6 @@ class RootTurnTest(DaemonHarness):
         self.assertEqual(len(applies), 1)
         self.assertIsNone(applies[0].get("approval"))  # written through the handler, not the approval box
 
-    def test_daemon_answers_while_job_runs(self):
-        """A job's step holds the job's own thread, not the lane: a say still gets its answer (jobs until U9)."""
-        proceed = threading.Event()
-
-        def slow_job_factory(cfg, control, tools):
-            def step(messages):
-                proceed.wait(2)
-                yield ("text", "job done")
-            return step
-
-        async def scenario(daemon):
-            c = await Client.open(self.home)
-            first = await self.say(c, "start a job")
-            for _ in range(200):
-                if daemon.jobs_mgr.jobs:
-                    break
-                await asyncio.sleep(0.01)
-            second = await self.say(c, "hi")  # this must not wait on the job's own sleep
-            proceed.set()
-            job = next(iter(daemon.jobs_mgr.jobs.values()))
-            for _ in range(200):  # let the job finish before close() tears down the state under it
-                if job.state != "running":
-                    break
-                await asyncio.sleep(0.01)
-            c.close()
-            return first, second, job.session
-
-        first, second, session = self.run_with(fake_model("hi back", [call("c1", "start_job", goal="research")]),
-                                               scenario, job_factory=slow_job_factory)
-        self.assertEqual((first[-1]["kind"], second[-1]["kind"]), ("answer", "answer"))
-        self.assertEqual(session, first[0]["session"])  # start_job learns the item's session
-
     def test_mcp_tool_call_in_a_turn(self):
         config.set(self.home, "mcp_servers",
                    {"fake": {"transport": "stdio", "command": [sys.executable, str(FAKE_SERVER)]}})
@@ -1095,6 +1039,27 @@ class JudgmentCapTest(DaemonHarness):
         decisions = [e for e in events if e["type"] == "decision"]
         self.assertTrue(any(d["action"] == "defer" and d["why"] == "judgment cap" for d in decisions))
 
+    def test_judge_stub_silences_an_unsettled_signal(self):
+        """v2 partition 1 (Q2 = a): no model triage until partition 5 - a signal no rule settles gets the
+        stub's judgment and is silenced, and no request reaches the router."""
+        async def scenario(daemon):
+            _never_quiet(daemon)
+            daemon.push_signal(Signal(sense="mail", kind="kind_with_no_rules_section",
+                                      key="stub-test", summary="s", fields={}, trust="third_party"))
+            for _ in range(200):
+                if any(e["type"] == "decision" for e in Ledger(self.home).read()):
+                    break
+                await asyncio.sleep(0.01)
+            return list(Ledger(self.home).read())
+
+        model = fake_model()
+        events = self.run_with(model, scenario)
+        triage = [(e["type"], e.get("speak"), e.get("reason"), e.get("action"), e.get("why")) for e in events
+                  if e["type"] in ("judgment", "decision") and e.get("signal_key") == "stub-test"]
+        self.assertEqual(triage, [("judgment", False, "model triage returns in partition 5", None, None),
+                                  ("decision", None, None, "silence", "judged")])
+        self.assertEqual(model.seen, [])
+
 
 class RateLimitDoesNotBlockLaneTest(DaemonHarness):
     def test_held_signal_does_not_delay_a_say(self):
@@ -1196,8 +1161,8 @@ class PushDoorValidationTest(DaemonHarness):
         self.assertEqual([e for e in self.events() if e["type"] == "signal"], [])
 
     def test_socket_refuses_signal_jobs(self):
-        """Not a push sense: `jobs.Manager` pushes `job_done`/`job_failed` directly, so a
-        `signal jobs ...` line from outside is refused like any unknown or non-push sense."""
+        """`jobs` is no sense (v2 partition 1 removed it), so a `signal jobs ...` line from
+        outside is refused like any unknown or non-push sense."""
         async def scenario(daemon):
             c = await Client.open(self.home)
             c.send({"type": "signal", "sense": "jobs", "fields": {"goal": "x", "summary": "y"}})
@@ -1326,30 +1291,6 @@ class MemoryDaemonTest(DaemonHarness):
         self.assertEqual(d2["action"], "silence")  # the broken edit was refused - old rules kept
         self.assertTrue(any(e["type"] == "error" and "RULES.md" in e.get("message", "") for e in events))
 
-    def test_memory_run_forces_a_pass(self):
-        def pass_factory(cfg, control, tools):
-            def step(messages):
-                yield ("text", "nothing new")
-            return step
-
-        async def scenario(daemon):
-            c = await Client.open(self.home)
-            c.send({"type": "say", "text": "hello"})
-            await c.until("turn.end")
-            c.send({"type": "memory.run"})
-            reply = await c.recv()
-            for _ in range(200):
-                if any(e["type"] == "memory_pass" for e in Ledger(self.home).read()):
-                    break
-                await asyncio.sleep(0.01)
-            c.close()
-            return reply, list(Ledger(self.home).read())
-
-        reply, events = self.run_with(fake_model("ok"), scenario, pass_factory=pass_factory)
-        self.assertEqual(reply["type"], "memory.run")
-        self.assertIn("result", reply)
-        self.assertTrue(any(e["type"] == "memory_pass" for e in events))
-
     def test_socket_refuses_signal_memory(self):
         async def scenario(daemon):
             c = await Client.open(self.home)
@@ -1360,36 +1301,6 @@ class MemoryDaemonTest(DaemonHarness):
 
         reply = self.run_with(fake_model(), scenario)
         self.assertEqual(reply["type"], "error")
-
-
-class JobDaemonIntegrationTest(DaemonHarness):
-    def test_job_lines_reach_a_moved_screen(self):
-        """U4 (5b): the job's session went quiet (D41), the screen attached to a newer one, and the
-        job's lines still reach it."""
-        def job_factory(cfg, control, tools):
-            def step(messages):
-                yield ("text", "found it")
-            return step
-
-        async def scenario(daemon):
-            daemon.record("session_start", session="older")
-            daemon.state.db.execute("UPDATE sessions SET last_ts = last_ts - ? WHERE id = ?", (3 * 3600, "older"))
-            c = await Client.open(self.home)
-            c.send({"type": "attach"})
-            attached = (await c.until("attached"))[-1]
-            daemon.jobs_mgr.start("research", "older")
-            lines = await c.until("job.end")
-            for _ in range(200):  # let the job finish before close() tears down the state under it
-                if all(j.state != "running" for j in daemon.jobs_mgr.jobs.values()):
-                    break
-                await asyncio.sleep(0.01)
-            c.close()
-            return attached, lines
-
-        attached, lines = self.run_with(fake_model("ok"), scenario, job_factory=job_factory)
-        self.assertNotEqual(attached["session"], "older")
-        self.assertEqual([m["type"] for m in lines if m["type"].startswith("job.")], ["job.start", "job.end"])
-        self.assertEqual(lines[-1]["state"], "done")
 
 
 class JobSignalTest(DaemonHarness):
@@ -2193,109 +2104,17 @@ class SessionLifetimeTest(DaemonHarness):
         self.assertIsNone(after_triage)
         self.assertEqual(after_notice, sid)
 
-    def _old_session(self, daemon):
-        daemon.record("session_start", session="old")
-        daemon.record("user", session="old", turn="t1", origin="user", trust="user", text="old question")
-        self._age(daemon, "old", 3 * 3600)
-
-    async def _settle(self, daemon):  # let a job's thread finish before close() tears the state down
-        for _ in range(300):
-            if all(j.state not in ("running", "gated") for j in daemon.jobs_mgr.jobs.values()):
-                break
-            await asyncio.sleep(0.01)
-
-    def test_say_after_a_job_gate_in_an_aged_session_lands_in_the_new_session(self):
-        """D63 (live 2026-09-30): a job's gate made a session D41 had ended the newest again, and the
-        owner's next message went into it with its old history. The phrase typed after the gate gets
-        the harness line in the screen's session; said again, it reaches the model there."""
-        def job_factory(cfg, control, tools):
-            def step(messages):
-                if not any(m.get("role") == "tool" for m in messages):
-                    yield ("tool_calls", [{"id": "c1", "name": "write_file",
-                                           "arguments": {"path": str(self.home / "n.txt"), "content": "hi"}}])
-                else:
-                    yield ("text", "done")
-            return step
-        model = fake_model("ok")
-
-        async def scenario(daemon):
-            self._old_session(daemon)
-            aged = daemon.state.session("old")["last_ts"]
-            c = await Client.open(self.home)
-            c.send({"type": "attach"})
-            screen = (await c.until("attached"))[-1]["session"]
-            daemon.jobs_mgr.start("write a note", "old")
-            gate = (await c.until("job.gate"))[-1]
-            said = []
-            for _ in range(2):
-                c.send({"type": "say", "text": "응"})
-                said.append("".join(m["text"] for m in await c.until("turn.end") if m["type"] == "delta"))
-            seen = list(model.seen)
-            c.send({"type": "approve", "id": gate["approval"]})
-            await c.until("job.end")
-            await self._settle(daemon)
-            c.close()
-            return screen, gate, said, seen, daemon.state.session("old")["last_ts"] == aged
-
-        screen, gate, said, seen, still_aged = self.run_with(model, scenario, job_factory=job_factory)
-        self.assertNotEqual(screen, "old")
-        self.assertTrue(still_aged)  # the job's start, gate, approval and end moved nothing
-        self.assertIn(f"/approve {gate['approval']} ", said[0])
-        self.assertTrue(said[0].endswith(" - if you meant something else, say it again · 다른 뜻이었다면 다시 말해 주세요"))
-        self.assertEqual(said[1], "ok ")
-        self.assertEqual(len(seen), 1)  # only the phrase said again made a request
-        self.assertNotIn("old question", json.dumps(seen[0].messages, ensure_ascii=False))
-        self.assertEqual([e["session"] for e in self.events() if e["type"] == "user" and e["text"] == "응"],
-                         [screen, screen])
-
-    def test_job_done_notice_lands_in_the_screens_session(self):
-        """D63: a job from a session D41 ended reports where the screen is - the goal and the summary,
-        not the old session's history."""
-        def job_factory(cfg, control, tools):
-            def step(messages):
-                yield ("text", "found it")
-            return step
-        model = fake_model("ok")
-
-        async def scenario(daemon):
-            _never_quiet(daemon)
-            self._old_session(daemon)
-            c = await Client.open(self.home)
-            c.send({"type": "attach"})
-            screen = (await c.until("attached"))[-1]["session"]
-            daemon.jobs_mgr.start("research", "old")
-            notice = (await c.until("notice"))[-1]
-            await self._settle(daemon)
-            c.send({"type": "say", "text": "and then?"})
-            await c.until("turn.end")
-            c.close()
-            return screen, notice
-
-        screen, notice = self.run_with(model, scenario, job_factory=job_factory)
-        self.assertNotEqual(screen, "old")
-        self.assertTrue(notice["text"].startswith("Job done: research\nfound it"), notice["text"])
-        # P1: the notice is the summary alone (no signal model turn) and stays out of the root's window
-        # until attention (P5); the root's next turn sees the screen's session, not the old one
-        self.assertEqual([e["session"] for e in self.events() if e["type"] == "delivery"], [screen])
-        self.assertNotIn("old question", json.dumps(model.seen[-1].messages, ensure_ascii=False))
-
     def test_notice_text_passes_clean(self):
         """D62, found at U25's review: every sense's summary reaches the screen and then history. It
-        is cleaned once where the notice text is formed - live, rebuilt after a restart, and a job's
-        worker text."""
-        def job_factory(cfg, control, tools):
-            def step(messages):
-                yield ("text", "found \x1b[31mit\x1b[0m\u202e now")
-            return step
-
+        is cleaned once where the notice text is formed - live and rebuilt after a restart."""
         async def scenario(daemon):
             _never_quiet(daemon)
             c = await Client.open(self.home)
             c.send({"type": "attach"})
-            screen = (await c.until("attached"))[-1]["session"]
-            daemon.jobs_mgr.start("research", screen)
+            await c.until("attached")
+            daemon.push_signal(Signal(sense="test", kind="schedule_due", key="dirty-0", fields={"id": "s0"},
+                                      summary="Scheduled note: found \x1b[31mit\x1b[0m\u202e now", trust="user"))
             live = (await c.until("notice"))[-1]
-            await self._settle(daemon)
             c.send({"type": "presence", "idle_s": 0})  # typing: the next notice is held, then the daemon stops
             await asyncio.sleep(0.05)
             daemon.push_signal(Signal(sense="test", kind="schedule_due", key="dirty-1", fields={"id": "s1"},
@@ -2307,8 +2126,8 @@ class SessionLifetimeTest(DaemonHarness):
             c.close()
             return live
 
-        live = self.run_with(fake_model("ok"), scenario, job_factory=job_factory)
-        self.assertTrue(live["text"].startswith("Job done: research\nfound it now"), live["text"])
+        live = self.run_with(fake_model("ok"), scenario)
+        self.assertTrue(live["text"].startswith("Scheduled note: found it now"), live["text"])
         rebuilt = State(self.home / "rebuilt.db")  # a restart's state, rebuilt from the ledger
         rebuilt.catch_up(Ledger(self.home))
         held = [row["text"] for row in rebuilt.undelivered()]

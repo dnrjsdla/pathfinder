@@ -1,0 +1,11 @@
+step      result    checks
+1         PASS      all 8 passed
+2         PASS      all 6 passed
+3         PASS      all 8 passed
+4         PASS      all 4 passed
+5         PASS      all 1 passed
+6         PASS      all 1 passed
+step 1 cache (read, write) per request: [(0, 2963), (2963, 156), (3119, 225)]
+thinking blocks before the restart: 3
+step 4 reply (should say the outcome is unknown): "I don't know. The run was interrupted by a restart, so it may or may not have finished. Nothing I can see confirms it completed. `sleep 30` changes nothing, so running it again is safe if you need a r"
+removed /tmp/pf1

@@ -1,0 +1,1562 @@
+{
+ "measurement": "v2-m6",
+ "models": {
+  "root": "anthropic:claude-haiku-5-5",
+  "summarize": "anthropic:claude-haiku-5-5",
+  "worker": "anthropic:claude-haiku-5-5",
+  "night": "anthropic:claude-haiku-5-5"
+ },
+ "effort": "api default",
+ "date": "2026-10-18",
+ "prices_per_mtok": {
+  "in": 0.1,
+  "out": 0.5,
+  "cache_read": 0.1,
+  "write_5m": 1.25,
+  "write_1h": 2.0
+ },
+ "ttl_1h_note": "the product's pricing (1-hour writes at 2x) and the pass figure; adjusted: the 5-minute one",
+ "requests": 86,
+ "folds": 5,
+ "raw": {
+  "tokens": {
+   "input": 41045,
+   "output": 32914,
+   "cache_read": 560402,
+   "cache_creation": 147129
+  },
+  "cost_usd": 0.05559132000000001,
+  "hit_rate": 0.7486
+ },
+ "adjusted": {
+  "tokens": {
+   "input": 41045,
+   "output": 32914,
+   "cache_read": 485257,
+   "cache_creation": 222274
+  },
+  "cost_usd": 0.05319832,
+  "hit_rate": 0.6482
+ },
+ "ttl_1h": {
+  "tokens": {
+   "input": 41045,
+   "output": 32914,
+   "cache_read": 513203,
+   "cache_creation": 194328
+  },
+  "cost_usd": 0.06455912999999999,
+  "hit_rate": 0.6856
+ },
+ "pass": false,
+ "criteria": {
+  "max_cost_usd": 1.0,
+  "min_hit_rate": 0.7,
+  "cold_after_s": 3600
+ },
+ "items": [
+  {
+   "at": "07:40:00",
+   "kind": "user",
+   "clone": "root",
+   "role": "root",
+   "end": "answer",
+   "gap_s": null,
+   "requests": 1,
+   "usage": [
+    [
+     507,
+     378,
+     0,
+     2951
+    ]
+   ],
+   "folds": 0,
+   "tools": [],
+   "gates": [],
+   "errors": 0,
+   "needs_tools": false
+  },
+  {
+   "at": "07:42:00",
+   "kind": "user",
+   "clone": "root",
+   "role": "root",
+   "end": "answer",
+   "gap_s": 120,
+   "requests": 3,
+   "usage": [
+    [
+     507,
+     146,
+     2951,
+     428
+    ],
+    [
+     506,
+     130,
+     3379,
+     221
+    ],
+    [
+     506,
+     226,
+     3600,
+     3392
+    ]
+   ],
+   "folds": 0,
+   "tools": [
+    "read_file",
+    "read_result"
+   ],
+   "gates": [],
+   "errors": 0,
+   "needs_tools": true
+  },
+  {
+   "at": "07:45:00",
+   "kind": "user",
+   "clone": "root",
+   "role": "root",
+   "end": "answer",
+   "gap_s": 180,
+   "requests": 2,
+   "usage": [
+    [
+     507,
+     107,
+     6992,
+     272
+    ],
+    [
+     506,
+     124,
+     7264,
+     258
+    ]
+   ],
+   "folds": 0,
+   "tools": [
+    "read_result"
+   ],
+   "gates": [],
+   "errors": 0,
+   "needs_tools": true
+  },
+  {
+   "at": "07:47:00",
+   "kind": "user",
+   "clone": "root",
+   "role": "root",
+   "end": "answer",
+   "gap_s": 120,
+   "requests": 1,
+   "usage": [
+    [
+     507,
+     350,
+     7522,
+     150
+    ]
+   ],
+   "folds": 0,
+   "tools": [],
+   "gates": [],
+   "errors": 0,
+   "needs_tools": false
+  },
+  {
+   "at": "07:55:00",
+   "kind": "signal",
+   "clone": "root",
+   "role": "root",
+   "end": "error",
+   "gap_s": 480,
+   "requests": 0,
+   "usage": [],
+   "folds": 0,
+   "tools": [],
+   "gates": [],
+   "errors": 1,
+   "needs_tools": false
+  },
+  {
+   "at": "08:10:00",
+   "kind": "signal",
+   "clone": "root",
+   "role": "root",
+   "end": "error",
+   "gap_s": 1380,
+   "requests": 0,
+   "usage": [],
+   "folds": 0,
+   "tools": [],
+   "gates": [],
+   "errors": 1,
+   "needs_tools": false
+  },
+  {
+   "at": "08:50:00",
+   "kind": "signal",
+   "clone": "root",
+   "role": "root",
+   "end": "error",
+   "gap_s": 3780,
+   "requests": 0,
+   "usage": [],
+   "folds": 0,
+   "tools": [],
+   "gates": [],
+   "errors": 1,
+   "needs_tools": false
+  },
+  {
+   "at": "09:32:00",
+   "kind": "user",
+   "clone": "root",
+   "role": "root",
+   "end": "answer",
+   "gap_s": 6300,
+   "requests": 3,
+   "usage": [
+    [
+     507,
+     116,
+     7672,
+     788
+    ],
+    [
+     506,
+     72,
+     8460,
+     199
+    ],
+    [
+     506,
+     112,
+     8659,
+     446
+    ]
+   ],
+   "folds": 0,
+   "tools": [
+    "read_file",
+    "read_result"
+   ],
+   "gates": [],
+   "errors": 0,
+   "needs_tools": true
+  },
+  {
+   "at": "09:35:00",
+   "kind": "user",
+   "clone": "root",
+   "role": "root",
+   "end": "answer",
+   "gap_s": 180,
+   "requests": 4,
+   "usage": [
+    [
+     507,
+     57,
+     9105,
+     148
+    ],
+    [
+     506,
+     104,
+     9253,
+     109
+    ],
+    [
+     506,
+     138,
+     9362,
+     149
+    ],
+    [
+     506,
+     119,
+     9511,
+     354
+    ]
+   ],
+   "folds": 0,
+   "tools": [
+    "read_file",
+    "read_result",
+    "read_result"
+   ],
+   "gates": [],
+   "errors": 0,
+   "needs_tools": true
+  },
+  {
+   "at": "09:37:00",
+   "kind": "user",
+   "clone": "root",
+   "role": "root",
+   "end": "answer",
+   "gap_s": 120,
+   "requests": 1,
+   "usage": [
+    [
+     507,
+     144,
+     9865,
+     160
+    ]
+   ],
+   "folds": 0,
+   "tools": [],
+   "gates": [],
+   "errors": 0,
+   "needs_tools": true
+  },
+  {
+   "at": "09:40:00",
+   "kind": "user",
+   "clone": "root",
+   "role": "root",
+   "end": "answer",
+   "gap_s": 180,
+   "requests": 1,
+   "usage": [
+    [
+     507,
+     1217,
+     10025,
+     199
+    ]
+   ],
+   "folds": 0,
+   "tools": [],
+   "gates": [],
+   "errors": 0,
+   "needs_tools": false
+  },
+  {
+   "at": "09:41:00",
+   "kind": "signal",
+   "clone": "root",
+   "role": "root",
+   "end": "error",
+   "gap_s": 60,
+   "requests": 0,
+   "usage": [],
+   "folds": 0,
+   "tools": [],
+   "gates": [],
+   "errors": 1,
+   "needs_tools": false
+  },
+  {
+   "at": "09:43:00",
+   "kind": "user",
+   "clone": "root",
+   "role": "root",
+   "end": "answer",
+   "gap_s": 180,
+   "requests": 1,
+   "usage": [
+    [
+     507,
+     560,
+     10224,
+     1359
+    ]
+   ],
+   "folds": 0,
+   "tools": [],
+   "gates": [],
+   "errors": 0,
+   "needs_tools": false
+  },
+  {
+   "at": "09:45:00",
+   "kind": "user",
+   "clone": "root",
+   "role": "root",
+   "end": "answer",
+   "gap_s": 120,
+   "requests": 3,
+   "usage": [
+    [
+     507,
+     678,
+     11583,
+     607
+    ],
+    [
+     506,
+     249,
+     12190,
+     702
+    ],
+    [
+     4,
+     797,
+     0,
+     4787
+    ]
+   ],
+   "folds": 1,
+   "tools": [],
+   "gates": [
+    73
+   ],
+   "errors": 0,
+   "needs_tools": true,
+   "approved": [
+    73
+   ]
+  },
+  {
+   "at": "09:45:45",
+   "kind": "report",
+   "clone": "root",
+   "role": "root",
+   "end": "answer",
+   "gap_s": 45,
+   "requests": 1,
+   "usage": [
+    [
+     507,
+     350,
+     2828,
+     3560
+    ]
+   ],
+   "folds": 0,
+   "tools": [],
+   "gates": [],
+   "errors": 0
+  },
+  {
+   "at": "10:25:00",
+   "kind": "signal",
+   "clone": "root",
+   "role": "root",
+   "end": "error",
+   "gap_s": 2355,
+   "requests": 0,
+   "usage": [],
+   "folds": 0,
+   "tools": [],
+   "gates": [],
+   "errors": 1,
+   "needs_tools": false
+  },
+  {
+   "at": "11:20:00",
+   "kind": "signal",
+   "clone": "root",
+   "role": "root",
+   "end": "error",
+   "gap_s": 5655,
+   "requests": 0,
+   "usage": [],
+   "folds": 0,
+   "tools": [],
+   "gates": [],
+   "errors": 1,
+   "needs_tools": false
+  },
+  {
+   "at": "11:30:00",
+   "kind": "user",
+   "clone": "root",
+   "role": "root",
+   "end": "answer",
+   "gap_s": 6255,
+   "requests": 7,
+   "usage": [
+    [
+     507,
+     154,
+     6388,
+     659
+    ],
+    [
+     506,
+     71,
+     7047,
+     229
+    ],
+    [
+     506,
+     198,
+     7276,
+     3362
+    ],
+    [
+     506,
+     264,
+     10638,
+     3514
+    ],
+    [
+     506,
+     290,
+     14152,
+     3531
+    ],
+    [
+     506,
+     584,
+     17683,
+     934
+    ],
+    [
+     4,
+     1458,
+     0,
+     3876
+    ]
+   ],
+   "folds": 1,
+   "tools": [
+    "read_file",
+    "read_result",
+    "read_result",
+    "read_result",
+    "read_result"
+   ],
+   "gates": [],
+   "errors": 0,
+   "needs_tools": true
+  },
+  {
+   "at": "11:30:40",
+   "kind": "child",
+   "clone": "w-7556bca7",
+   "role": "worker",
+   "end": "answer",
+   "gap_s": 40,
+   "requests": 5,
+   "usage": [
+    [
+     507,
+     53,
+     0,
+     2342
+    ],
+    [
+     506,
+     205,
+     2342,
+     128
+    ],
+    [
+     506,
+     267,
+     2470,
+     3491
+    ],
+    [
+     506,
+     279,
+     5961,
+     3672
+    ],
+    [
+     506,
+     423,
+     9633,
+     3917
+    ]
+   ],
+   "folds": 0,
+   "tools": [
+    "read_file",
+    "read_result",
+    "read_result",
+    "read_result",
+    "read_result",
+    "read_result"
+   ],
+   "gates": [],
+   "errors": 0,
+   "brief_chars": 110,
+   "needs_tools": true
+  },
+  {
+   "at": "11:33:00",
+   "kind": "user",
+   "clone": "root",
+   "role": "root",
+   "end": "answer",
+   "gap_s": 140,
+   "requests": 2,
+   "usage": [
+    [
+     507,
+     231,
+     2828,
+     12949
+    ],
+    [
+     4,
+     2000,
+     0,
+     12900
+    ]
+   ],
+   "folds": 1,
+   "tools": [],
+   "gates": [],
+   "errors": 0,
+   "needs_tools": true
+  },
+  {
+   "at": "11:36:00",
+   "kind": "user",
+   "clone": "root",
+   "role": "root",
+   "end": "answer",
+   "gap_s": 180,
+   "requests": 1,
+   "usage": [
+    [
+     507,
+     513,
+     2828,
+     2129
+    ]
+   ],
+   "folds": 0,
+   "tools": [],
+   "gates": [],
+   "errors": 0,
+   "needs_tools": false
+  },
+  {
+   "at": "12:50:00",
+   "kind": "signal",
+   "clone": "root",
+   "role": "root",
+   "end": "error",
+   "gap_s": 4440,
+   "requests": 0,
+   "usage": [],
+   "folds": 0,
+   "tools": [],
+   "gates": [],
+   "errors": 1,
+   "needs_tools": false
+  },
+  {
+   "at": "13:05:00",
+   "kind": "user",
+   "clone": "root",
+   "role": "root",
+   "end": "answer",
+   "gap_s": 5340,
+   "requests": 1,
+   "usage": [
+    [
+     507,
+     610,
+     4957,
+     659
+    ]
+   ],
+   "folds": 0,
+   "tools": [],
+   "gates": [],
+   "errors": 0,
+   "needs_tools": false
+  },
+  {
+   "at": "13:06:00",
+   "kind": "signal",
+   "clone": "root",
+   "role": "root",
+   "end": "error",
+   "gap_s": 60,
+   "requests": 0,
+   "usage": [],
+   "folds": 0,
+   "tools": [],
+   "gates": [],
+   "errors": 1,
+   "needs_tools": false
+  },
+  {
+   "at": "13:08:00",
+   "kind": "user",
+   "clone": "root",
+   "role": "root",
+   "end": "answer",
+   "gap_s": 180,
+   "requests": 3,
+   "usage": [
+    [
+     507,
+     171,
+     5616,
+     788
+    ],
+    [
+     506,
+     73,
+     6404,
+     254
+    ],
+    [
+     506,
+     148,
+     6658,
+     332
+    ]
+   ],
+   "folds": 0,
+   "tools": [
+    "read_file",
+    "read_result"
+   ],
+   "gates": [],
+   "errors": 0,
+   "needs_tools": true
+  },
+  {
+   "at": "13:10:00",
+   "kind": "user",
+   "clone": "root",
+   "role": "root",
+   "end": "answer",
+   "gap_s": 120,
+   "requests": 2,
+   "usage": [
+    [
+     507,
+     117,
+     6990,
+     178
+    ],
+    [
+     506,
+     139,
+     7168,
+     511
+    ]
+   ],
+   "folds": 0,
+   "tools": [
+    "read_result"
+   ],
+   "gates": [],
+   "errors": 0,
+   "needs_tools": true
+  },
+  {
+   "at": "13:10:40",
+   "kind": "child",
+   "clone": "w-35add281",
+   "role": "worker",
+   "end": "answer",
+   "gap_s": 40,
+   "requests": 3,
+   "usage": [
+    [
+     507,
+     56,
+     2237,
+     99
+    ],
+    [
+     506,
+     71,
+     2336,
+     139
+    ],
+    [
+     506,
+     80,
+     2475,
+     1000
+    ]
+   ],
+   "folds": 0,
+   "tools": [
+    "read_file",
+    "read_result"
+   ],
+   "gates": [],
+   "errors": 0,
+   "brief_chars": 93,
+   "needs_tools": true
+  },
+  {
+   "at": "13:13:00",
+   "kind": "user",
+   "clone": "root",
+   "role": "root",
+   "end": "answer",
+   "gap_s": 140,
+   "requests": 1,
+   "usage": [
+    [
+     507,
+     278,
+     7679,
+     178
+    ]
+   ],
+   "folds": 0,
+   "tools": [],
+   "gates": [],
+   "errors": 0,
+   "needs_tools": false
+  },
+  {
+   "at": "13:30:00",
+   "kind": "signal",
+   "clone": "root",
+   "role": "root",
+   "end": "error",
+   "gap_s": 1020,
+   "requests": 0,
+   "usage": [],
+   "folds": 0,
+   "tools": [],
+   "gates": [],
+   "errors": 1,
+   "needs_tools": false
+  },
+  {
+   "at": "13:50:00",
+   "kind": "signal",
+   "clone": "root",
+   "role": "root",
+   "end": "error",
+   "gap_s": 2220,
+   "requests": 0,
+   "usage": [],
+   "folds": 0,
+   "tools": [],
+   "gates": [],
+   "errors": 1,
+   "needs_tools": false
+  },
+  {
+   "at": "15:00:00",
+   "kind": "user",
+   "clone": "root",
+   "role": "root",
+   "end": "answer",
+   "gap_s": 6420,
+   "requests": 4,
+   "usage": [
+    [
+     507,
+     121,
+     7857,
+     586
+    ],
+    [
+     506,
+     73,
+     8443,
+     173
+    ],
+    [
+     506,
+     228,
+     8616,
+     128
+    ],
+    [
+     506,
+     374,
+     8744,
+     1009
+    ]
+   ],
+   "folds": 0,
+   "tools": [
+    "read_file",
+    "read_result",
+    "read_result"
+   ],
+   "gates": [],
+   "errors": 0,
+   "needs_tools": true
+  },
+  {
+   "at": "15:00:40",
+   "kind": "child",
+   "clone": "w-d74aba85",
+   "role": "worker",
+   "end": "answer",
+   "gap_s": 40,
+   "requests": 3,
+   "usage": [
+    [
+     507,
+     57,
+     2237,
+     107
+    ],
+    [
+     506,
+     50,
+     2344,
+     109
+    ],
+    [
+     506,
+     339,
+     2453,
+     817
+    ]
+   ],
+   "folds": 0,
+   "tools": [
+    "read_file",
+    "read_result"
+   ],
+   "gates": [],
+   "errors": 0,
+   "brief_chars": 99,
+   "needs_tools": true
+  },
+  {
+   "at": "15:01:00",
+   "kind": "signal",
+   "clone": "root",
+   "role": "root",
+   "end": "error",
+   "gap_s": 20,
+   "requests": 0,
+   "usage": [],
+   "folds": 0,
+   "tools": [],
+   "gates": [],
+   "errors": 1,
+   "needs_tools": false
+  },
+  {
+   "at": "15:03:00",
+   "kind": "user",
+   "clone": "root",
+   "role": "root",
+   "end": "answer",
+   "gap_s": 140,
+   "requests": 2,
+   "usage": [
+    [
+     507,
+     290,
+     9753,
+     544
+    ],
+    [
+     506,
+     181,
+     10297,
+     314
+    ]
+   ],
+   "folds": 0,
+   "tools": [],
+   "gates": [
+    203
+   ],
+   "errors": 0,
+   "needs_tools": true,
+   "approved": [
+    203
+   ]
+  },
+  {
+   "at": "15:03:45",
+   "kind": "report",
+   "clone": "root",
+   "role": "root",
+   "end": "answer",
+   "gap_s": 45,
+   "requests": 1,
+   "usage": [
+    [
+     507,
+     202,
+     10611,
+     305
+    ]
+   ],
+   "folds": 0,
+   "tools": [],
+   "gates": [],
+   "errors": 0
+  },
+  {
+   "at": "15:05:00",
+   "kind": "user",
+   "clone": "root",
+   "role": "root",
+   "end": "answer",
+   "gap_s": 75,
+   "requests": 3,
+   "usage": [
+    [
+     507,
+     407,
+     10916,
+     221
+    ],
+    [
+     506,
+     76,
+     11137,
+     472
+    ],
+    [
+     506,
+     483,
+     11609,
+     308
+    ]
+   ],
+   "folds": 0,
+   "tools": [
+    "read_file",
+    "read_result"
+   ],
+   "gates": [],
+   "errors": 0,
+   "needs_tools": false
+  },
+  {
+   "at": "15:08:00",
+   "kind": "user",
+   "clone": "root",
+   "role": "root",
+   "end": "answer",
+   "gap_s": 180,
+   "requests": 3,
+   "usage": [
+    [
+     507,
+     314,
+     11917,
+     539
+    ],
+    [
+     506,
+     299,
+     12456,
+     660
+    ],
+    [
+     4,
+     2000,
+     0,
+     4577
+    ]
+   ],
+   "folds": 1,
+   "tools": [
+    "read_result",
+    "read_result"
+   ],
+   "gates": [],
+   "errors": 0,
+   "needs_tools": true
+  },
+  {
+   "at": "15:08:40",
+   "kind": "child",
+   "clone": "w-cc135eab",
+   "role": "worker",
+   "end": "answer",
+   "gap_s": 40,
+   "requests": 6,
+   "usage": [
+    [
+     507,
+     53,
+     2237,
+     103
+    ],
+    [
+     506,
+     71,
+     2340,
+     128
+    ],
+    [
+     506,
+     414,
+     2468,
+     3362
+    ],
+    [
+     506,
+     427,
+     5830,
+     3735
+    ],
+    [
+     506,
+     402,
+     9565,
+     3699
+    ],
+    [
+     506,
+     481,
+     13264,
+     1051
+    ]
+   ],
+   "folds": 0,
+   "tools": [
+    "read_file",
+    "read_result",
+    "read_result",
+    "read_result",
+    "read_result"
+   ],
+   "gates": [],
+   "errors": 0,
+   "brief_chars": 100,
+   "needs_tools": true
+  },
+  {
+   "at": "15:40:00",
+   "kind": "signal",
+   "clone": "root",
+   "role": "root",
+   "end": "answer",
+   "gap_s": 1880,
+   "requests": 1,
+   "usage": [
+    [
+     507,
+     306,
+     2237,
+     5939
+    ]
+   ],
+   "folds": 0,
+   "tools": [],
+   "gates": [],
+   "errors": 0,
+   "needs_tools": false
+  },
+  {
+   "at": "16:15:00",
+   "kind": "signal",
+   "clone": "root",
+   "role": "root",
+   "end": "answer",
+   "gap_s": 2100,
+   "requests": 1,
+   "usage": [
+    [
+     507,
+     216,
+     8176,
+     421
+    ]
+   ],
+   "folds": 0,
+   "tools": [],
+   "gates": [],
+   "errors": 0,
+   "needs_tools": false
+  },
+  {
+   "at": "16:50:00",
+   "kind": "signal",
+   "clone": "root",
+   "role": "root",
+   "end": "answer",
+   "gap_s": 2100,
+   "requests": 1,
+   "usage": [
+    [
+     507,
+     502,
+     8597,
+     339
+    ]
+   ],
+   "folds": 0,
+   "tools": [],
+   "gates": [],
+   "errors": 0,
+   "needs_tools": false
+  },
+  {
+   "at": "17:00:00",
+   "kind": "user",
+   "clone": "root",
+   "role": "root",
+   "end": "error",
+   "gap_s": 600,
+   "requests": 0,
+   "usage": [],
+   "folds": 0,
+   "tools": [],
+   "gates": [],
+   "errors": 1,
+   "needs_tools": false
+  },
+  {
+   "at": "17:02:00",
+   "kind": "user",
+   "clone": "root",
+   "role": "root",
+   "end": "error",
+   "gap_s": 720,
+   "requests": 0,
+   "usage": [],
+   "folds": 0,
+   "tools": [],
+   "gates": [],
+   "errors": 1,
+   "needs_tools": false
+  },
+  {
+   "at": "17:05:00",
+   "kind": "user",
+   "clone": "root",
+   "role": "root",
+   "end": "error",
+   "gap_s": 900,
+   "requests": 0,
+   "usage": [],
+   "folds": 0,
+   "tools": [],
+   "gates": [],
+   "errors": 1,
+   "needs_tools": false
+  },
+  {
+   "at": "17:40:00",
+   "kind": "signal",
+   "clone": "root",
+   "role": "root",
+   "end": "answer",
+   "gap_s": 3000,
+   "requests": 1,
+   "usage": [
+    [
+     507,
+     1245,
+     8936,
+     693
+    ]
+   ],
+   "folds": 0,
+   "tools": [],
+   "gates": [],
+   "errors": 0,
+   "needs_tools": false
+  },
+  {
+   "at": "18:45:00",
+   "kind": "signal",
+   "clone": "root",
+   "role": "root",
+   "end": "answer",
+   "gap_s": 3900,
+   "requests": 1,
+   "usage": [
+    [
+     507,
+     247,
+     9629,
+     1379
+    ]
+   ],
+   "folds": 0,
+   "tools": [],
+   "gates": [],
+   "errors": 0,
+   "needs_tools": false
+  },
+  {
+   "at": "19:00:00",
+   "kind": "user",
+   "clone": "root",
+   "role": "root",
+   "end": "error",
+   "gap_s": 900,
+   "requests": 1,
+   "usage": [
+    [
+     4,
+     2000,
+     0,
+     5634
+    ]
+   ],
+   "folds": 1,
+   "tools": [],
+   "gates": [],
+   "errors": 1,
+   "needs_tools": true
+  },
+  {
+   "at": "19:03:00",
+   "kind": "user",
+   "clone": "root",
+   "role": "root",
+   "end": "answer",
+   "gap_s": 180,
+   "requests": 3,
+   "usage": [
+    [
+     507,
+     433,
+     2828,
+     4361
+    ],
+    [
+     506,
+     73,
+     7189,
+     508
+    ],
+    [
+     506,
+     509,
+     7697,
+     224
+    ]
+   ],
+   "folds": 0,
+   "tools": [
+    "read_file",
+    "read_result"
+   ],
+   "gates": [],
+   "errors": 0,
+   "needs_tools": false
+  },
+  {
+   "at": "19:05:00",
+   "kind": "user",
+   "clone": "root",
+   "role": "root",
+   "end": "answer",
+   "gap_s": 120,
+   "requests": 1,
+   "usage": [
+    [
+     507,
+     508,
+     7921,
+     538
+    ]
+   ],
+   "folds": 0,
+   "tools": [],
+   "gates": [],
+   "errors": 0,
+   "needs_tools": false
+  },
+  {
+   "at": "19:40:00",
+   "kind": "signal",
+   "clone": "root",
+   "role": "root",
+   "end": "error",
+   "gap_s": 2100,
+   "requests": 0,
+   "usage": [],
+   "folds": 0,
+   "tools": [],
+   "gates": [],
+   "errors": 1,
+   "needs_tools": false
+  },
+  {
+   "at": "20:15:00",
+   "kind": "signal",
+   "clone": "root",
+   "role": "root",
+   "end": "error",
+   "gap_s": 4200,
+   "requests": 0,
+   "usage": [],
+   "folds": 0,
+   "tools": [],
+   "gates": [],
+   "errors": 1,
+   "needs_tools": false
+  },
+  {
+   "at": "21:00:00",
+   "kind": "user",
+   "clone": "root",
+   "role": "root",
+   "end": "answer",
+   "gap_s": 6900,
+   "requests": 1,
+   "usage": [
+    [
+     507,
+     608,
+     8459,
+     763
+    ]
+   ],
+   "folds": 0,
+   "tools": [],
+   "gates": [],
+   "errors": 0,
+   "needs_tools": false
+  },
+  {
+   "at": "21:03:00",
+   "kind": "user",
+   "clone": "root",
+   "role": "root",
+   "end": "answer",
+   "gap_s": 180,
+   "requests": 1,
+   "usage": [
+    [
+     507,
+     484,
+     9222,
+     628
+    ]
+   ],
+   "folds": 0,
+   "tools": [],
+   "gates": [],
+   "errors": 0,
+   "needs_tools": false
+  },
+  {
+   "at": "21:03:40",
+   "kind": "child",
+   "clone": "w-1e340573",
+   "role": "worker",
+   "end": "answer",
+   "gap_s": 40,
+   "requests": 4,
+   "usage": [
+    [
+     507,
+     105,
+     2237,
+     115
+    ],
+    [
+     506,
+     149,
+     2352,
+     277
+    ],
+    [
+     506,
+     218,
+     2629,
+     272
+    ],
+    [
+     506,
+     477,
+     2901,
+     593
+    ]
+   ],
+   "folds": 0,
+   "tools": [
+    "read_file",
+    "read_file",
+    "read_result",
+    "read_result",
+    "read_result",
+    "read_result"
+   ],
+   "gates": [],
+   "errors": 0,
+   "brief_chars": 138,
+   "needs_tools": true
+  },
+  {
+   "at": "21:05:00",
+   "kind": "signal",
+   "clone": "root",
+   "role": "root",
+   "end": "error",
+   "gap_s": 80,
+   "requests": 0,
+   "usage": [],
+   "folds": 0,
+   "tools": [],
+   "gates": [],
+   "errors": 1,
+   "needs_tools": false
+  },
+  {
+   "at": "21:06:00",
+   "kind": "user",
+   "clone": "root",
+   "role": "root",
+   "end": "answer",
+   "gap_s": 140,
+   "requests": 1,
+   "usage": [
+    [
+     507,
+     239,
+     9850,
+     620
+    ]
+   ],
+   "folds": 0,
+   "tools": [],
+   "gates": [],
+   "errors": 0,
+   "needs_tools": false
+  },
+  {
+   "at": "22:30:00",
+   "kind": "signal",
+   "clone": "root",
+   "role": "root",
+   "end": "error",
+   "gap_s": 5040,
+   "requests": 0,
+   "usage": [],
+   "folds": 0,
+   "tools": [],
+   "gates": [],
+   "errors": 1,
+   "needs_tools": false
+  },
+  {
+   "at": "23:40:00",
+   "kind": "night",
+   "clone": "night-d6f4dfce",
+   "role": "night",
+   "end": "answer",
+   "gap_s": 9240,
+   "requests": 1,
+   "usage": [
+    [
+     507,
+     2346,
+     2237,
+     17868
+    ]
+   ],
+   "folds": 0,
+   "tools": [],
+   "gates": [],
+   "errors": 0,
+   "brief_chars": 30186,
+   "needs_tools": false
+  }
+ ],
+ "resident_chars": 1050
+}

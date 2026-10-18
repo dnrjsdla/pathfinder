@@ -85,6 +85,7 @@ class RouterTest(unittest.TestCase):
             self.run_req(Request("root", "S", clone="root", turn="t1"))
         self.assertEqual((cm.exception.status, cm.exception.fallbacks),
                          (400, [{"model": "cloud:big", "status": 503, "message": "fake 503"}]))
+        self.router = router.Router(lambda: {**CFG, "models": {}})
         with self.assertRaises(LLMError) as cm:  # no chain at all: raised before any attempt
             self.run_req(Request("worker", "S"))
         self.assertEqual(cm.exception.fallbacks, [])
@@ -115,10 +116,23 @@ class RouterTest(unittest.TestCase):
                 self.router.chain("root", bad)
         self.assertEqual(self.run_req(Request("root", "S", model="local:other")).model, "local:other")
 
-    def test_role_without_models_raises(self):
-        for role in ("worker", "no-such-role"):
-            with self.assertRaises(LLMError):
+    def test_role_without_a_chain_uses_roots(self):
+        self.router = router.Router(lambda: {**CFG, "models": {"root": ["local:small", "local:tiny"]}})
+        self.assertEqual(self.router.chain("summarize"), ["local:small", "local:tiny"])
+        resp = self.run_req(Request("summarize", "S", max_tokens=2000))  # the fold's request
+        self.assertEqual((resp.model, self.fake.calls), ("local:small", ["small"]))
+
+    def test_no_chain_for_the_role_nor_root_raises_naming_root(self):
+        self.router = router.Router(lambda: {**CFG, "models": {"worker": ["local:small"]}})
+        for role in ("summarize", "root"):
+            with self.assertRaises(LLMError) as cm:
                 self.router.chain(role)
+            self.assertIn(f"no models for role '{role}' nor for root", cm.exception.message)
+
+    def test_role_with_its_own_chain_ignores_roots(self):
+        self.assertEqual(self.router.chain("summarize"), ["local:small"])
+        self.assertEqual(self.run_req(Request("summarize", "S")).model, "local:small")
+        self.assertNotIn("big", self.fake.calls)
 
     def test_semaphore_serializes_one_api(self):
         active, peak = 0, 0

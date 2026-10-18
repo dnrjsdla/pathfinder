@@ -7,7 +7,7 @@ import uuid
 from pathlib import Path
 from unittest import mock
 
-from pathfinder import assemble, clone as clone_mod, policy, results, tools
+from pathfinder import assemble, clone as clone_mod, policy, results, router as router_mod, tools
 from pathfinder.clone import BUDGET_NOTE, NOT_RUN, NOT_RUN_INTERRUPTED, REFUSED_LINE, SKIPPED, USER_UNKNOWN, Clone, Item
 from pathfinder.ledger import Ledger
 from pathfinder.llm import Endpoint, LLMError, Response, anthropic, openai_compat
@@ -456,6 +456,28 @@ class CloneTest(unittest.IsolatedAsyncioTestCase):
             await c.run(Item("user", "Third.", "s1"))  # this fold fails: an error, no summary
         self.assertEqual(len(self.events("summary")), 1)
         self.assertEqual(self.events("error")[-1]["status"], 402)
+
+    async def test_a_root_only_config_folds_on_roots_chain(self):
+        """U12: `models` holds only root; through the real router the fold's summarize request runs on root's chain."""
+        steps, seen = [resp(text("one")), resp(text("two")), resp(text("Summary of turn one."))], []
+
+        async def adapter(endpoint, req, on_text=None, cancel=None):
+            seen.append(req.role)
+            return steps.pop(0)
+
+        cfg = {"providers": {"local": {"base_url": "http://127.0.0.1:9/v1"}}, "models": {"root": ["local:fake-model"]}}
+        c = Clone("root", "root", home=self.home, state=self.state, record=self.record,
+                  router=router_mod.Router(lambda: cfg), send=lambda session, msg: self.sent.append(msg),
+                  enqueue=self.queue.append, resident=self._resident)
+        c.restore()
+        with mock.patch.object(openai_compat, "complete", adapter), \
+                mock.patch.object(assemble, "HISTORY_BUDGET", 50), mock.patch.object(assemble, "FOLD_KEEP", 10):
+            await c.run(Item("user", "First.", "s1"))
+            await c.run(Item("user", "Second.", "s1"))
+        self.assertEqual(seen, ["root", "root", "summarize"])
+        self.assertEqual(self.events("error"), [])
+        [summary] = self.events("summary")
+        self.assertEqual(summary["model"], "local:fake-model")
 
     async def test_a_blank_stream_before_an_error_records_no_text_block(self):
         """U8a review: what streamed is recorded, but a blank text block would be replayed in every later

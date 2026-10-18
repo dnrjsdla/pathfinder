@@ -1,5 +1,5 @@
-"""pathfinder daemon | reindex | say TEXT | config get [KEY] |
-config set KEY VALUE | config set senses.NAME JSON|off |
+"""pathfinder daemon | reindex | say TEXT | config get [KEY[.SUB]] |
+config set KEY VALUE | config set KEY.SUB JSON|off |
 approvals | approve ID | deny ID | interrupt |
 listen | signal SENSE JSON | react up|down [ID] | rules | tools |
 memory | memory undo [N] |
@@ -364,28 +364,38 @@ def memory_undo(home, n=1):
 
 
 def config_cmd(home, args):
-    """`config get [KEY]` prints JSON; `config set KEY VALUE` writes through config.set();
-    `config set senses.NAME JSON|off` changes that one sense and keeps the others (a whole-senses
-    `config set` once switched seven senses off unnoticed). A refusal is one line, exit 1."""
+    """`config get [KEY[.SUB]]` prints JSON; `config set KEY VALUE` writes through config.set();
+    `config set KEY.SUB JSON|off` sets or drops one entry of an object-valued key (`senses.mail`,
+    `models.summarize`) and keeps the others (a whole-senses `config set` once switched seven senses
+    off unnoticed; D73, D75). A refusal is one line, exit 1."""
     try:
         cfg = config.load(home)
         if args[0] == "get":
-            if len(args) == 2 and args[1] not in cfg:
-                raise config.ConfigError(f"unknown config key: {args[1]}")
-            print(json.dumps(cfg[args[1]] if len(args) == 2 else cfg, indent=2, ensure_ascii=False))
+            value = cfg
+            for part in args[1].split(".", 1) if len(args) == 2 else []:
+                if value is cfg["models"] and part != "root" and part in config._MODEL_ROLES and part not in value:
+                    print(f"not set; uses root's: {json.dumps(value.get('root'))}")
+                    return 0
+                if not isinstance(value, dict) or part not in value:
+                    raise config.ConfigError(f"unknown config key: {args[1]}")
+                value = value[part]
+            print(json.dumps(value, indent=2, ensure_ascii=False))
             return 0
         key, raw = args[1], args[2]
         try:
             value = json.loads(raw)
         except ValueError:
             value = raw  # a bare word is a string: `config set embed_model provider:name`
-        if key.startswith("senses."):
-            senses, name = dict(cfg["senses"]), key.removeprefix("senses.")
+        family, dotted, sub = key.partition(".")
+        if dotted:
+            if family in cfg and not isinstance(cfg[family], dict):
+                raise config.ConfigError(f"{family} is set whole: `pathfinder config set {family} VALUE`")
+            table = dict(cfg.get(family, {}))  # an unknown family is refused by config.set
             if value == "off":
-                senses.pop(name, None)
+                table.pop(sub, None)
             else:
-                senses[name] = value
-            key, value = "senses", senses
+                table[sub] = value
+            key, value = family, table
         config.set(home, key, value, ledger=Ledger(home))
     except config.ConfigError as e:
         print(f"pathfinder: {e}", file=sys.stderr)

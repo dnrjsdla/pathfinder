@@ -12,7 +12,8 @@ from pathlib import Path
 from unittest import mock
 
 from pathfinder import __main__ as cli
-from pathfinder import config, init
+from pathfinder import config, init, router
+from pathfinder.ledger import Ledger
 
 # "bge" is excluded on purpose: init.py's embed_model heuristic (`"bge" in id.lower()`) has to
 # name that substring to detect it in ids the machine reports - that is pattern matching against
@@ -94,8 +95,7 @@ class InitChecksTest(InitTestBase):
         # model 1, embed n, attach/catalog/schedule/reminders/shell/claude_code n, launchd n
         answers = ["1", "n", "n", "n", "n", "n", "n", "n", "n"]
         self.assertEqual(self.run_init(answers=answers, models_url=url), 0)
-        self.assertEqual(config.load(self.home)["models"],
-                         {"root": ["ollama:x-cloud"], "summarize": ["ollama:x-cloud"]})
+        self.assertEqual(config.load(self.home)["models"], {"root": ["ollama:x-cloud"]})
         types = []
         for f in sorted((self.home / "events").glob("*.jsonl")):
             for line in f.read_text().splitlines():
@@ -174,6 +174,47 @@ class ConfigCommandTest(InitTestBase):
             self.assertEqual(len(err.splitlines()), 1, argv)
             self.assertTrue(err.startswith("pathfinder: "), argv)
         self.assertEqual(config.load(self.home)["senses"], {"calendar": {}, "shell": {}})
+
+    def test_config_set_one_model_role_keeps_the_others(self):
+        """D75: `config set models.<role>` merges one role through the one writer, one `config_set` event."""
+        config.set(self.home, "models", {"root": ["ollama:fake-a"]})
+        self.assertEqual(self.run_cli("config", "set", "models.summarize", '["ollama:fake-b"]')[0], 0)
+        self.assertEqual(config.load(self.home)["models"], {"root": ["ollama:fake-a"], "summarize": ["ollama:fake-b"]})
+        events = [e for e in Ledger(self.home).read() if e["type"] == "config_set"]
+        self.assertEqual([e["key"] for e in events], ["models"])
+
+    def test_config_set_model_role_off_falls_back_to_root(self):
+        config.set(self.home, "models", {"root": ["ollama:fake-a"], "summarize": ["ollama:fake-b"]})
+        self.assertEqual(self.run_cli("config", "set", "models.summarize", "off")[0], 0)
+        self.assertEqual(config.load(self.home)["models"], {"root": ["ollama:fake-a"]})
+        self.assertEqual(router.Router(lambda: config.load(self.home)).chain("summarize"), ["ollama:fake-a"])
+
+    def test_config_set_dotted_refusals(self):
+        config.set(self.home, "models", {"root": ["ollama:fake-a"]})
+        for argv, why in ((("config", "set", "models.nosuch", '["ollama:x"]'), "unknown models key"),
+                          (("config", "set", "models.summarize", '["nowhere:x"]'), "unknown provider"),
+                          (("config", "set", "providers.ollama", "off"), "unknown provider"),  # root's ref names it
+                          (("config", "set", "grants.x", "maybe"), "grants values must be"),
+                          (("config", "set", "max_steps.x", "1"), "max_steps is set whole"),
+                          (("config", "set", "nosuch.x", "1"), "unknown config key")):
+            rc, out, err = self.run_cli(*argv)
+            self.assertEqual((rc, out, len(err.splitlines())), (1, "", 1), argv)
+            self.assertIn(why, err, argv)
+        cfg = config.load(self.home)
+        self.assertEqual((cfg["models"], list(cfg["providers"]), cfg["grants"], cfg["max_steps"]),
+                         ({"root": ["ollama:fake-a"]}, ["ollama"], {}, 8))
+
+    def test_config_get_one_entry(self):
+        config.set(self.home, "models", {"root": ["ollama:fake-a"]})
+        rc, out, _ = self.run_cli("config", "get", "models.root")
+        self.assertEqual((rc, json.loads(out)), (0, ["ollama:fake-a"]))
+        rc, out, _ = self.run_cli("config", "get", "senses.calendar")
+        self.assertEqual((rc, json.loads(out)), (0, {}))
+        self.assertEqual(self.run_cli("config", "get", "models.summarize"),
+                         (0, 'not set; uses root\'s: ["ollama:fake-a"]\n', ""))
+        for key in ("senses.mail", "max_steps.x"):
+            rc, out, err = self.run_cli("config", "get", key)
+            self.assertEqual((rc, out, err), (1, "", f"pathfinder: unknown config key: {key}\n"))
 
 
 class InitShellHookTest(InitTestBase):

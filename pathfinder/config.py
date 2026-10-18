@@ -21,7 +21,7 @@ class ConfigError(Exception):
 DEFAULTS = {
     "embed_model": "",
     "models": {},      # role -> ["provider:model", ...]: first = primary, the rest = the fallback chain
-    "providers": {"ollama": {"base_url": "http://localhost:11434/v1", "api_key_env": ""}},  # + optional "api": "openai" (default) | "anthropic" (experimental - never run live, D7/D37), "effort" (anthropic only)
+    "providers": {"ollama": {"base_url": "http://localhost:11434/v1", "api_key_env": ""}},  # + optional "api": "openai" (default) | "anthropic" (the official SDK; live only on the owner's go-ahead, D7), "effort" (anthropic only)
     "max_steps": 8,
     "session_resume_s": 7200,
     "grants": {},

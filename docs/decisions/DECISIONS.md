@@ -667,3 +667,16 @@ and the model diagnosed permissions; 144 of 158 error records were one mail `gai
 were cut by an in-turn restart. — *Reversed if* a refusal blocks a command the owner meant to
 run (then the pattern narrows), or a sense that fails and recovers by turns
 fills the ledger with error and `Recovered` pairs.
+
+**D75. A role without a model chain uses root's** (decided 2026-10-18). Role-specific models are
+optional: when `models` holds no chain for a role, the router uses `root`'s, and it raises only when
+root has none either (the message names root). `config set models.<role>` sets one role (as D73 did
+for senses): one general rule, `config set KEY.SUB JSON|off` sets or drops one entry of any
+object-valued key and refuses a scalar or list key, supersedes D73's senses-only branch as D73's own
+clause foresaw; `config get KEY.SUB` prints one entry. The U10a review found that an install whose
+`models` held only `root` never folded: the fold asks for role `summarize`, the router raised `no
+models for role 'summarize'`, and the window stayed unfolded - a silent failure. Every new role (P3,
+P5) would otherwise start as the same silent failure, and `config set models` replaces the whole
+table, so adding one role could wipe another. `init` writes `root` only again: one line of config
+runs everything. — *Reversed if* a role silently running on root's model costs more than a missed
+fold would — then roles are explicit again and `config set` warns when a used role is missing.

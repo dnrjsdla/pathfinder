@@ -116,10 +116,10 @@ pathfinder service start
 
 ## Model providers
 
-Any OpenAI-compatible endpoint works: `pathfinder config set models '{"root": ["provider:model-name"], "summarize": ["provider:model-name"]}'`, with the
-provider's `base_url` and `api_key_env` in `config.json`. An Anthropic-native adapter exists
-(`providers.<name>.api = "anthropic"`) but is **experimental**: it is tested against recorded
-responses only and has never been run live.
+Any OpenAI-compatible endpoint works: `pathfinder config set models '{"root": ["provider:model-name"]}'`, with the
+provider's `base_url` and `api_key_env` in `config.json`. An Anthropic-native adapter
+(`providers.<name>.api = "anthropic"`) uses the official SDK and runs live only on the owner's
+go-ahead (D7).
 
 ## Measurements
 

@@ -62,10 +62,11 @@ def resolve(cfg, ref):
     error, not a crash - the message tells the user how to fix it."""
     provider, _, model = (ref or "").partition(":")
     if not model:
-        raise LLMError(0, "no model configured; set one with `pathfinder config set model provider:name`")
+        raise LLMError(0, "no model configured; set one with `pathfinder config set models.root '[\"provider:name\"]'`")
     providers = cfg.get("providers", {})
     if provider not in providers:
-        raise LLMError(0, f"unknown provider {provider!r}; set model with `pathfinder config set model provider:name`")
+        raise LLMError(0, f"unknown provider {provider!r}; set the model with "
+                          "`pathfinder config set models.root '[\"provider:name\"]'`")
     p = providers[provider]
     api = p.get("api", "openai")
     if api not in ("openai", "anthropic"):

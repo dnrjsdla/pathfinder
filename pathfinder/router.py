@@ -22,7 +22,8 @@ class Router:
         self._pins = {}  # (clone, chain) -> (turn, index): the chain position of the clone's current run
 
     def chain(self, role: str, override: str = "") -> list[str]:
-        """The refs to try in order: the override alone (a spawn argument), else the role's `models` chain."""
+        """The refs to try in order: the override alone (a spawn argument), else the role's `models` chain;
+        a role without a chain uses root's."""
         return self._chain(self._load_cfg(), role, override)
 
     def _chain(self, cfg, role, override):
@@ -31,10 +32,11 @@ class Router:
             if not model or provider not in cfg.get("providers", {}):
                 raise llm.LLMError(0, f"bad model override {override!r}: want provider:model with a known provider")
             return [override]
-        refs = cfg.get("models", {}).get(role)
+        models = cfg.get("models", {})
+        refs = models.get(role) or models.get("root")
         if not refs:
-            raise llm.LLMError(0, f"no models for role {role!r}; set one with "
-                                  f"`pathfinder config set models '{{\"{role}\": [\"provider:model\"]}}'`")
+            raise llm.LLMError(0, f"no models for role {role!r} nor for root; set root with "
+                                  "`pathfinder config set models.root '[\"provider:model\"]'`")
         return list(refs)
 
     async def complete(self, req: llm.Request, on_text=None, cancel=None) -> llm.Response:

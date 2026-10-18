@@ -216,7 +216,8 @@ in-memory string: the resident as `turn_start.resident` holds it, the user's wor
 
 **Config** (`config.py`, through `config.set()` only): `models` = `{key: ["provider:model", ...]}`, keys closed to
 `root, worker, reviewer, triage, summarize, night`, first = primary, the rest = the fallback chain, every provider must
-exist. `providers.<name>` gains optional `effort` (`anthropic` only: `low|medium|high|xhigh|max`; absent = API default).
+exist; a role without a chain uses root's (owner decision 2026-10-18); `config set models.<role>` sets one role.
+`providers.<name>` gains optional `effort` (`anthropic` only: `low|medium|high|xhigh|max`; absent = API default).
 `max_steps` (8) stays the step budget. `model`/`worker_model` leave in U10a (§12 "single model setting");
 `embed_model` stays (V20). Constants, not config, until a second value is needed: `router.CONCURRENCY = {"anthropic":
 4, "openai": 1}` (per api), `clone.TOKEN_BUDGET = 100_000` per item, counted as `input_tokens +

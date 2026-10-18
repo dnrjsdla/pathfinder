@@ -2,7 +2,6 @@
 config set KEY VALUE | config set senses.NAME JSON|off |
 approvals | approve ID | deny ID | interrupt |
 listen | signal SENSE JSON | react up|down [ID] | rules | tools |
-jobs |
 memory | memory undo [N] |
 install NAME | uninstall ID | search TEXT | secret ID NAME |
 init | service start|stop|restart|status | tui"""
@@ -14,13 +13,11 @@ import json
 import shlex
 import socket
 import sys
-import time
 from pathlib import Path
 
 from . import catalog, config, keychain, memory, mirror, tui
 from . import init as init_mod
 from . import installer as installer_mod
-from .clock import format_local
 from .daemon import SOCKET, Daemon, is_serving
 from .ledger import Ledger
 from .mcp import servers as mcp_servers
@@ -119,8 +116,7 @@ def approvals(home):
             if row["tool"] == "install_server":
                 print(installer_mod.render_row(row))
                 continue
-            job = f"  job: {row['job']}" if row.get("job") else ""
-            print(visible(f"{row['id']}  {row['tool']}  {json.dumps(row['args'], ensure_ascii=False)}{job}"))
+            print(visible(f"{row['id']}  {row['tool']}  {json.dumps(row['args'], ensure_ascii=False)}"))
     finally:
         state.close()
     return 0
@@ -334,35 +330,11 @@ def rules_path(home):
     return 0
 
 
-def jobs_list(home):
-    """List every job, newest first - reads state.db directly, like `approvals`."""
-    state = State(home / "state.db")
-    try:
-        for row in state.jobs():
-            started = format_local(row["started_ts"])
-            print(f"{row['id']}  {row['state']}  {started}  {row['goal']}")
-    finally:
-        state.close()
-    return 0
-
-
 def memory_status(home):
-    """`pathfinder memory`: cursor, passes/lines-read/applied for today and the two days before,
-    pending proposals, judgments per day (seven days, today first), and the latest session's
-    summary - reads state.db directly, like `jobs_list`."""
+    """`pathfinder memory`: pending proposals - reads state.db directly, like `approvals`."""
     state = State(home / "state.db")
     try:
-        stats = state.memory_stats(time.time())
-        print(f"cursor {state.memory_cursor}")
-        labels = ("today", "1 day ago", "2 days ago")
-        for label, day in zip(labels, stats["days"]):
-            print(f"{label}: passes {day['passes']}, read {day['read']}, applied {day['applied']}")
-        print(f"pending proposals {stats['pending']}")
-        print(f"judgments/day (today first): {' '.join(str(n) for n in stats['judgments'])}")
-        sid = state.latest_session(config.load(home)["session_resume_s"])
-        summary = state.summary(sid) if sid else None
-        if summary:
-            print(f"latest session summary upto #{summary['upto']}")
+        print(f"pending proposals {len(state.pending_memory())}")
     finally:
         state.close()
     return 0
@@ -406,7 +378,7 @@ def config_cmd(home, args):
         try:
             value = json.loads(raw)
         except ValueError:
-            value = raw  # a bare word is a string: `config set model provider:name`
+            value = raw  # a bare word is a string: `config set embed_model provider:name`
         if key.startswith("senses."):
             senses, name = dict(cfg["senses"]), key.removeprefix("senses.")
             if value == "off":
@@ -479,8 +451,6 @@ def main(argv=None):
         return search_cmd(home, " ".join(args[1:]))
     if args[:1] == ["secret"] and (args[1:] == ["mail"] or len(args) in (3, 5) and args[3:4] in ([], ["--from"])):
         return secret_cmd(home, *args[1:3], *args[4:])
-    if args == ["jobs"]:
-        return jobs_list(home)
     if args == ["memory"]:
         return memory_status(home)
     if len(args) in (2, 3) and args[:2] == ["memory", "undo"]:

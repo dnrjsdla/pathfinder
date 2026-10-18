@@ -16,12 +16,11 @@ from pathlib import Path
 from . import keychain
 
 TYPES = frozenset({
-    "session_start", "user", "assistant", "tool_call", "tool_result",
+    "session_start", "user", "assistant",
     "turn_start", "turn_end", "error", "config_set",
     "approval_pending", "approval", "interrupted",
     "signal", "decision", "judgment", "delivery", "reaction", "presence",
-    "job_start", "job_done", "job_failed",
-    "memory_pass", "memory_apply", "session_summary",
+    "memory_apply",
     "pin_accept", "pin_revoke",
     "install_step", "install_done", "install_failed", "uninstalled",
     # v2 (partition 1 contract); every one carries `clone`

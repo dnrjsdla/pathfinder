@@ -459,9 +459,9 @@ class PastedTokenTest(unittest.TestCase):
         body = "\n".join("MIIJ" + "Qk9vdHN0cmFw" * 5 for _ in range(48))  # about 3 KB, no END
         key = "-----BEGIN " + "RSA PRIVATE KEY-----\n" + body + "\n-----END " + "RSA PRIVATE KEY-----"
         for clipped in (tools_mod.clip_for_ledger(key), tools_mod.clip_for_ledger({"content": key})):
-            event = self._record("tool_result", id="c1", name="read_file", ok=True, result=clipped)
-            self.assertEqual(event["result"], clipped[:clipped.index("-----BEGIN")] + "[redacted]...(truncated)")
-        self.assertIsNone(re.search(r"[A-Za-z0-9+/=]{20,}", "".join(json.loads(line)["result"]
+            event = self._record("result", call_id="c1", tool="read_file", ok=True, body=clipped)
+            self.assertEqual(event["body"], clipped[:clipped.index("-----BEGIN")] + "[redacted]...(truncated)")
+        self.assertIsNone(re.search(r"[A-Za-z0-9+/=]{20,}", "".join(json.loads(line)["body"]
                           for line in self._on_disk().splitlines())))
         self.assertEqual(self.items, {})
 
@@ -508,11 +508,21 @@ class PastedTokenTest(unittest.TestCase):
     def test_a_token_in_a_tool_result_is_redacted_without_the_keychain(self):
         mock.patch.stopall()
         with mock.patch("pathfinder.keychain.subprocess.run") as run:
-            result = self._record("tool_result", id="c1", name="read_file", ok=True, result=f"env: {self.TOKEN}")
+            result = self._record("result", call_id="c1", tool="read_file", ok=True, body=f"env: {self.TOKEN}")
             signal = self.ledger.append("signal", origin="signal", trust="third_party", summary=f"mail {self.OTHER}")
-        self.assertEqual((result["result"], signal["summary"]), ("env: [redacted]", "mail [redacted]"))
+        self.assertEqual((result["body"], signal["summary"]), ("env: [redacted]", "mail [redacted]"))
         self.assertEqual(run.call_count, 0)
         self.assertFalse((self.home / "pasted.json").exists())
+
+    def test_a_token_in_gate_args_is_redacted_without_the_keychain(self):
+        """A raw token the model wrote into a call's arguments reaches the ledger redacted, as any text not the owner's."""
+        mock.patch.stopall()
+        with mock.patch("pathfinder.keychain.subprocess.run") as run:
+            gate = self._record("gate", origin="user", clone="root", step=1, call_id="toolu_1", tool="save",
+                                args={"key": self.OTHER}, effect="write", brief="b")
+        self.assertEqual(gate["args"], {"key": "[redacted]"})
+        self.assertNotIn(self.OTHER, self._on_disk())
+        self.assertEqual(run.call_count, 0)
 
     def test_a_token_in_the_owners_text_gets_a_handle(self):
         mock.patch.stopall()
@@ -552,15 +562,3 @@ class PastedTokenTest(unittest.TestCase):
         self.assertNotIn("delete-generic-password", calls)
         self.assertNotIn("-i", calls)
 
-    def test_pasted_token_reaches_the_record_as_a_handle(self):
-        """The owner's paste becomes a handle in history; a call that passes the handle on is
-        recorded with it, and a raw token the model wrote into a call is recorded redacted."""
-        self._record("session_start", session="s")
-        handle = self._say(f"save {self.TOKEN}", session="s", turn="t1")["text"].split()[-1]
-        args = {"token": handle, "raw": self.OTHER}
-        for type_, extra in (("tool_call", {"args": args}), ("tool_result", {"ok": True, "result": "done"})):
-            self._record(type_, session="s", turn="t1", origin="user", id="c1", name="remember", **extra)
-        (record,) = [m["content"] for m in self.state.history("s") if m["role"] == "system"]
-        self.assertIn(f'remember {{"token":"{handle}","raw":"[redacted]"}} ok', record)
-        self.assertNotIn(self.TOKEN, record)
-        self.assertNotIn(self.OTHER, record)

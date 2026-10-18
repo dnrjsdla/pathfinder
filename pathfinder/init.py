@@ -209,7 +209,8 @@ def run(home, *, ask=input, say=print, launchctl=_launchctl, models_url=None) ->
     index = int(pick) - 1 if pick.isdigit() else 0
     if not 0 <= index < len(ids):
         index = 0
-    config.set(home_path, "model", f"ollama:{ids[index]}", ledger=ledger)
+    ref = f"ollama:{ids[index]}"
+    config.set(home_path, "models", {**cfg["models"], "root": [ref], "summarize": [ref]}, ledger=ledger)
     say(f"model: ollama:{ids[index]}")
 
     embed_candidates = [m for m in ids if "embed" in m.lower() or "bge" in m.lower()]

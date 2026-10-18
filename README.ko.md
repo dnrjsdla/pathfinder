@@ -114,7 +114,7 @@ pathfinder service start
 
 ## 모델 제공자
 
-OpenAI 호환 엔드포인트면 무엇이든: `pathfinder config set model provider:model-name`, 제공자의
+OpenAI 호환 엔드포인트면 무엇이든: `pathfinder config set models '{"root": ["provider:model-name"], "summarize": ["provider:model-name"]}'`, 제공자의
 `base_url`과 `api_key_env`는 `config.json`에. Anthropic 네이티브 어댑터도 있지만
 (`providers.<name>.api = "anthropic"`) **실험적**이다: 녹화된 응답으로만 테스트했고 라이브로
 돌린 적이 없다.

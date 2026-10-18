@@ -40,18 +40,13 @@ STRINGS = {
     "no_daemon": "데몬이 실행되지 않음 · the daemon is not running (start it with: pathfinder daemon)",
     "dropped": "연결 끊김 · connection to the daemon was lost",
     "gate": "승인 대기 · waiting for approval on {tool} {args} - /approve {id} or /deny {id}",
-    "job_gate": "작업 승인 대기 · job {id} waiting for approval on {tool} {args} "
-                "- /approve {approval} or /deny {approval}",
-    "job_start": "작업 시작 · job {id} started: {goal}",
-    "job_end": "작업 종료 · job {id} {state}",
     "error": "오류 · error: {message}",
     "tool_ok": "도구 완료 · tool {name} done",
     "tool_fail": "도구 실패 · tool {name} failed",
     "notice": "알림 · notice: {text} ({why})",
     "retract": "철회 · withdrawn: the answer above {what} without calling a tool - trying again with the tools",
-    "help": "알 수 없는 명령 · unknown command - try /approve, /deny, /approvals, /jobs, /secret, /quit",
+    "help": "알 수 없는 명령 · unknown command - try /approve, /deny, /approvals, /secret, /quit",
     "no_approvals": "대기 중인 승인 없음 · no approvals seen this sitting",
-    "no_jobs": "확인된 작업 없음 · no jobs seen this sitting",
 }
 
 
@@ -83,13 +78,6 @@ def render(msg: dict) -> str | None:
     if kind == "notice":
         text = sanitize(msg.get("text") or "")
         return NOTICE_DIM + STRINGS["notice"].format(text=text, why=msg.get("why")) + RESET
-    if kind == "job.start":
-        return STRINGS["job_start"].format(id=msg.get("id"), goal=sanitize(msg.get("goal") or ""))
-    if kind == "job.gate":
-        return visible(STRINGS["job_gate"].format(id=msg.get("id"), approval=msg.get("approval"),
-                                                   tool=msg.get("tool"), args=_gate_args(msg.get("args"))))
-    if kind == "job.end":
-        return STRINGS["job_end"].format(id=msg.get("id"), state=msg.get("state"))
     if kind == "error":
         return STRINGS["error"].format(message=msg.get("message"))
     if kind == "secret.ask":  # D53, for a client with no masked input (`say`, `listen`)
@@ -270,8 +258,8 @@ class _Session:
             self.send({"type": "approve", "id": rest})
         elif cmd == "deny" and rest:
             self.send({"type": "deny", "id": rest})
-        elif cmd in ("approvals", "jobs"):
-            self._cli_list(cmd)
+        elif cmd == "approvals":
+            self._cli_list()
         elif cmd == "secret":
             entry, text = tui_secret.entry(rest, self.home, self.send)
             if entry:
@@ -283,13 +271,13 @@ class _Session:
             self.show(STRINGS["help"])
         return None
 
-    def _cli_list(self, cmd):
+    def _cli_list(self):
         from . import __main__ as cli  # lazy: __main__ imports this module
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            (cli.approvals if cmd == "approvals" else cli.jobs_list)(self.home)
+            cli.approvals(self.home)
         lines = buf.getvalue().splitlines()
-        for line in lines or [STRINGS["no_approvals" if cmd == "approvals" else "no_jobs"]]:
+        for line in lines or [STRINGS["no_approvals"]]:
             self.show(line)
 
     def _read_sock(self):

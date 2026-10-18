@@ -9,18 +9,14 @@
 No network: entries are built by hand, and `servers.call` is a recording fake."""
 from __future__ import annotations
 
-import tempfile
 import unittest
-from pathlib import Path
 
 from pathfinder import policy
 from pathfinder.broker import Broker
-from pathfinder.ledger import Ledger
 from pathfinder.mcp import pins as mcp_pins
 from pathfinder.mcp import tools as mcp_tools
 from pathfinder.mcp.protocol import qualify
 from pathfinder.mcp.servers import Entry
-from pathfinder.state import RECORD_HEADER, State
 
 
 class FakeServers:
@@ -141,25 +137,14 @@ class FlattenTest(unittest.TestCase):
 
     def test_mcp_is_error_is_a_failed_call(self):
         """U22: a 401 the server reports as `isError` reaches the broker as an exception, so the
-        model gets `ok: false` and the owner's tool record says `failed`, not `ok`."""
+        model gets `ok: false`."""
         entry = _entry()
         name = entry.qualified_name
         spec = _spec_for(entry, results={name: {"content": [{"type": "text", "text": "401 unauthorized"}],
                                                 "isError": True}})
-        emitted = []
         broker = Broker({name: spec}, "user", {name: "allow"}, control=None,
-                        emit=lambda kind, payload: emitted.append((kind, payload)))
+                        emit=lambda kind, payload: None)
         self.assertEqual(broker.call("c1", name, {}), {"ok": False, "error": "401 unauthorized"})
-        tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(tmp.cleanup)
-        ledger, state = Ledger(Path(tmp.name)), State(Path(tmp.name) / "state.db")
-        self.addCleanup(state.close)
-        state.apply(ledger.append("session_start", session="s1"))
-        for kind, payload in emitted:
-            state.apply(ledger.append(kind, session="s1", turn="t1", origin="user", **payload))
-        record = state.history("s1")[-1]["content"]
-        self.assertTrue(record.startswith(RECORD_HEADER))
-        self.assertEqual(record.splitlines()[-1], f"{name} {{}} failed")
 
 
 class HandlerTest(unittest.TestCase):

@@ -97,7 +97,7 @@ CHAT_APPROVAL = tuple(map(_said, (
     "거부", "거절", "취소", "아니", "아니요", "no", "n", "deny", "cancel")))
 
 
-def chat_approval(state, session, text, max_age_s):
+def chat_approval(state, session, text):
     """D52: an approval phrase typed while a gate is open is answered by the harness, one line per
     open gate (the root's undecided gates of this session by seq, then v1 approvals), and the gate
     stays pending. A gate counts while it is newer than the session's last user message. None: the
@@ -109,5 +109,5 @@ def chat_approval(state, session, text, max_age_s):
              if g["session"] == session and g["decision"] is None and g["seq"] > last]
     lines = "\n".join(f"승인은 채팅으로 받지 않습니다 · approvals are not taken in chat: /approve {id} or /deny "
                       f"{id} ({tool}; shell: pathfinder approve|deny {id})"
-                      for id, tool in gates + [(p["id"], p["tool"]) for p in state.open_approvals(session, max_age_s)])
+                      for id, tool in gates + [(p["id"], p["tool"]) for p in state.open_approvals(session)])
     return f"{lines} - if you meant something else, say it again · 다른 뜻이었다면 다시 말해 주세요" if lines else None

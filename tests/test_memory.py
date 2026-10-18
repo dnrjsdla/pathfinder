@@ -143,23 +143,13 @@ class GateTest(MemoryHarness):
 
 class ApplyTest(MemoryHarness):
     def test_edit_memory_refusal_is_a_failed_call(self):
-        """U23: a vet refusal raises, so the model gets `ok: false` and the tool record says
-        `failed`, not `ok` for an edit that did not happen."""
+        """U23: a vet refusal raises, so the model gets `ok: false` for an edit that did not happen."""
         from pathfinder.broker import Broker
-        from pathfinder.state import RECORD_HEADER
         self.manager()
-        emitted = []
         broker = Broker(memory.TOOLS, "user", {"edit_memory": "allow"}, control=None,
-                        emit=lambda kind, payload: emitted.append((kind, payload)))
+                        emit=lambda kind, payload: None)
         out = broker.call("c1", "edit_memory", {"target": "USER.md", "op": "replace", "old": "- no such line", "new": "x"})
         self.assertEqual(out, {"ok": False, "error": "old does not match any line in the file"})
-        self.record("session_start", session="s1")
-        for kind, payload in emitted:
-            self.record(kind, session="s1", turn="t1", origin="user", **payload)
-        record = self.state.history("s1")[-1]["content"]
-        self.assertTrue(record.startswith(RECORD_HEADER))
-        self.assertTrue(record.splitlines()[-1].startswith("edit_memory "))
-        self.assertTrue(record.splitlines()[-1].endswith(" failed"))
 
     def test_wiki_applies_at_once(self):
         mgr = self.manager()

@@ -457,9 +457,6 @@ class TuiCase(unittest.TestCase):
             {"type": "gate", "id": "g1", "tool": "search", "args": {"q": "x"}},
             {"type": "turn.end", "kind": "ok"},
             {"type": "notice", "id": "n1", "text": "hi", "why": "signal"},
-            {"type": "job.start", "id": "j1", "goal": "do things"},
-            {"type": "job.gate", "id": "j1", "approval": "a1", "tool": "search", "args": {}},
-            {"type": "job.end", "id": "j1", "state": "done"},
             {"type": "error", "message": "boom"},
             {"type": "retract", "what": "says something was done", "why": "w"},
         ):
@@ -489,14 +486,14 @@ class TuiCase(unittest.TestCase):
 
     def test_gate_line_has_no_bidi_or_c1(self):
         """U33: what is shown is what runs - a hidden character in an approval line is escaped, never
-        dropped and never raw; tui `gate`, `job.gate`, `say` and `approvals` render the args alike."""
+        dropped and never raw; tui `gate`, `say` and `approvals` render the args alike."""
         from pathfinder import __main__ as cli
         from pathfinder.ledger import Ledger
         from pathfinder.state import State
         args = {"to": "bo\u200bss@example.com", "path": "/x/\u202eevil\x9b"}
         shown = '{"to": "bo\\u200bss@example.com", "path": "/x/\\u202eevil\\u009b"}'
         gate = {"type": "gate", "id": "g1", "tool": "send\u200b", "args": args}
-        lines = [tui.render(gate), tui.render({**gate, "type": "job.gate", "approval": "a1"})]
+        lines = [tui.render(gate)]
         server, client = socket.socketpair()
         with server, client:
             for m in (gate, {"type": "turn.end", "kind": "answer"}):
@@ -528,9 +525,8 @@ class TuiCase(unittest.TestCase):
         """5d: past 300 shown characters the args end in a tail. The count is taken after escaping,
         and the cut never splits an escape: here a `\\u200b` straddles the 300th character."""
         args = {"q": "a" * 290 + "\u200b" * 10}  # `{"q": "` and 290 letters: 297 shown, then 6-long units
-        for msg in ({"type": "gate", "id": "g1", "tool": "search", "args": args},
-                    {"type": "job.gate", "id": "j1", "approval": "a1", "tool": "search", "args": args}):
-            self.assertIn(' search {"q": "' + "a" * 290 + "...(clipped; /approvals) - /approve", tui.render(msg))
+        self.assertIn(' search {"q": "' + "a" * 290 + "...(clipped; /approvals) - /approve",
+                      tui.render({"type": "gate", "id": "g1", "tool": "search", "args": args}))
         exact = tui.render({"type": "gate", "id": "g1", "tool": "search", "args": {"q": "a" * 291}})
         self.assertIn('"a' + "a" * 290 + '"} - /approve', exact)  # exactly 300 shown: kept whole
 

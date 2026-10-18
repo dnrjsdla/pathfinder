@@ -94,7 +94,8 @@ class InitChecksTest(InitTestBase):
         # model 1, embed n, attach/catalog/schedule/reminders/shell/claude_code n, launchd n
         answers = ["1", "n", "n", "n", "n", "n", "n", "n", "n"]
         self.assertEqual(self.run_init(answers=answers, models_url=url), 0)
-        self.assertEqual(config.load(self.home)["model"], "ollama:x-cloud")
+        self.assertEqual(config.load(self.home)["models"],
+                         {"root": ["ollama:x-cloud"], "summarize": ["ollama:x-cloud"]})
         types = []
         for f in sorted((self.home / "events").glob("*.jsonl")):
             for line in f.read_text().splitlines():

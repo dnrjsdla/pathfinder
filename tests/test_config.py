@@ -31,9 +31,12 @@ class ConfigTest(unittest.TestCase):
     def tearDown(self):
         self._tmp.cleanup()
 
-    def test_default_model_is_empty(self):
+    def test_an_old_config_with_the_retired_model_keys_loads(self):
+        (self.home / "config.json").write_text(json.dumps({"model": "ollama:old", "worker_model": "", "max_steps": 3}))
         cfg = config.load(self.home)
-        self.assertEqual(cfg["model"], "")
+        self.assertEqual((cfg["max_steps"], "model" in cfg, "worker_model" in cfg), (3, False, False))
+        config.set(self.home, "max_steps", 4)  # the next write drops them from the file
+        self.assertEqual(json.loads((self.home / "config.json").read_text()).keys() & {"model", "worker_model"}, set())
 
     def test_unknown_key_raises_on_load(self):
         (self.home / "config.json").write_text(json.dumps({"not_a_real_key": 1}))
@@ -45,20 +48,20 @@ class ConfigTest(unittest.TestCase):
             config.set(self.home, "not_a_real_key", "value")
 
     def test_set_is_atomic(self):
-        config.set(self.home, "model", "ollama:some-model")
+        config.set(self.home, "embed_model", "ollama:some-model")
         cfg = config.load(self.home)
-        self.assertEqual(cfg["model"], "ollama:some-model")
+        self.assertEqual(cfg["embed_model"], "ollama:some-model")
         # atomic write leaves no leftover temp file behind
         leftovers = list(self.home.glob(".config-*.tmp"))
         self.assertEqual(leftovers, [])
 
     def test_set_appends_config_set_event_without_value(self):
         ledger = FakeLedger()
-        config.set(self.home, "model", "ollama:secret-model-name", ledger=ledger)
+        config.set(self.home, "embed_model", "ollama:secret-model-name", ledger=ledger)
         self.assertEqual(len(ledger.events), 1)
         event = ledger.events[0]
         self.assertEqual(event["type"], "config_set")
-        self.assertEqual(event["key"], "model")
+        self.assertEqual(event["key"], "embed_model")
         self.assertNotIn("value", event)
         self.assertNotIn("ollama:secret-model-name", json.dumps(event))
 
@@ -77,7 +80,7 @@ class ConfigTest(unittest.TestCase):
                 os.environ["PATHFINDER_HOME"] = old
 
     def test_values_are_type_checked_at_both_doors(self):
-        for key, bad in (("max_steps", 0), ("max_steps", "abc"), ("max_steps", True), ("model", 5), ("providers", [])):
+        for key, bad in (("max_steps", 0), ("max_steps", "abc"), ("max_steps", True), ("embed_model", 5), ("providers", [])):
             with self.assertRaises(config.ConfigError, msg=f"{key}={bad!r}"):
                 config.set(self.home, key, bad)
         # a hand-edited file goes through the same check as `config set`

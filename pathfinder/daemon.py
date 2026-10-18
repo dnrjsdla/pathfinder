@@ -428,8 +428,7 @@ class Daemon:
 
     async def _run(self, item) -> None:
         # D52, checked as the lane takes the say (as v1 did): every say queued ahead of it is recorded by now
-        if item.kind == "user" and (reply := chat_approval(self.state, item.session, item.text,
-                                                           config.load(self.home)["session_resume_s"])):
+        if item.kind == "user" and (reply := chat_approval(self.state, item.session, item.text)):
             self._chat_reply(item.session, item.text, reply)
             self.outbox.release()
             return

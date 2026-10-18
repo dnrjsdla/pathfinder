@@ -19,8 +19,6 @@ class ConfigError(Exception):
 
 
 DEFAULTS = {
-    "model": "",
-    "worker_model": "",
     "embed_model": "",
     "models": {},      # role -> ["provider:model", ...]: first = primary, the rest = the fallback chain
     "providers": {"ollama": {"base_url": "http://localhost:11434/v1", "api_key_env": ""}},  # + optional "api": "openai" (default) | "anthropic" (experimental - never run live, D7/D37), "effort" (anthropic only)
@@ -32,6 +30,7 @@ DEFAULTS = {
     "mcp_servers": {},  # server id -> {transport, command|url, env|headers, timeout, protocol}
 }
 
+_RETIRED = ("model", "worker_model")  # v2 U10a: `models` replaced them; an old config.json still loads
 _MODEL_ROLES = ("root", "worker", "reviewer", "triage", "summarize", "night")
 _APIS = ("openai", "anthropic")
 _EFFORTS = ("low", "medium", "high", "xhigh", "max")
@@ -212,6 +211,7 @@ def load(home: Path) -> dict:
         overrides = json.loads(config_path.read_text())
         if not isinstance(overrides, dict):
             raise ConfigError("the config file must hold one JSON object")
+        overrides = {k: v for k, v in overrides.items() if k not in _RETIRED}  # the next set() drops them
         for key, value in overrides.items():
             _check(key, value)
         cfg.update(overrides)

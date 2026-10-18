@@ -11,9 +11,9 @@ behind `read_file`. The day is m6_day.json: user items as root turns, signal env
 as `signal` items, each child a fresh clone (spawn parent root, role worker, its brief as the first message), one
 night clone (role night) given a digest of the day's ledger; a gating item's gate is approved `approve_after_s`
 later and its report item runs then. Usage comes only from the ledger's `assistant`/`summary` events. Prices
-(per million tokens) come from the command line; cache read 0.1x, 5-minute write 1.25x, 1-hour write 2x. Cold
-adjustment: an item more than 300 s (1-hour TTL: 3600 s) after the previous request, or the day's first, has its
-first request's cache reads repriced as writes. Pass (adjusted): cost <= $1.00 and hit rate >= 0.70.
+(per million tokens) come from the command line; cache read 0.1x, write 2x (the product's 1-hour TTL; adjusted,
+the 5-minute comparison, 1.25x). Cold adjustment: an item 300 s (ttl_1h: 3600 s) or more after the previous request, or
+the day's first, has its first request's cache reads repriced as writes. Pass (ttl_1h): cost <= $1, hit rate >= 0.70.
 Output: docs/measurements/v2-m6-<model>-<date>.json.
 """
 import argparse, asyncio, datetime, json, math, sys, tempfile, uuid
@@ -106,12 +106,12 @@ async def day(home: Home, spec) -> list[dict]:
     return rows
 
 
-def score(rows, p_in, p_out, cold_s=None, write=WRITE_5M) -> dict:
-    """Tokens by kind, cost in $ and hit rate; with `cold_s`, the first request of an item that came more than
+def score(rows, p_in, p_out, cold_s=None, write=WRITE_1H) -> dict:
+    """Tokens by kind, cost in $ and hit rate; with `cold_s`, the first request of an item that came at least
     `cold_s` after the previous request (or first in the day) has its cache reads counted as writes."""
     t = dict.fromkeys(("input", "output", "cache_read", "cache_creation"), 0)
     for row in rows:
-        cold = cold_s is not None and (row["gap_s"] is None or row["gap_s"] > cold_s)
+        cold = cold_s is not None and (row["gap_s"] is None or row["gap_s"] >= cold_s)
         for k, (i, o, read, made) in enumerate(row["usage"]):
             if k == 0 and cold:
                 read, made = 0, made + read
@@ -124,25 +124,25 @@ def score(rows, p_in, p_out, cold_s=None, write=WRITE_5M) -> dict:
 
 
 def report(rows, a, refs) -> dict:
-    adjusted = score(rows, a.price_in, a.price_out, COLD_5M)
+    hour = score(rows, a.price_in, a.price_out, COLD_1H)
     return {"measurement": "v2-m6", "models": refs, "effort": a.effort or "api default", "date": a.date,
             "prices_per_mtok": {"in": a.price_in, "out": a.price_out, "cache_read": READ, "write_5m": WRITE_5M,
-                                "write_1h": WRITE_1H}, "ttl_1h_note": "assumes 1-hour cache writes at 2x input",
+                                "write_1h": WRITE_1H},
+            "ttl_1h_note": "the product's pricing (1-hour writes at 2x) and the pass figure; adjusted: the 5-minute one",
             "requests": sum(r["requests"] for r in rows), "folds": sum(r["folds"] for r in rows),
-            "raw": score(rows, a.price_in, a.price_out), "adjusted": adjusted,
-            "ttl_1h": score(rows, a.price_in, a.price_out, COLD_1H, WRITE_1H),
-            "pass": adjusted["cost_usd"] <= MAX_COST and adjusted["hit_rate"] >= MIN_HIT,
-            "criteria": {"max_cost_usd": MAX_COST, "min_hit_rate": MIN_HIT, "cold_after_s": COLD_5M}, "items": rows}
+            "raw": score(rows, a.price_in, a.price_out), "adjusted": score(rows, a.price_in, a.price_out, COLD_5M, WRITE_5M),
+            "ttl_1h": hour, "pass": hour["cost_usd"] <= MAX_COST and hour["hit_rate"] >= MIN_HIT,
+            "criteria": {"max_cost_usd": MAX_COST, "min_hit_rate": MIN_HIT, "cold_after_s": COLD_1H}, "items": rows}
 
 
 def check_score() -> None:
     """The cold adjustment and the 1-hour figure on a hand-made day of three items."""
     rows = [{"gap_s": None, "usage": [[10, 5, 0, 1000]]}, {"gap_s": 60, "usage": [[10, 5, 1000, 100]]},
             {"gap_s": 600, "usage": [[10, 5, 1000, 100], [10, 5, 1100, 50]]}]
-    raw, adj, hour = score(rows, 1, 5), score(rows, 1, 5, COLD_5M), score(rows, 1, 5, COLD_1H, WRITE_1H)
+    raw, adj, hour = score(rows, 1, 5), score(rows, 1, 5, COLD_5M, WRITE_5M), score(rows, 1, 5, COLD_1H)
     assert raw["tokens"] == {"input": 40, "output": 20, "cache_read": 3100, "cache_creation": 1250}, raw
     assert adj["tokens"]["cache_read"] == 2100 and adj["tokens"]["cache_creation"] == 2250, adj
-    assert hour["tokens"] == raw["tokens"] and math.isclose(hour["cost_usd"], (40 + 310 + 2500 + 100) / 1e6), hour
+    assert hour == raw and math.isclose(raw["cost_usd"], (40 + 310 + 1250 * 2 + 100) / 1e6), (raw, hour)
     assert math.isclose(adj["cost_usd"], (40 + 210 + 2250 * 1.25 + 100) / 1e6) and adj["hit_rate"] == round(2100 / 4390, 4)
 
 
@@ -191,7 +191,7 @@ def main():
         assert sum(bool(r["tools"]) for r in rows if r["kind"] == "user" and r["needs_tools"]) >= 8
         assert all(r["requests"] and not r["errors"] for r in rows) and out["folds"] >= 1
         assert sum(len(r.get("approved", [])) for r in rows) == 2 and out["raw"]["hit_rate"] > out["adjusted"]["hit_rate"]
-        assert out["pass"] == (out["adjusted"]["cost_usd"] <= MAX_COST and out["adjusted"]["hit_rate"] >= MIN_HIT)
+        assert out["pass"] == (out["ttl_1h"]["cost_usd"] <= MAX_COST and out["ttl_1h"]["hit_rate"] >= MIN_HIT)
         print("dry run: PASS (scoring, composition, gates, folds, output shape)")
     return 0 if out["pass"] or a.dry_run else 1
 

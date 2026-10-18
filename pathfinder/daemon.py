@@ -449,9 +449,11 @@ class Daemon:
                     self._send_to_session(row["session"], {"type": "turn.end", "turn": row["turn"], "kind": kind})
             except Exception:
                 pass  # the ledger itself is failing (disk full?): a dead lane would turn every later `say` into silence
-        if item.kind == "schedule" and not self._is_attached(item.session):
-            # no screen saw this scheduled turn: a banner says it ran; the answer stays in history
-            self.outbox.enqueue(Notice(uuid.uuid4().hex[:12], item.session, f"{item.text} ({kind})", "schedule", []))
+        if (item.kind == "schedule" or item.gate and kind) and not self._is_attached(item.session):
+            # no screen saw this scheduled or report turn (a restore()-requeued report never has one; kind "" = a
+            # report merged into an earlier turn): a banner says it ran, its text clipped (a report line runs to
+            # 2,000 chars); the answer stays in history
+            self.outbox.enqueue(Notice(uuid.uuid4().hex[:12], item.session, f"{item.text[:200]} ({kind})", "schedule", []))
         self.outbox.release()  # a held notice may be releasable now that this turn ended
 
     # -- signals (D20) -------------------------------------------------------------------

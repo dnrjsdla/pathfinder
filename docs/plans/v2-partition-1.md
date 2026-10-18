@@ -49,7 +49,7 @@ stop()  { kill "${1:--TERM}" "$(cat /tmp/pf1/check/pid)"; while kill -0 "$(cat /
    prints `thinking blocks before the restart: k` — k = 0 means the post-restart strip is untested, not passed.
 4. `$PF say "Run the shell command: sleep 30" & until grep -q '"name": "run_command"' /tmp/pf1/events/*.jsonl;
    do sleep 0.2; done; stop -9; start && $CHK interrupted /tmp/pf1`: `interrupted {why: restart}` and `turn_end
-   interrupted` for that turn, written by `restore()` (kill -9: a SIGTERM `close()` writes no root events either, but
+   interrupted` for that turn, written by `restore()` (kill -9: a SIGTERM `close()` writes no root turn event either (an approved call already running may still record its result), but
    -9 also covers the crash). Then `$PF say "Did the last command finish?"` → it says the outcome is unknown; no 400.
 5. `$PF config set providers '{"anthropic": {"api": "anthropic", "base_url": "http://127.0.0.1:9"}, "ollama":
    {"base_url": "http://localhost:11434/v1"}}'; $PF say "Say hello in five words."` → an answer. `$CHK fallback
@@ -229,7 +229,7 @@ spend the budget by itself; openai_compat: prompt + completion).
 
 | # | What happens | Ledger | Screen |
 |---|---|---|---|
-| 1 | `say` (daemon): chat-approval check first if an open gate is newer than the last user message (D52-2); else, the root parked, record it as a new item's opening say (the item's turn id); a turn running, enqueue it for the clone, unrecorded (row 11) | `user {clone: root, turn}` | — |
+| 1 | `say` (daemon): steer check first (D17: a steer is never intercepted): a say while the root runs this session's turn is a steer, enqueued for the clone, unrecorded (row 11); else it is a new item on the lane and, when the lane takes it, the chat-approval check (an open gate newer than the last user message, D52-2); no approval phrase, the clone records it as the item's opening say (the item's turn id) | `user {clone: root, turn}` | — |
 | 2 | Root takes the item; resident parts gathered, frozen | `turn_start {item, resident}` | `turn.start` |
 | 3 | `req = assemble(...)`; `resp = await router.complete(req, on_text=delta)` | `error` per failed attempt | `delta`s |
 | 4 | Response recorded verbatim | `assistant {step, blocks, model, usage}` | — |
@@ -314,7 +314,9 @@ model, then appends one line per handle of the folded part and the previous summ
 handle, tool, summary type and count, no third-party strings (no titles, no previews) — so handle survival never
 depends on the model. A failed fold (all models blocked) records `error` and retries after the next turn.
 
-**Restart (V12)**, `Clone.restore()` at daemon start, after `state.catch_up`; `close()` (SIGTERM) writes no root events.
+**Restart (V12)**, `Clone.restore()` at daemon start, after `state.catch_up`; `close()` (SIGTERM) cancels the root task and records no turn event for the root;
+an approved call already running when `close()` begins may still finish and record its `result {gate}` — the real
+outcome; `restore()` re-queues its report.
 No root row → `spawn {clone: root, preset: root}` once per home. `running` → `interrupted {why: restart}` + `turn_end
 interrupted`, nothing re-run (a write could repeat). Open gates need nothing reassembled: the root never waits, the
 `gates` rows return with `rebuild`, and `restore` only re-lists them (`approvals`). A decided gate whose report never
@@ -412,10 +414,11 @@ router and fold in a temp home on Haiku (root, summarize), with fake_notion's wo
 gate and are approved), 20 signal envelopes as `signal` items, 5 child runs as fresh clone ids (role `worker`, a brief
 first), 1 night run (role `night`, a 30k-char digest), folds as the window demands. Run at the product's effort, not the
 live check's xhigh; `effort` is per provider, so summarize/triage/night run at the root's effort (the JSON records it).
-Prices from the command line (`--price-in --price-out`; cache read 0.1×, 5-minute write 1.25×; none in code). Cold
-adjustment: an item more than 300 s after the previous request has its first request's cache reads repriced as writes.
-Pass (adjusted): cost ≤ $1.00 and Σcache_read / Σ(input + cache_read + cache_creation) ≥ 0.70; raw and 1-hour-TTL figures
-beside. Output `docs/measurements/v2-m6-<model>-<date>.json` (tokens by kind, costs, hit rates, folds, a row per item).
+Prices from the command line (`--price-in --price-out`): cache read 0.1×, writes 2× (1-hour TTL, owner decision
+2026-10-18; the 5-minute comparison 1.25×); none in code. Cold adjustment: an item 3600 s or more after the previous
+request (300 s or more for the 5-minute comparison) has its first request's cache reads repriced as writes.
+Pass (1-hour TTL, cold after 3600 s): cost ≤ $1.00 and Σcache_read / Σ(input + cache_read + cache_creation) ≥ 0.70; raw and
+adjusted (5-minute) figures beside. Output `docs/measurements/v2-m6-<model>-<date>.json` (tokens by kind, costs, hit rates, folds, a row per item).
 ≈ 150–200 requests, ≈ $0.10–0.30. Fail → cheaper role models, a smaller resident block.
 
 **M8 — the fold keeps facts.** `bench/v2/m8_fold.py --ledger <home>/events --session <id> --questions <file>`, locally,

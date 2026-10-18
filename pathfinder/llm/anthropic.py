@@ -11,7 +11,7 @@ CLEAR_AT_BETA = "mid-conversation-system-clear-at-2026-08-21"
 # (beta). False, the fallback: one copy per item, after its opening user message, kept in place (no beta).
 RESIDENT_CLEAR_AT = True
 THINKING = {"type": "adaptive", "display": "summarized"}  # summarized: same cost, P4 reads the text
-BREAKPOINT = {"type": "ephemeral"}
+BREAKPOINT = {"type": "ephemeral", "ttl": "1h"}  # owner decision 2026-10-18: writes 2x input
 STOP_REASONS = {"stop_sequence": "end_turn", "model_context_window_exceeded": "max_tokens"}
 USAGE_KEYS = ("input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
 

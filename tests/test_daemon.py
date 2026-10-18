@@ -566,6 +566,69 @@ class RootTurnTest(DaemonHarness):
             self.assertTrue(streamed)
             self.assertEqual(streamed, recorded)
 
+    def test_report_turn_with_no_screen_lands_as_a_banner(self):
+        """A report turn no screen sees (here: the gate approved after a restart from a connection that closes at
+        once) is delivered as a scheduled turn is: one banner says it ran, a long report line clipped."""
+        blocker = self.home / ("x" * 200)  # a file where the write needs a folder: the error holds the long path
+        blocker.write_text("")
+        note = blocker / "note.txt"
+        banners = []
+
+        async def gated(daemon):
+            c = await Client.open(self.home)
+            await self.say(c, "please write a note")
+            c.close()
+
+        self.run_with(fake_model("I asked for approval.",
+                                 [call("c1", "write_file", path=str(note), content="hi")]), gated)
+        [gate] = [e for e in self.events() if e["type"] == "gate"]
+
+        async def approve(daemon):  # a new daemon: the gate survived the restart
+            _never_quiet(daemon)
+            daemon.outbox.banner = lambda text: banners.append(text) or True
+            c = await Client.open(self.home)
+            c.send({"type": "approve", "id": gate["seq"]})
+            c.close()  # gone long before the report turn ends
+            await self.wait(lambda events: any(e["type"] == "delivery" for e in events))
+
+        self.run_with(fake_model("Written."), approve)
+        events = self.events()
+        [opening] = [e for e in events if e["type"] == "user" and e.get("gate")]
+        self.assertEqual([e["ok"] for e in events if e["type"] == "result" and e.get("gate")], [False])
+        self.assertGreater(len(opening["text"]), 250)  # long enough to be clipped
+        self.assertEqual(banners, [f"{opening['text'][:200]} (answer)"])
+        self.assertLessEqual(len(banners[0]), 210)
+        self.assertEqual([e["via"] for e in events if e["type"] == "delivery"], ["banner"])
+
+    def test_report_turn_seen_by_the_approving_screen_sends_no_banner(self):
+        """The connection that approves stays attached (the TUI, the CLI waiting for turn.end): it shows the
+        report turn as it runs, so no banner."""
+        note = self.home / "note.txt"
+        banners = []
+
+        async def gated(daemon):
+            c = await Client.open(self.home)
+            await self.say(c, "please write a note")
+            c.close()
+
+        self.run_with(fake_model("I asked for approval.",
+                                 [call("c1", "write_file", path=str(note), content="hi")]), gated)
+        [gate] = [e for e in self.events() if e["type"] == "gate"]
+
+        async def approve(daemon):
+            daemon.outbox.banner = lambda text: banners.append(text) or True
+            c = await Client.open(self.home)
+            c.send({"type": "approve", "id": gate["seq"]})
+            seen = await c.until("turn.end")
+            c.close()
+            return seen
+
+        seen = self.run_with(fake_model("Written."), approve)
+        self.assertEqual(seen[-1]["kind"], "answer")
+        self.assertEqual(note.read_text(), "hi")
+        self.assertEqual(banners, [])
+        self.assertEqual([e for e in self.events() if e["type"] == "delivery"], [])
+
     def test_close_mid_turn_records_nothing_for_the_root_and_restore_closes_it(self):
         """V12: a shutdown cancels the root's task and the clone records nothing; the next start's restore
         closes the turn as interrupted by a restart."""

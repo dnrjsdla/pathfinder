@@ -17,7 +17,7 @@ except ImportError:
 
 EP = Endpoint(base_url="https://api.example.com", api_key="sk-fake", model="fake-model", api="anthropic")
 REF = "anthropic:fake-model"
-BP = {"type": "ephemeral"}
+BP = {"type": "ephemeral", "ttl": "1h"}  # every breakpoint: the 1-hour TTL
 SYSTEM = "You are a test assistant."
 TOOLS = ({"name": "read_result", "description": "Reopen a stored result.",
           "parameters": {"type": "object", "properties": {"handle": {"type": "string"}}, "required": ["handle"]}},
@@ -75,7 +75,7 @@ class TestToWire(unittest.TestCase):
                          [{"role": "system", "content": "Local time 09:00"}])
         self.assertEqual(body["messages"][1]["role"], "system")  # after the item's opening user message
         self.assertNotIn("betas", body)
-        self.assertIn("cache_control", body["messages"][-1]["content"][-1])
+        self.assertEqual(body["messages"][-1]["content"][-1]["cache_control"], BP)
 
     def test_thinking_dropped_for_another_model(self):
         other = ({"role": "user", "content": [{"type": "text", "text": "Hi."}]},

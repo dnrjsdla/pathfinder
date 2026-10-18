@@ -11,7 +11,6 @@ from unittest import mock
 
 from pathfinder import keychain as keychain_mod
 from pathfinder import ledger as ledger_mod
-from pathfinder import tools as tools_mod
 from pathfinder.ledger import Ledger
 from pathfinder.state import State
 
@@ -454,11 +453,12 @@ class PastedTokenTest(unittest.TestCase):
         self.assertEqual(self.items, {})
 
     def test_pem_without_end_is_redacted_whole(self):
-        """The ledger's 2,000-character clip cuts a 4096-bit key's END line off: the header and
-        the base64 after it go, as raw text or as JSON with `\\n` escapes."""
+        """A 2,000-character head cut drops a 4096-bit key's END line: the header and the base64
+        after it go, as raw text or as JSON with `\\n` escapes."""
         body = "\n".join("MIIJ" + "Qk9vdHN0cmFw" * 5 for _ in range(48))  # about 3 KB, no END
         key = "-----BEGIN " + "RSA PRIVATE KEY-----\n" + body + "\n-----END " + "RSA PRIVATE KEY-----"
-        for clipped in (tools_mod.clip_for_ledger(key), tools_mod.clip_for_ledger({"content": key})):
+        for clipped in (key[:2000] + "...(truncated)",
+                        json.dumps({"content": key}, ensure_ascii=False)[:2000] + "...(truncated)"):
             event = self._record("result", call_id="c1", tool="read_file", ok=True, body=clipped)
             self.assertEqual(event["body"], clipped[:clipped.index("-----BEGIN")] + "[redacted]...(truncated)")
         self.assertIsNone(re.search(r"[A-Za-z0-9+/=]{20,}", "".join(json.loads(line)["body"]

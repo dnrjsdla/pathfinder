@@ -1,6 +1,6 @@
 """The one door every tool call goes through. The broker never writes the
 ledger itself - it returns the raw result (the clone caps and records it; the
-store's renderer filters it on the way to the model) and emits for a job."""
+store's renderer filters it on the way to the model)."""
 import unicodedata
 
 from . import policy
@@ -12,8 +12,8 @@ USER_DENIED_TEXT = ("The user looked at this call and declined it. This is their
 
 
 class Gate(Exception):
-    """A call needs the user's approval. Left to propagate out of loop.run/settle -
-    a gate is an exception, not an outcome."""
+    """A call needs the user's approval. Left to propagate out of `call` to the clone, which records
+    the `gate` - a gate is an exception, not an outcome."""
 
     def __init__(self, id, name, arguments):
         super().__init__(f"gated: {name}")
@@ -21,44 +21,40 @@ class Gate(Exception):
         self.name = name
         # not `self.args`: BaseException.args turns a dict into a tuple of its keys
         self.arguments = arguments
-        self.said = ""  # filled by loop.run: the text streamed before the gate
 
 
 class Broker:
-    def __init__(self, tools, origin, grants, *, control, emit, approved=None, denied=frozenset()):
+    def __init__(self, tools, origin, grants, *, control, approved=None, denied=frozenset()):
         self.tools = tools
         self.origin = origin
         self.grants = grants
         self.control = control
-        self.emit = emit
         # A decision is single-use and names the exact call: the tool-call id is a string the
         # model chose (and re-uses), so it cannot be a standing permission for the turn.
         # approved: {call_id: (name, args)}; denied: {call_id}. Both are consumed when matched.
         self.approved = dict(approved or {})
         self.denied = set(denied)
 
-    def _refuse(self, id, name, args, error, **extra) -> dict:
-        """A call turned away at the door still reaches the ledger (D69): the record shows the miss,
-        and `refused` tells the loop it was not a tool call, so the second look still runs."""
-        self.emit("tool_call", {"id": id, "name": name, "args": args or {}})
-        self.emit("tool_result", {"id": id, "name": name, "ok": False, "result": error, "refused": True, **extra})
-        return {"ok": False, "refused": True, "error": error, **extra}
+    @staticmethod
+    def _refuse(error, **extra) -> dict:
+        """A call turned away at the door is a failed call: the clone records its `result` with `ok: false`."""
+        return {"ok": False, "error": error, **extra}
 
     def call(self, id, name, args) -> dict:
         spec = self.tools.get(name)
         if spec is None:
             name = str(name)[:64]  # model text: bounded
             off = f" (the {OFF_TOOLS[name]} sense is off)" if name in OFF_TOOLS else ""
-            return self._refuse(id, name, args, f"no such tool: {name}{off}")
+            return self._refuse(f"no such tool: {name}{off}")
 
         coerced, error = coerce(spec, args)
         if error:
-            return self._refuse(id, name, args, error)
+            return self._refuse(error)
         if spec.normalize:
             try:
                 coerced = spec.normalize(coerced)  # before the gate: the user approves what will run
             except ValueError as e:
-                return self._refuse(id, name, coerced, str(e))
+                return self._refuse(str(e))
 
         if id in self.denied:
             self.denied.discard(id)
@@ -68,18 +64,16 @@ class Broker:
         else:
             decision = policy.decide(spec, self.origin, coerced, self.grants)
             if decision == "deny":
-                return self._refuse(id, name, coerced, policy.DENIED_TEXT, denied=True)
+                return self._refuse(policy.DENIED_TEXT, denied=True)
             if decision == "ask":
                 raise Gate(id, name, coerced)
 
-        self.emit("tool_call", {"id": id, "name": name, "args": coerced})
         try:
             result = spec.handler(**coerced, control=self.control)
             ok = True
         except Exception as e:
             result = str(e)
             ok = False
-        self.emit("tool_result", {"id": id, "name": name, "ok": ok, "result": result})
         return {"ok": True, "result": result} if ok else {"ok": False, "error": result}
 
 

@@ -98,11 +98,11 @@ class SkillsTest(unittest.TestCase):
         for origin, grants in (("user", {"write_file": "allow"}), ("signal", {}), ("job", {})):
             for path in (self.home / "skills" / "x.md", self.home / "skills" / "new" / ".." / "y.md"):
                 args = {"path": str(path), "content": _skill("x", "Use for x.")}
-                broker = Broker({"write_file": spec}, origin, grants, control=None, emit=lambda *a: None)
+                broker = Broker({"write_file": spec}, origin, grants, control=None)
                 if origin != "user":
                     with self.assertRaises(Gate) as cm:  # policy asks first; the owner says yes
                         broker.call("c1", "write_file", args)
-                    broker = Broker({"write_file": spec}, origin, grants, control=None, emit=lambda *a: None,
+                    broker = Broker({"write_file": spec}, origin, grants, control=None,
                                     approved={"c1": ("write_file", cm.exception.arguments)})
                 out = broker.call("c1", "write_file", args)
                 self.assertFalse(out["ok"], (origin, path))
@@ -113,7 +113,7 @@ class SkillsTest(unittest.TestCase):
         link = self.home / "workspace" / "l.md"  # what a user-turn shell can do in the workspace
         link.parent.mkdir()
         link.symlink_to(self.home / "skills" / "a.md")
-        out = Broker({"write_file": spec}, "user", {"write_file": "allow"}, control=None, emit=lambda *a: None
+        out = Broker({"write_file": spec}, "user", {"write_file": "allow"}, control=None
                      ).call("c3", "write_file", {"path": str(link), "content": "overwritten"})
         self.assertIn("a skill is written only by the owner", out["error"])
         for path in (link, self.home / "skills" / "new" / ".." / "b.md"):  # the handler resolves too, no gate in front
@@ -122,10 +122,10 @@ class SkillsTest(unittest.TestCase):
         self.assertFalse((self.home / "skills" / "new").exists())  # a refused write makes no directory
         self.assertEqual((self.home / "skills" / "a.md").read_text(encoding="utf-8"), seed)
         with self.assertRaises(Gate) as cm:  # no grant: the approval line names the target, not the link
-            Broker({"write_file": spec}, "user", {}, control=None, emit=lambda *a: None
+            Broker({"write_file": spec}, "user", {}, control=None
                    ).call("c4", "write_file", {"path": str(link), "content": "overwritten"})
         self.assertEqual(cm.exception.arguments["path"], str((self.home / "skills" / "a.md").resolve()))
-        out = Broker({"write_file": spec}, "user", {"write_file": "allow"}, control=None, emit=lambda *a: None
+        out = Broker({"write_file": spec}, "user", {"write_file": "allow"}, control=None
                      ).call("c2", "write_file", {"path": str(self.home / "notes.md"), "content": "ok"})
         self.assertTrue(out["ok"])  # anywhere else it writes as before
 

@@ -43,10 +43,6 @@ class Item:
     turn: str = ""
 
 
-def _drop(kind, payload):
-    """The broker's v1 emits (tool_call/tool_result, gone in U10b): the clone records `result` itself."""
-
-
 def _spent(rows) -> tuple[int, int, dict]:
     """(steps, budget tokens, summed usage) of a turn's rows."""
     usage = {}
@@ -128,6 +124,7 @@ class Clone:
             self.record("error", **ev, step=step, model=f["model"], status=f["status"], message=f["message"][:300])
 
     def _result(self, ev, step, call_id, tool, ok, body, **extra) -> dict:
+        tool = tool[:64]  # model text: bounded (`assistant.blocks` keeps the raw name)
         body, cut = results.cap(body)
         event = self.record("result", **ev, trust="third_party", step=step, call_id=call_id, tool=tool, ok=ok,
                             body=body, **({"cut": cut} if cut else {}), **extra)
@@ -180,7 +177,7 @@ class Clone:
         registry = tools.for_origin(item.origin)
         specs = [spec.schema()["function"] for spec in registry.values()]
         broker = Broker(registry, item.origin, cfg["grants"],  # `session`: edit_memory's evidence
-                        control=SimpleNamespace(interrupt=event, session=item.session), emit=_drop)
+                        control=SimpleNamespace(interrupt=event, session=item.session))
         end = ""  # set once the turn must end: the next step is its last, and its calls do not run
         while True:
             steps, tokens, _ = _spent(self._rows(item.session, ev["turn"], start))
@@ -346,7 +343,7 @@ class Clone:
         event = threading.Event()
         self._events.add(event)
         broker = Broker(tools.for_origin("user"), "user", config.load(self.home)["grants"],
-                        control=SimpleNamespace(interrupt=event, session=gate["session"]), emit=_drop,
+                        control=SimpleNamespace(interrupt=event, session=gate["session"]),
                         approved={gate["call_id"]: (gate["tool"], gate["args"])})
         try:
             out = await asyncio.to_thread(broker.call, gate["call_id"], gate["tool"], gate["args"])

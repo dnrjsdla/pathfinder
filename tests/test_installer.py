@@ -198,14 +198,10 @@ class InstallerTest(unittest.TestCase):
         from pathfinder.senses import catalog as catalog_sense
         self.addCleanup(installer_mod.bind, installer_mod._installer)
         installer_mod.bind(self.installer)
-        emitted = []
-        broker = Broker(catalog_sense.TOOLS, "user", {"propose_install": "allow"}, control=None,
-                        emit=lambda kind, payload: emitted.append((kind, payload)))
+        broker = Broker(catalog_sense.TOOLS, "user", {"propose_install": "allow"}, control=None)
         with mock.patch.object(catalog, "latest", return_value=None):
             out = broker.call("c1", "propose_install", {"name": "io.github.acme/none"})
         self.assertEqual(out, {"ok": False, "error": "no such server; try search_tools"})
-        self.assertEqual(emitted[-1][0], "tool_result")
-        self.assertFalse(emitted[-1][1]["ok"])
 
     def test_handle_install_and_uninstall_replies(self):
         """U3: the socket's `install`/`uninstall` messages are answered here, the daemon only writes."""

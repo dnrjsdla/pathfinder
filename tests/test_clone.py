@@ -164,6 +164,16 @@ class CloneTest(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(b["messages"][:len(a["messages"])], a["messages"])
                 self.assertGreater(len(b["messages"]), len(a["messages"]))
 
+    async def test_a_call_refused_at_the_door_is_a_failed_result(self):
+        """The broker records nothing (D69's emits left in U10b): the clone's `result` carries the refusal."""
+        c = self.clone(resp(call("c1", "nope", x=1)), resp(text("No such tool.")))
+        self.assertEqual(await c.run(Item("user", "Use nope.", "s1")), "answer")
+        [r] = self.events("result")
+        self.assertEqual((r["tool"], r["ok"], r["body"]), ("nope", False, "no such tool: nope"))
+        c = self.clone(resp(call("c2", "n" * 3000)), resp(text("No such tool.")))
+        self.assertEqual(await c.run(Item("user", "Use it.", "s1")), "answer")
+        self.assertEqual(self.events("result")[-1]["tool"], "n" * 64)
+
     async def test_steer_mid_step_and_refused_turn_keeps_an_opening_message(self):
         async def steer_during(req, on_text, cancel):
             c.steer("s1", "also the date")

@@ -44,14 +44,14 @@ class AddEventGateTest(unittest.TestCase):
     def test_add_event_gate_shows_canonical_datetime(self):
         """The gate fires before the handler ever runs (no EventKit needed here): normalize
         already turned the model's `T`-separated time into the canonical local string."""
-        b = Broker(dict(calendar_sense.TOOLS), "user", {}, control=None, emit=lambda k, p: None)
+        b = Broker(dict(calendar_sense.TOOLS), "user", {}, control=None)
         with self.assertRaises(Gate) as cm:
             b.call("c1", "add_event", {"title": "Standup", "start": "2026-09-22T09:00", "end": "2026-09-22T09:30"})
         self.assertEqual(cm.exception.arguments["start"], "2026-09-22 09:00")
         self.assertEqual(cm.exception.arguments["end"], "2026-09-22 09:30")
 
     def test_add_event_refuses_an_offset(self):
-        b = Broker(dict(calendar_sense.TOOLS), "user", {}, control=None, emit=lambda k, p: None)
+        b = Broker(dict(calendar_sense.TOOLS), "user", {}, control=None)
         result = b.call("c1", "add_event", {"title": "x", "start": "2026-09-22 09:00+09:00", "end": "2026-09-22 10:00"})
         self.assertFalse(result["ok"])
         self.assertIn("offset", result["error"])

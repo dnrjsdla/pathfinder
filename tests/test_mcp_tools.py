@@ -142,8 +142,7 @@ class FlattenTest(unittest.TestCase):
         name = entry.qualified_name
         spec = _spec_for(entry, results={name: {"content": [{"type": "text", "text": "401 unauthorized"}],
                                                 "isError": True}})
-        broker = Broker({name: spec}, "user", {name: "allow"}, control=None,
-                        emit=lambda kind, payload: None)
+        broker = Broker({name: spec}, "user", {name: "allow"}, control=None)
         self.assertEqual(broker.call("c1", name, {}), {"ok": False, "error": "401 unauthorized"})
 
 

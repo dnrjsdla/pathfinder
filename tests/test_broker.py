@@ -17,99 +17,64 @@ TOOLS = {"read_thing": READ, "write_thing": WRITE}
 
 class BrokerTest(unittest.TestCase):
     def _broker(self, origin="user", grants=None, **kw):
-        emitted = []
-        b = Broker(TOOLS, origin, grants or {}, control=None,
-                  emit=lambda k, p: emitted.append((k, p)), **kw)
-        return b, emitted
+        return Broker(TOOLS, origin, grants or {}, control=None, **kw)
 
     def test_broker_unknown_deny_ask_allow(self):
-        b, emitted = self._broker()
+        b = self._broker()
         self.assertEqual(b.call("c0", "nope", {}),
-                         {"ok": False, "refused": True, "error": "no such tool: nope"})
+                         {"ok": False, "error": "no such tool: nope"})
 
-        b, emitted = self._broker()
+        b = self._broker()
         result = b.call("c1", "read_thing", {})  # allow
         self.assertEqual(result, {"ok": True, "result": {"done": True}})
-        self.assertEqual([k for k, _ in emitted], ["tool_call", "tool_result"])
 
-        b, emitted = self._broker()
+        b = self._broker()
         with self.assertRaises(Gate) as cm:
             b.call("c2", "write_thing", {})  # ask
         self.assertEqual((cm.exception.id, cm.exception.name), ("c2", "write_thing"))
-        self.assertEqual(emitted, [])  # nothing emitted before a gate
 
-        b, emitted = self._broker(origin="system")
+        b = self._broker(origin="system")
         result = b.call("c3", "write_thing", {})  # deny
-        self.assertEqual(result, {"ok": False, "refused": True, "denied": True, "error": policy.DENIED_TEXT})
+        self.assertEqual(result, {"ok": False, "denied": True, "error": policy.DENIED_TEXT})
 
-    def _assert_refused(self, b, emitted, id, name, args, error, **extra):
-        result = b.call(id, name, args)
-        self.assertEqual(result, {"ok": False, "refused": True, "error": error, **extra})
-        self.assertEqual(emitted, [("tool_call", {"id": id, "name": name, "args": args}),
-                                   ("tool_result", {"id": id, "name": name, "ok": False, "result": error,
-                                                    "refused": True, **extra})])
-
-    def test_a_call_refused_at_the_door_is_recorded_as_refused(self):
-        """D69: the four early returns emit tool_call then tool_result with `refused`."""
-        b, emitted = self._broker()
-        self._assert_refused(b, emitted, "c1", "nope", {"x": 1}, "no such tool: nope")
-        bad = _spec("typed_thing", params={"n": {"type": "integer"}}, required=["n"])
-        b, emitted = self._broker()
-        b.tools = {**TOOLS, "typed_thing": bad}
-        result = b.call("c2", "typed_thing", {"n": "not a number"})
-        self.assertEqual([k for k, _ in emitted], ["tool_call", "tool_result"])
-        self.assertTrue(result["refused"] and emitted[1][1]["refused"] and emitted[0][1]["args"] == {"n": "not a number"})
-        def no(args):
-            raise ValueError("bad time")
-        b, emitted = self._broker()
-        b.tools = {**TOOLS, "norm_thing": _spec("norm_thing", normalize=no)}
-        self._assert_refused(b, emitted, "c3", "norm_thing", {}, "bad time")
-        b, emitted = self._broker(origin="system")
-        self._assert_refused(b, emitted, "c4", "write_thing", {}, policy.DENIED_TEXT, denied=True)
-
-    def test_an_unknown_tool_name_is_bounded_in_events_and_error(self):
-        b, emitted = self._broker()
+    def test_an_unknown_tool_name_is_bounded_in_the_error(self):
+        b = self._broker()
         result = b.call("c1", "n" * 3000, {})
-        self.assertTrue(all(len(p["name"]) <= 64 for _, p in emitted) and len(result["error"]) < 100)
+        self.assertLess(len(result["error"]), 100)
 
     def test_unknown_tool_of_an_off_sense_names_the_sense(self):
         """B2: with the calendar off, `list_events` is refused with the reason, not as a name that never was."""
         from pathfinder import signals, tools
         self.addCleanup(tools.OFF_TOOLS.clear)
         signals.load({"senses": {}})
-        b, emitted = self._broker()
-        self._assert_refused(b, emitted, "c1", "list_events", {}, "no such tool: list_events (the calendar sense is off)")
-
-    def test_an_allowed_call_is_not_marked_refused(self):
-        b, emitted = self._broker()
-        self.assertNotIn("refused", b.call("c1", "read_thing", {}))
-        self.assertTrue(all("refused" not in p for _, p in emitted))
+        b = self._broker()
+        self.assertEqual(b.call("c1", "list_events", {}),
+                         {"ok": False, "error": "no such tool: list_events (the calendar sense is off)"})
 
     def test_broker_approved_skips_policy(self):
-        b, emitted = self._broker(approved={"c1": ("write_thing", {})})
+        b = self._broker(approved={"c1": ("write_thing", {})})
         result = b.call("c1", "write_thing", {})
         self.assertEqual(result, {"ok": True, "result": {"done": True}})
 
     def test_broker_approval_is_single_use_and_exact(self):
         """The call id is a string the model chose and re-uses: one approval must not become a
         standing permission, nor cover the same id with different arguments (review, partition 2)."""
-        b, emitted = self._broker(approved={"c1": ("write_thing", {})})
+        b = self._broker(approved={"c1": ("write_thing", {})})
         b.call("c1", "write_thing", {})
         with self.assertRaises(Gate):
             b.call("c1", "write_thing", {})  # same id again: gated again
-        b, emitted = self._broker(approved={"c1": ("write_thing", {"x": 1})})
+        b = self._broker(approved={"c1": ("write_thing", {"x": 1})})
         with self.assertRaises(Gate):
             b.call("c1", "write_thing", {})  # same id, other arguments: not what was approved
 
     def test_broker_denied_returns_user_denial(self):
-        b, emitted = self._broker(denied={"c1"})
+        b = self._broker(denied={"c1"})
         result = b.call("c1", "write_thing", {})
         self.assertEqual(result, {"ok": False, "denied": True, "error": USER_DENIED_TEXT})
-        self.assertEqual(emitted, [])
 
     def test_broker_coerce_error_before_policy(self):
         bad_spec = _spec("typed_thing", params={"n": {"type": "integer"}}, required=["n"])
-        b, emitted = self._broker()
+        b = self._broker()
         b.tools = {**TOOLS, "typed_thing": bad_spec}
         result = b.call("c1", "typed_thing", {"n": "not a number"})
         self.assertFalse(result["ok"])
@@ -118,13 +83,13 @@ class BrokerTest(unittest.TestCase):
         def boom(control=None):
             raise RuntimeError("kaboom")
         spec = _spec("boom_thing", handler=boom)
-        b, emitted = self._broker()
+        b = self._broker()
         b.tools = {**TOOLS, "boom_thing": spec}
         result = b.call("c1", "boom_thing", {})
         self.assertEqual(result, {"ok": False, "error": "kaboom"})
 
     def test_broker_small_result_passes_through_unclipped(self):
-        b, emitted = self._broker()
+        b = self._broker()
         result = b.call("c1", "read_thing", {})
         self.assertEqual(result, {"ok": True, "result": {"done": True}})
 
@@ -132,8 +97,7 @@ class BrokerTest(unittest.TestCase):
         """The clone's path (U7): the store caps and the renderer filters, so the broker hands back the value."""
         raw = {"text": "\x1b[31mred\x1b[0m" + "x" * 20000}
         failing = _spec("f", handler=lambda control=None: (_ for _ in ()).throw(RuntimeError("\x07" + "y" * 9000)))
-        b = Broker({"t": _spec("t", handler=lambda control=None: raw), "f": failing}, "user", {}, control=None,
-                   emit=lambda kind, payload: None)
+        b = Broker({"t": _spec("t", handler=lambda control=None: raw), "f": failing}, "user", {}, control=None)
         self.assertEqual(b.call("c1", "t", {}), {"ok": True, "result": raw})
         self.assertEqual(b.call("c2", "f", {}), {"ok": False, "error": "\x07" + "y" * 9000})
 

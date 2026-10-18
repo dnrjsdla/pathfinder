@@ -362,7 +362,7 @@ priority. The model that answered is `Response.model` → `assistant.model`.
 | `test_no_new_ledger_type` | U1, then U10a | the new `TYPES` set exactly |
 | `test_module_ceilings` | U1 (state 800, noted), U10b | the Shape table (state 780, results 390, assemble 520, clone 520, router+llm 715, ledger 260, daemon 780, broker+policy 455) |
 | `test_core_under_6000` | U10b | ledger, state, daemon, clone, assemble, results, router, llm/*, broker, policy, exec, tools, memory, rules, signals, deliver ≤ 6,000 (≈ 4,850 expected) |
-| `test_coupling_ceilings` (first) | U10b | P1 modules: ≤ 8 package imports, ≤ 8 importers (clock, config exempt), no function-level imports; `NOT_YET` = daemon, tools, keychain, memory, `__main__` — empty by P6 |
+| `test_coupling_ceilings` (first) | U10b | P1 modules: ≤ 8 package imports, ≤ 8 importers (clock, config exempt), no function-level imports (package imports; the SDK's lazy `import anthropic` in llm/anthropic.py is exempt); `NOT_YET` = daemon, tools, keychain, memory, `__main__` — empty by P6 |
 
 Also: U1 `test_assistant_blocks_written_verbatim`; U2 `test_result_body_capped_at_256k`; U3 `test_v21_rename_round_trip`
 (nested, collision, both names, original only, replayed calls, ledger original); U4 `test_resident_breakpoint_placement`;

@@ -146,8 +146,7 @@ class ApplyTest(MemoryHarness):
         """U23: a vet refusal raises, so the model gets `ok: false` for an edit that did not happen."""
         from pathfinder.broker import Broker
         self.manager()
-        broker = Broker(memory.TOOLS, "user", {"edit_memory": "allow"}, control=None,
-                        emit=lambda kind, payload: None)
+        broker = Broker(memory.TOOLS, "user", {"edit_memory": "allow"}, control=None)
         out = broker.call("c1", "edit_memory", {"target": "USER.md", "op": "replace", "old": "- no such line", "new": "x"})
         self.assertEqual(out, {"ok": False, "error": "old does not match any line in the file"})
 

@@ -4,7 +4,6 @@ ever checks policy or calls a handler - an uncast `escalate="false"` (a string,
 which Python treats as truthy) must not sail past the gate as an escalation."""
 from __future__ import annotations
 
-import json
 import os
 import re
 from dataclasses import dataclass
@@ -16,7 +15,6 @@ from . import exec as _exec
 
 READ_CLIP = 8000
 READ_CAP = 1 << 20  # read_file's hard cap in characters; the store (results.cap) keeps 256 KB of it
-LEDGER_CLIP = 2000  # what a recorded tool_call/tool_result keeps
 
 
 @dataclass(frozen=True)
@@ -167,15 +165,6 @@ def map_strings(value, fn):
     if isinstance(value, (list, tuple)):
         return [map_strings(v, fn) for v in value]
     return value
-
-
-def clip_for_ledger(value, limit: int = LEDGER_CLIP):
-    """Shorter and head-only, unlike `clip()` above - what the daemon and a job keep of a tool
-    call's args/result in the ledger, not what the model itself is shown."""
-    if isinstance(value, str):
-        return value if len(value) <= limit else value[:limit] + "...(truncated)"
-    text = json.dumps(value, ensure_ascii=False)
-    return value if len(text) <= limit else text[:limit] + "...(truncated)"
 
 
 def normalize_local_datetime(*keys):

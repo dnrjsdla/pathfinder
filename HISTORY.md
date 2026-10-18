@@ -1604,3 +1604,194 @@ The first M2 run (default effort, 5 trials, 4 arms all 5/5, 0 HTTP 400; `v2-m2-c
 
 Left open: Korean tool search (M5), the adapter rename (M9), N1/N6/N7 scorer rewrites before an M1 re-run, M2 at n=10 with a mid-history removal, and whether
 `read_result` round trips cost too much against the M4 "≤ 2× cost" line.
+
+## 2026-10-18 — Partition 1 of the v2 rebuild: the root clone runs a day
+
+Partition 1 (contract `docs/plans/v2-partition-1.md`) replaced v1's turn engine with the v2 skeleton: one
+assembler that alone builds model requests, a result store with `r:N` handles and `read_result`, the Broker/policy
+door with the gate hand-off (V22: the root does not wait at a gate; the approved call runs under the harness and
+comes back as a report item), the root as one asyncio clone, the Anthropic adapter on the official SDK beside
+`openai_compat`, a router with role chains and fallback, and the harness fold (V5). U9 deleted the old engine (loop,
+jobs, slot, the memory pass, `summarize`, `rules.judge`); U10a/U10b trimmed state and keys and landed the invariant
+table. "It runs" passed live on Haiku 5.5 (6/6). M6, a synthetic day, failed its first run and passed after one more
+unit (U13, D76). M8 is not yet run. 715 tests at the end, from 820 before the switch (U8a); 86 retired in U9 and 28
+in U10a with the code they pinned. Commits 19218e6 (the contract) through f337c01.
+
+### The units
+
+- U1 ledger TYPES for v2 events and state's results/clones/gates/context index · U2 the result store (handle + rule
+  summary ≤ 2,000 chars, `read_result` by range/query/path ≤ 6,000, 256 KB ledger cap) · U3 neutral
+  `Request`/`Response`, `openai_compat.to_wire`/`complete`, the V21 rename · U4 the Anthropic adapter on the SDK
+  (dependency 0 → 1, V13): three cache breakpoints, the resident copy as a `clear_at` system message, blocks replayed
+  verbatim · U5 the router (role chains, fallback, per-api semaphores) · U6 the assembler and the fold, with
+  `prompts/root.txt` and `fold.txt` · U7 the clone: turn loop, hand-off, interrupt, restart, fold.
+- U8a the switch: the daemon runs the root clone (daemon 778 → 599), one revertible commit. U8b the CLI
+  (`approvals` by ledger seq; `approve` prints the report turn) and the live checker `bench/v2/p1_runs.py` +
+  `p1_checks.py`.
+- U9 deleted `loop.py`, `jobs.py`, `llm/slot.py`, `senses/jobs.py`, three prompts and the v1 benches that imported
+  them (their measurement records stay); memory.py 729 → 467; `rules.judge` is a stub until P5. U10a: the final
+  TYPES set of 37, state.py 798 → 582, `model`/`worker_model` gone. U10b: clips and emits gone, the invariant table.
+- R1/R2 (researcher): `bench/v2/m6_day.py` and `bench/v2/m8_fold.py` with their stubs and dry runs.
+- U13 (D76), after M6's first run: one tool list for every origin.
+
+### Size against the ceilings
+
+`tests/test_invariants.py` now holds the contract's table: `test_module_ceilings` (§6 × 1.3), `test_core_under_6000`,
+`test_single_assembler` (by AST: a `Request` is built only in assemble.py, `router.complete` is called only in
+clone.py, adapters are imported only by the router, memory's `embed` the named exemption) and
+`test_coupling_ceilings` (≤ 8 package imports, ≤ 8 importers, no function-level package imports). Its `NOT_YET` set
+(daemon, tools, keychain, memory, `__main__`) is asserted to still violate, so it cannot go stale; it is empty by P6.
+
+| row | ceiling | at U10b | after U13 |
+|---|---|---|---|
+| core (16 rows) | 6,000 | 4,352 | 4,351 |
+| state.py | 780 | 582 | 582 |
+| daemon.py | 780 | 556 | 558 |
+| clone.py | 520 | 405 | 405 |
+| assemble.py | 520 | 190 | 190 |
+| results.py | 390 | 253 | 253 |
+| router.py + llm/** | 715 | 553 | 556 |
+| broker.py + policy.py | 455 | 165 | 167 |
+| tools.py | 390 | 269 | 261 |
+
+### The live check: 6/6 on Haiku 5.5
+
+`bench/v2/p1_runs.py`, record `docs/measurements/v2-p1-live-claude-haiku-5-5-2026-10-18.txt`: Haiku 5.5 as root at
+effort xhigh, gemma4 on Ollama as the fallback, a fresh home, the daemon started and stopped by pid only.
+
+| step | what | checks |
+|---|---|---|
+| 1 | read a 100-page file, reopen the result by `r:N`, answer the page id | 8/8 |
+| 2 | a write is handed off at a gate; the root's turn ends | 6/6 |
+| 3 | stop, delete state.db, restart: the gate is still listed; approve → the call runs once, the root reports it | 8/8 |
+| 4 | kill -9 during `run_command`, restart: `interrupted {why: restart}`; asked, the model says the outcome is unknown | 4/4 |
+| 5 | the Anthropic provider on a closed port → the answer comes from the Ollama model | 1/1 |
+| 6 | cleanup | 1/1 |
+
+- Step 1's cache (read, write) per request: (0, 2,963) → (2,963, 156) → (3,119, 225). The API accepted the 1-hour
+  `cache_control` marker (SDK 1.15.0, no beta header), and the third request read more than the first one wrote, so
+  the history breakpoint is read across cleared resident copies: Deviation 5 holds and U4's fallback constant (one
+  copy per item) was not needed.
+- Three thinking blocks existed before the restart, so V12's strip-on-restart path ran live, not only in M2 (k = 0
+  would have printed UNTESTED).
+- Step 4's answer: "I don't know. The run was interrupted by a restart, so it may or may not have finished."
+
+### M6 — a synthetic day: FAIL, then PASS after U13
+
+`bench/v2/m6_day.py` drives the real Clone, assembler, router and fold in a temp home on Haiku 5.5 (every role, at the
+API-default effort, the product's) over `bench/v2/m6_day.json`: 07:40–23:40, 30 user items (19 need tools, 2 gate and
+are approved), 20 signal envelopes as `signal` items, 5 child runs as fresh clones, 1 night run given a 30,000-char
+digest, folds as the window demands. Prices 0.10/0.50 per MTok from the command line; cache reads 0.1×, writes 2×
+(1-hour TTL, the pass figure, cold after 3,600 s); the 5-minute figure (writes 1.25×, cold after 300 s) beside it.
+Pass: cost ≤ $1.00, hit ≥ 0.70, and (since ced29a1) no error row. Resident block 1,050 chars in both runs.
+
+| run | requests | folds | error rows | output tokens | raw | 5-minute | 1-hour | verdict |
+|---|---|---|---|---|---|---|---|---|
+| 1, before U13 (`v2-m6-claude-haiku-5-5-2026-10-18.json`) | 86 | 5 | 19 of 58 | 32,914 | $0.0556, 0.749 | $0.0532, 0.648 | $0.0646, 0.686 | FAIL |
+| 2, after U13 (`…-2026-10-18-run2.json`) | 112 | 9 | 0 | 46,891 | $0.0694, 0.764 | $0.0771, 0.575 | $0.0765, 0.724 | PASS |
+
+The first run missed the hit criterion by 1.4 points. The researcher's diagnosis:
+
+- **19 of the 58 rows ended in an HTTP 400 with no answered request** (15 signal, 4 user). The tool list differed by origin: a
+  user turn got 7 tools, a signal turn 5 (`edit_memory` and `read_skill` were `origins={user,...}`). Haiku's thinking
+  signature is bound to the tool set, so replaying the session's shared history under the other list is a 400; and
+  the cache prefix (tools first) missed on every origin switch. 1-hour hit by kind, computed from the rows: user .724,
+  child .669, signal .572. Ceiling ≈ .83; run-to-run noise ±0.3 points.
+- **The bench scored the 86 remaining requests as if that were the day.** ced29a1: any error row fails the day, and
+  each row keeps its first error's status and message, so a diagnosis never needs the deleted temp home.
+- **Where the rest goes:** uncached input ≈ 477 tokens per request, which is the resident `clear_at` copy (506 tokens)
+  resent each turn; cold starts (the 8 items an hour or more after the previous request) carry 37% of the 1-hour
+  writes; a fold costs twice (three summaries ran to the 2,000-token cap). The dry run had predicted 0.854; the real
+  model's output and the uncached input are the difference.
+- **Predicted effects:** fixing the errors +4–7 points; folding as a branch of the root's prefix +4.2; removing the
+  resident +3.9 (rejected, D8); cheaper role models 0; fewer steps worse.
+- **Why the live check could not see it:** product P1's root turns are all origin user (signals end at rules and
+  summary notices until P5). In P5, with signal turns through the root, it would be certain.
+
+Owner decision 8 = (a), U13 (dc7886a, D76): one clone, one tool list. Every root turn and every approved gate's run
+takes one snapshot of `tools.TOOLS`; origin selects policy, never the list; a tool whose `origins` exclude the turn's
+origin is refused at the door as a failed call ("<tool> is not available in a <origin> turn"); `tools.for_origin` is
+gone. The second run has 0 errors and a 1-hour hit of 0.724 (by kind: user .766, child .717, signal .695). The day got
+longer (112 against 86 requests, 9 against 5 folds, 46.9k against 32.9k output tokens) because signal turns now
+complete instead of failing; the cost rose with it and is still 13× under the ceiling. The failed first run's JSON
+is kept beside the second.
+
+### What changed against the plan
+
+- **The live check ran once on Haiku**, after U10b and the owner's decisions; after U8b only its mechanics ran,
+  against a local Ollama model (no credits). The contract said "after U8b, again after U10b". Its `start()` now waits
+  on a socket connect: the socket file survives a kill -9.
+- **A thirteenth unit.** The plan had twelve rows; U13 came from M6. The tools piece changed from
+  `tools.for_origin("user")` to one `tools.TOOLS` snapshot for every origin, and the turn table's row 8 gained the
+  origin refusal (D76).
+- **Steers are recorded by the clone** at the step boundary with the item's turn id (U6/U7), not by the daemon on
+  arrival; two says queued behind a busy lane are two turns, never merged (U8a). Row 1 puts the steer check before
+  the chat-approval check (decision 5).
+- **Refusals at the door are failed calls.** The broker's emit hook left in U10b; the clone records a refusal as
+  `result {ok: false}`.
+- **Model roles.** U10a had `init` write both `root` and `summarize`; D75 replaced that with root only and every
+  empty role on root's chain, plus one `config set KEY.SUB` rule for every object-valued key (D73's senses-only
+  branch superseded).
+- **M6's pass basis is the 1-hour TTL** (decision 7), not the 5-minute adjusted figure first written, and an error
+  row fails the day. The day came in at 86 and 112 requests, $0.065 and $0.077, against the contract's estimate of
+  about 150–200 requests and $0.10–0.30.
+- **Sizes.** state.py ran at a temporary 800 ceiling from U1 to U10a and ended at 582, under §6's 600; assemble.py
+  is 190 lines against an estimate of about 330, results.py 253 against about 200, clone.py 405 against about 380.
+- **Settled by the units and written into the contract:** `open_gates` lists every unreported gate; `gates.result`
+  and `summary.session` exist; `user.gate` is always a list; text ranges count characters; a fallback model keeps
+  thinking only when the bare model name matches; `llm/rename.py` stands alone (ceiling 105); a provider with no
+  key fails as `LLMError` 400; v1 hex ids still resolve proposals; an old state.db opens as is until one
+  `pathfinder reindex`.
+
+### Owner decisions during the partition (2026-10-18, each the lead's recommendation)
+
+1. Between U8a and U9, jobs and the memory pass received uncut, unfiltered results: recorded here, not fixed (both
+   were deleted in U9).
+2. `close()` records no root turn event, but an approved call already running may still finish and record its
+   result (the real outcome): kept, and the contract's wording says so.
+3. A report turn whose session has no attached screen goes out through the schedule banner path (text clipped to
+   200 chars); reports re-queued by `restore()` after a restart are always this case. An attached approver gets no
+   banner.
+4. A delivered notification is not in the root's window, so "that notification just now?" cannot be answered: a
+   declared P1 gap and the first requirement of P5.
+5. The contract's "approval check first" in row 1 conflicted with D17 (a steer is never intercepted): the contract
+   moved to D17's side.
+6. D75: a role without a model chain uses root's; `config set KEY.SUB`.
+7. The 1-hour cache TTL (writes 2×) is the product's pricing and M6's pass basis: the three breakpoints carry it.
+8. D76: one clone, one tool list (above).
+
+### Defects found, by whom
+
+- **M6, live (researcher's diagnosis):** the per-origin tool list: 400s on replay and a cache miss on every origin
+  switch → D76, U13.
+- **Lead, after the first M6 run:** the bench scored a day with 19 failed rows as clean (ced29a1).
+- **U10a review:** a config whose `models` held only `root` never folded: the fold asks for role `summarize`, the
+  router raised, and the window stayed unfolded without a word. Every later role would have started the same way
+  → D75.
+- **U8b, the local mechanics run:** a provider with no API key raised a `TypeError` that escaped the router; it is now
+  an `LLMError` 400 before any client is built.
+- **U8a review (two rounds):** two says queued behind a busy lane were recorded as one user turn at queue time
+  (the clone now records at take time); a fold cancelled mid-request wrote half a summary (it now re-raises); a
+  mid-stream error dropped what had streamed (now recorded, blueprint §11 invariant 2); blank text blocks were
+  replayed (never now).
+- **The contract, against HISTORY 2026-10-17:** the bullet "Haiku 5.5 thinks by default" contradicts that day's own
+  M2 run (no thinking at the default effort, thinking at xhigh); the contract trusted the run. The live check at
+  xhigh saw three blocks.
+
+### Left open on purpose
+
+- **M8** (the fold loses no fact, on the owner's long 10-14 session) is not yet run: it needs the owner's session id
+  and ten questions written outside the repo.
+- **D76's residual:** an MCP install or unload, or a skill write, still changes the tool bytes under a live thinking
+  epoch. Whether the epoch advances on a tool change is the owner's call later.
+- **Thinking removal after a restart** rests on M2 and live step 3 only (one run, three blocks); a run with k = 0
+  would have been UNTESTED.
+- **A turn followed by a fold can send the CLI approver's banner twice** (the same window existed on the schedule path).
+- **The consolidation pass's three-day stall alarm** (blueprint §11) is off until P4.
+- **Decision 4's gap** (a delivered notification is outside the root's window) waits for P5.
+- **ARCHITECTURE.md and ARCHITECTURE.ko.md are v1-stale**; they are rewritten in P6 together with the contract.
+- **An old home needs `pathfinder reindex` once** (`approvals.seq` is not backfilled by `catch_up`).
+- From the contract's stubbed list: `rules.judge` until P5; gate timeout and piece 2 over 8,000 chars with MCP tools
+  until P2; the mid-stream steer cut until the TUI (P6); M2's in-place resume path with the children (P3).
+
+Anthropic credit used: about $0.20 before the M6 re-run and about $0.08 for the re-run.

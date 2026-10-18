@@ -14,7 +14,7 @@ later and its report item runs then. Usage comes only from the ledger's `assista
 (per million tokens) come from the command line; cache read 0.1x, write 2x (the product's 1-hour TTL; adjusted,
 the 5-minute comparison, 1.25x). Cold adjustment: an item 300 s (ttl_1h: 3600 s) or more after the previous request, or
 the day's first, has its first request's cache reads repriced as writes. Pass (ttl_1h): cost <= $1, hit rate >= 0.70.
-Output: docs/measurements/v2-m6-<model>-<date>.json.
+An item with an `error` event fails the day (printed, kept in its row). Output: docs/measurements/v2-m6-<model>-<date>.json.
 """
 import argparse, asyncio, datetime, json, math, sys, tempfile, uuid
 from pathlib import Path
@@ -32,8 +32,7 @@ MAX_COST, MIN_HIT = 1.00, 0.70
 
 
 def check_spec(spec) -> None:
-    kinds = [i["kind"] for i in spec["items"]]
-    got = {k: kinds.count(k) for k in COMPOSITION}
+    got = {k: sum(i["kind"] == k for i in spec["items"]) for k in COMPOSITION}
     users = [i for i in spec["items"] if i["kind"] == "user"]
     assert got == COMPOSITION, got
     assert sum(bool(i.get("tools")) for i in users) >= 8 and sum("approve_after_s" in i for i in users) == 2
@@ -68,13 +67,14 @@ async def day(home: Home, spec) -> list[dict]:
         now["ts"], mark = at, home.ledger.last_seq
         end = await clone.run(item)
         ev = home.events(mark)
-        use = requests(ev)
+        use = requests(ev)  # a failed request's ledger text is kept in the row: the temp home is deleted after the run
+        failed = [{"status": e.get("status"), "message": e.get("message", "")[:200]} for e in ev if e["type"] == "error"]
         rows.append({"at": datetime.datetime.fromtimestamp(at).strftime("%H:%M:%S"), "kind": label, "clone": clone.id,
                      "role": clone.role, "end": end, "gap_s": None if prev is None else round(at - prev),
                      "requests": len(use), "usage": use, "folds": sum(e["type"] == "summary" for e in ev),
                      "tools": [e["tool"] for e in ev if e["type"] == "result"],
                      "gates": [e["seq"] for e in ev if e["type"] == "gate"],
-                     "errors": sum(e["type"] == "error" for e in ev)})
+                     "errors": len(failed), **({"error": failed[0]} if failed else {})})
         prev = at if use else prev
         return rows[-1]
 
@@ -117,22 +117,22 @@ def score(rows, p_in, p_out, cold_s=None, write=WRITE_1H) -> dict:
                 read, made = 0, made + read
             for name, n in zip(t, (i, o, read, made)):
                 t[name] += n
-    cost = (t["input"] * p_in + t["cache_read"] * READ * p_in + t["cache_creation"] * write * p_in
-            + t["output"] * p_out) / 1e6
+    cost = ((t["input"] + t["cache_read"] * READ + t["cache_creation"] * write) * p_in + t["output"] * p_out) / 1e6
     prompt = t["input"] + t["cache_read"] + t["cache_creation"]
     return {"tokens": t, "cost_usd": cost, "hit_rate": round(t["cache_read"] / prompt, 4) if prompt else 0.0}
 
 
 def report(rows, a, refs) -> dict:
-    hour = score(rows, a.price_in, a.price_out, COLD_1H)
+    hour, errors = score(rows, a.price_in, a.price_out, COLD_1H), sum(bool(r["errors"]) for r in rows)
     return {"measurement": "v2-m6", "models": refs, "effort": a.effort or "api default", "date": a.date,
             "prices_per_mtok": {"in": a.price_in, "out": a.price_out, "cache_read": READ, "write_5m": WRITE_5M,
                                 "write_1h": WRITE_1H},
             "ttl_1h_note": "the product's pricing (1-hour writes at 2x) and the pass figure; adjusted: the 5-minute one",
-            "requests": sum(r["requests"] for r in rows), "folds": sum(r["folds"] for r in rows),
+            "requests": sum(r["requests"] for r in rows), "folds": sum(r["folds"] for r in rows), "errors": errors,
             "raw": score(rows, a.price_in, a.price_out), "adjusted": score(rows, a.price_in, a.price_out, COLD_5M, WRITE_5M),
-            "ttl_1h": hour, "pass": hour["cost_usd"] <= MAX_COST and hour["hit_rate"] >= MIN_HIT,
-            "criteria": {"max_cost_usd": MAX_COST, "min_hit_rate": MIN_HIT, "cold_after_s": COLD_1H}, "items": rows}
+            "ttl_1h": hour, "pass": hour["cost_usd"] <= MAX_COST and hour["hit_rate"] >= MIN_HIT and not errors,
+            "criteria": {"max_cost_usd": MAX_COST, "min_hit_rate": MIN_HIT, "cold_after_s": COLD_1H, "max_errors": 0},
+            "items": rows}
 
 
 def check_score() -> None:
@@ -167,8 +167,6 @@ def main():
     spec = json.loads(SPEC.read_text(encoding="utf-8"))
     check_spec(spec)
     check_score()
-    if not a.dry_run:
-        m6_stub.key()
     with tempfile.TemporaryDirectory(prefix="pf-m6-") as tmp:
         m6_stub.configure(Path(tmp), refs, a.effort)
         world(Path(tmp), spec)
@@ -183,9 +181,11 @@ def main():
     for name in ("raw", "adjusted", "ttl_1h"):
         print(f"{name:<9} ${out[name]['cost_usd']:.4f}  hit {out[name]['hit_rate']:.3f}  {out[name]['tokens']}")
     print(f"requests {out['requests']}  folds {out['folds']}  resident {len(resident)} chars  pass {out['pass']}  -> {path}")
+    print(*(f"error row {i}: {r['kind']} at {r['at']} ({r['clone']}) {r['error']['status']}: {r['error']['message']}"
+            for i, r in enumerate(rows) if r["errors"]), f"errors: {out['errors']} (must be 0)", sep="\n")
     if a.dry_run:
-        kinds = [r["kind"] for r in rows]
-        assert {k: kinds.count(k) for k in COMPOSITION} == COMPOSITION and kinds.count("report") == 2
+        assert {k: sum(r["kind"] == k for r in rows) for k in [*COMPOSITION, "report"]} == {**COMPOSITION, "report": 2}
+        assert not report([{**rows[0], "errors": 1}], a, refs)["pass"], "an item with an error must fail the day"
         assert next(r for r in rows if r["kind"] == "night")["brief_chars"] == len(spec["items"][-1]["brief"]) + 30002
         assert spec["user_md"].splitlines()[1] in resident and signals.AGENDA_HEADER in resident
         assert sum(bool(r["tools"]) for r in rows if r["kind"] == "user" and r["needs_tools"]) >= 8

@@ -41,6 +41,8 @@ class Home:
         self.path = Path(path)
         os.environ["PATHFINDER_HOME"] = str(self.path)
         self.ledger, self.state = ledger.Ledger(self.path), state.State(self.path / "state.db")
+        if router is None:  # a live home: the real router reads ANTHROPIC_API_KEY
+            key()
         self.router = router or Router(lambda: config.load(self.path))
         self.queue = []  # the lane: items a clone enqueues (gate reports, late steers)
 

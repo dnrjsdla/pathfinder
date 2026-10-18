@@ -197,7 +197,7 @@ class AssembleTest(unittest.TestCase):
     def test_budgets(self):
         self.assertLessEqual(len(assemble.SYSTEM), 6000)
         self.assertLessEqual(len(assemble.FOLD_PROMPT), 1500)
-        native = [spec.schema()["function"] for spec in tools.for_origin("user").values()]
+        native = [spec.schema()["function"] for spec in tools.TOOLS.values()]
         req = assemble.assemble(self.state, self.view, native)
         self.assertLessEqual(len(json.dumps(req.tools, ensure_ascii=False)), 8000)  # native + core (Deviation 7)
         self.assertEqual(assemble.resident(["a" * 3000, "", "b" * 3000]), "a" * 3000 + "\n\n" + "b" * 998)

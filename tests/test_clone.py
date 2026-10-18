@@ -174,6 +174,27 @@ class CloneTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await c.run(Item("user", "Use it.", "s1")), "answer")
         self.assertEqual(self.events("result")[-1]["tool"], "n" * 64)
 
+    async def test_one_tool_list_for_every_origin(self):
+        """D76 (M6: a thinking signature and the cache prefix are bound to the tool list): user → signal → user in
+        one session sends byte-identical tools; a tool the signal origin may not use is refused at the door."""
+        ran = []
+        tools.TOOLS["edit_memory"] = ToolSpec("edit_memory", "Edit.", {}, [], lambda control=None: ran.append(1),
+                                              origins=frozenset({"user", "memory"}))
+        c = self.clone(resp(text("Hi.")), resp(THINK, call("c1", "edit_memory")), resp(text("Not here.")),
+                       resp(text("Back.")))
+        self.assertEqual(await c.run(Item("user", "Hello.", "s1")), "answer")
+        self.assertEqual(await c.run(Item("signal", "A mail came.", "s1", origin="signal")), "answer")
+        self.assertEqual(await c.run(Item("user", "And now?", "s1")), "answer")
+        [r] = self.events("result")
+        self.assertEqual((r["tool"], r["ok"], r["body"]),
+                         ("edit_memory", False, "edit_memory is not available in a signal turn"))
+        self.assertEqual(ran, [])
+        reqs = self.router.requests
+        self.assertEqual(len(reqs), 4)
+        self.assertIn("edit_memory", [t["name"] for t in reqs[0].tools])
+        self.assertEqual(len({json.dumps(r.tools) for r in reqs}), 1)
+        self.assertEqual(len({json.dumps(anthropic.to_wire(r, ENDPOINTS[0])["tools"]) for r in reqs}), 1)
+
     async def test_steer_mid_step_and_refused_turn_keeps_an_opening_message(self):
         async def steer_during(req, on_text, cancel):
             c.steer("s1", "also the date")

@@ -51,6 +51,20 @@ class BrokerTest(unittest.TestCase):
         self.assertEqual(b.call("c1", "list_events", {}),
                          {"ok": False, "error": "no such tool: list_events (the calendar sense is off)"})
 
+    def test_a_tool_outside_the_turns_origins_is_refused_at_the_door(self):
+        """D76: origin selects policy, never the tool list - a tool the turn's origin may not use is a failed
+        call before coerce and policy, its handler never run; `memory` is opt-in (not in the default origins)."""
+        ran = []
+        user_only = _spec("user_only", handler=lambda control=None: ran.append(1), origins=frozenset({"user"}))
+        b = Broker({**TOOLS, "user_only": user_only}, "signal", {}, control=None)
+        self.assertEqual(b.call("c1", "user_only", {"junk": 1}),
+                         {"ok": False, "error": "user_only is not available in a signal turn"})
+        self.assertEqual(self._broker(origin="memory").call("c2", "read_thing", {}),
+                         {"ok": False, "error": "read_thing is not available in a memory turn"})
+        self.assertEqual(ran, [])
+        self.assertEqual(Broker({"user_only": user_only}, "user", {}, control=None).call("c3", "user_only", {}),
+                         {"ok": True, "result": None})
+
     def test_broker_approved_skips_policy(self):
         b = self._broker(approved={"c1": ("write_thing", {})})
         result = b.call("c1", "write_thing", {})

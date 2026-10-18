@@ -680,3 +680,21 @@ P5) would otherwise start as the same silent failure, and `config set models` re
 table, so adding one role could wipe another. `init` writes `root` only again: one line of config
 runs everything. — *Reversed if* a role silently running on root's model costs more than a missed
 fold would — then roles are explicit again and `config set` warns when a used role is missing.
+
+**D76. One clone, one tool list** (decided 2026-10-18, owner decision 8 = (a)). A clone sends the
+same tool list for every origin: a turn, and an approved gate's run, takes one snapshot of the whole
+`tools.TOOLS`, and the list changes only when the registry itself changes (an MCP install or unload,
+a skill write - `read_skill`'s description carries the skill index). Such a change still moves the
+tool bytes under a live thinking epoch: the residual this fix does not cover (recorded in HISTORY;
+the owner's call whether the epoch advances on a tool change). Origin selects policy
+(allow/ask/deny), never the tool list. A tool whose `origins` exclude the turn's origin is refused
+at the door as a failed call `{ok: false, error: "<tool> is not available in a <origin> turn"}`,
+recorded like any refusal;
+`ToolSpec.origins` stays as the data the door reads, and `tools.for_origin` is gone. Blueprint V10
+discards the signal-turn special case and V18 puts tool subsets on clone presets; a per-origin list
+on the root was the v1 leftover. M6 (2026-10-18): a signal turn got 5 tools, a user turn 7
+(`edit_memory`, `read_skill`); a thinking signature is bound to the tool set, so replaying the
+shared history under another list was a 400 - 19 of 58 rows ended `error` - and the cache prefix
+(tools first) was missed on every origin switch (signal-turn cache hit 0.572). — *Reversed if* a
+model, shown a tool it may not use, calls it so often that refusals cost more than the cache they
+protect — then presets hide the tool instead.

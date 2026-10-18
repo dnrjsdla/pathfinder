@@ -237,7 +237,7 @@ spend the budget by itself; openai_compat: prompt + completion).
 | 5 | `refusal` → fixed line ("the model declined; this exchange is left out of the conversation") | `turn_end refused` | that line |
 | 6 | `max_tokens` → its `tool_use` blocks get "not run: the answer was cut at the output limit" | `result {ok: false}`, `turn_end max_tokens` | error line |
 | 7 | No `tool_use` → done | `turn_end answer` | `turn.end` |
-| 8 | Each `tool_use`, in order: unknown name / coerce error → refusal text; `read_result` → `results.read` | `result` | `tool` |
+| 8 | Each `tool_use`, in order: unknown name / a tool its origin may not use (D76) / coerce error → refusal text; `read_result` → `results.read` | `result` | `tool` |
 | 9 | Else `Broker.call`: allow → run; deny → `DENIED_TEXT`; `Gate` → hand-off (row 10) | `result` | `tool` |
 | 10 | Gate (V22): the call is detached; the model gets the waiting status and the loop goes on | `gate` | `gate` |
 | 11 | At each step boundary, immediately before it calls `assemble`, the clone drains the queued says and records them; they join the next user message as text blocks, so seq order equals what was sent | `user {steer: true, turn: <item turn>}` | — |
@@ -278,7 +278,7 @@ into the same turn — one opening user message with one line per gate in gate o
 | # | Piece | P1 content | Budget | Anthropic adapter | openai_compat |
 |---|---|---|---|---|---|
 | 1 | Static system | `prompts/root.txt`: identity, handles + `read_result` use (M1's store arm), what a gate and a denial mean, output form | 6,000 (test) | `system`, breakpoint 2 | system message 1 |
-| 2 | Tools | `read_result` + `tools.for_origin("user")` incl. MCP, sorted | 8,000 (test: native + core; Deviation 7) | `tools`, breakpoint 1 on the last | `tools` after `rename_out` |
+| 2 | Tools | `read_result` + `tools.TOOLS` incl. MCP, sorted; the same list for every origin (D76) | 8,000 (test: native + core; Deviation 7) | `tools`, breakpoint 1 on the last | `tools` after `rename_out` |
 | 3 | Resident | the item's frozen copy | 4,000 | primary: a copy after every user message of the item, `{"role": "system", "clear_at": "next_user_message"}` (beta `mid-conversation-system-clear-at-2026-08-21`); fallback: only after the opening one, no `clear_at` | one copy after the item's opening user message, `role: system`, in place |
 | 4 | History | this session's turns since the last fold; summary first ("Earlier in this conversation — a record, not a request:"); one resident copy per past item counts | 24,000 → fold | blocks verbatim; breakpoint 3 on the last user block before the trailing copy (never on a `clear_at` message: 400) | text + tool_calls (renamed); thinking/reasoning dropped |
 | 5 | Current step | user text, steers, tool results via `results.render` (handle + summary ≤ 2,000; errors inline ≤ 2,000; `read_result` output inline ≤ 6,000, Deviation 6) | 8,000 per step; over it, later results shrink to the handle line | `tool_result` + text blocks in one user message | `tool` messages, then a user message for steers |

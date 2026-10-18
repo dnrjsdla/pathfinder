@@ -174,7 +174,7 @@ class Clone:
         """`reported`: the results a report turn's opening message names, seen by the model even when the
         turn they were recorded under is out of the window (a refused turn)."""
         cfg = config.load(self.home)
-        registry = tools.for_origin(item.origin)
+        registry = dict(tools.TOOLS)  # D76: one list for every origin; a copy: an install thread edits TOOLS
         specs = [spec.schema()["function"] for spec in registry.values()]
         broker = Broker(registry, item.origin, cfg["grants"],  # `session`: edit_memory's evidence
                         control=SimpleNamespace(interrupt=event, session=item.session))
@@ -342,7 +342,7 @@ class Clone:
         outcome unknown. A shutdown records nothing (restore writes "outcome unknown")."""
         event = threading.Event()
         self._events.add(event)
-        broker = Broker(tools.for_origin("user"), "user", config.load(self.home)["grants"],
+        broker = Broker(dict(tools.TOOLS), "user", config.load(self.home)["grants"],
                         control=SimpleNamespace(interrupt=event, session=gate["session"]),
                         approved={gate["call_id"]: (gate["tool"], gate["args"])})
         try:

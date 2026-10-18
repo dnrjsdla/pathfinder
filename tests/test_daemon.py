@@ -18,6 +18,7 @@ from unittest import mock
 from pathfinder import config
 from pathfinder import tools as tools_mod
 from pathfinder import tui
+from pathfinder.broker import Broker
 from pathfinder.daemon import SOCKET, Daemon
 from pathfinder.deliver import Notice
 from pathfinder.ledger import Ledger
@@ -1555,10 +1556,11 @@ class InstallerDaemonTest(DaemonHarness):
         async def scenario(daemon):
             return dict(tools_mod.TOOLS)
 
-        self.run_with(fake_model("ok"), scenario)
-        self.assertIn("propose_install", tools_mod.for_origin("user"))
-        self.assertNotIn("propose_install", tools_mod.for_origin("signal"))
-        self.assertNotIn("search_tools", tools_mod.for_origin("signal"))
+        registry = self.run_with(fake_model("ok"), scenario)
+        self.assertIn("propose_install", registry)
+        for name in ("propose_install", "search_tools"):  # D76: in the one list, refused at the door
+            self.assertEqual(Broker(registry, "signal", {}, control=None).call("c1", name, {})["error"],
+                             f"{name} is not available in a signal turn")
 
 
 class ProposalGateLineTest(DaemonHarness):

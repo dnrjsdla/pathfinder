@@ -46,6 +46,8 @@ class Broker:
             name = str(name)[:64]  # model text: bounded
             off = f" (the {OFF_TOOLS[name]} sense is off)" if name in OFF_TOOLS else ""
             return self._refuse(f"no such tool: {name}{off}")
+        if self.origin not in spec.origins:  # D76: origin selects policy, never the tool list
+            return self._refuse(f"{name} is not available in a {self.origin} turn")
 
         coerced, error = coerce(spec, args)
         if error:

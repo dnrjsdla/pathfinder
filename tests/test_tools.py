@@ -64,31 +64,6 @@ class LocalDatetimeNormalizeTest(unittest.TestCase):
                 normalize({"at": bad})
 
 
-class OriginRegistryTest(unittest.TestCase):
-    def test_tools_for_origin(self):
-        job_names = set(tools_mod.for_origin("job"))
-        signal_names = set(tools_mod.for_origin("signal"))
-        # the read and write tools are still there for a job and a signal turn - policy (not
-        # this registry) is what turns "write" into a gate for them.
-        for names in (job_names, signal_names):
-            self.assertIn("read_file", names)
-            self.assertIn("write_file", names)
-
-    def test_for_origin_memory_is_opt_in(self):
-        """`memory` (the consolidation pass) sees no tool by default - a `ToolSpec` must
-        explicitly opt in with `origins={..., "memory"}` (as memory.py's own tools do; this
-        module ships none itself)."""
-        self.assertNotIn("write_file", tools_mod.for_origin("memory"))
-        self.assertNotIn("read_file", tools_mod.for_origin("memory"))
-        spec = ToolSpec(name="memory_only_thing", description="", params={}, required=[],
-                        handler=lambda **a: None, origins=frozenset({"memory"}))
-        tools_mod.TOOLS["memory_only_thing"] = spec
-        try:
-            self.assertIn("memory_only_thing", tools_mod.for_origin("memory"))
-        finally:
-            del tools_mod.TOOLS["memory_only_thing"]
-
-
 class RunCommandCheckTest(unittest.TestCase):
     def _check(self, command):
         return tools_mod.TOOLS["run_command"].normalize({"command": command})

@@ -243,8 +243,7 @@ class ApplyTest(MemoryHarness):
             mgr.edit("skills/foo.md", "add", "", self.SKILL, [], control)
         self.assertFalse((self.home / "skills").exists())
         self.assertEqual(self.state.pending(), [])
-        for origin in ("signal", "job"):
-            self.assertNotIn("edit_memory", tools_mod.for_origin(origin))
+        self.assertEqual(tools_mod.TOOLS["edit_memory"].origins, {"user", "memory"})  # D76: the rest refused
 
     def test_third_party_text_cannot_become_a_skill(self):
         mgr = self.manager()
@@ -497,10 +496,10 @@ class ContextTest(MemoryHarness):
 
 
 class ToolRegistryTest(unittest.TestCase):
-    def test_tools_for_origin_memory(self):
-        pass_tools = set(tools_mod.for_origin("memory"))
+    def test_memory_origin_tools_are_opt_in(self):
+        pass_tools = {name for name, spec in tools_mod.TOOLS.items() if "memory" in spec.origins}
         self.assertEqual(pass_tools, {"search_memory", "read_memory", "edit_memory"})
-        user_tools = set(tools_mod.for_origin("user"))
+        user_tools = {name for name, spec in tools_mod.TOOLS.items() if "user" in spec.origins}
         self.assertTrue({"search_memory", "read_memory", "edit_memory"} <= user_tools)
         self.assertNotIn("read_ledger", user_tools)
 

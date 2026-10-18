@@ -28,8 +28,8 @@ class ToolSpec:
     network: bool = False     # can send data out
     sandboxed: bool = False   # side effects are confined by exec.py
     reversible: bool = False  # a write the user can undo by deleting a row (D22) -> user: allow
-    # who may even see this tool's schema (default: the four turn origins; `memory` - the
-    # consolidation pass - is opt-in)
+    # which turn origins may call it (default: the four turn origins; `memory` - the consolidation
+    # pass - is opt-in). D76: every origin sees every schema; the broker refuses the rest at the door
     origins: frozenset = frozenset({"user", "signal", "job", "system"})
     # Runs after coerce and before policy: what the gate shows is what will happen. A relative
     # path becomes absolute here; a local_datetime param is canonicalized by normalize_local_datetime.
@@ -46,14 +46,6 @@ class ToolSpec:
                 "parameters": {"type": "object", "properties": self.params, "required": self.required},
             },
         }
-
-
-def for_origin(origin: str) -> dict:
-    """The registry a turn of this origin may call: only the specs whose `origins` name it - a tool
-    declared `origins={"user"}` never reaches a signal turn's registry (origin "signal"), which is
-    structure, not policy."""
-    # list(): an MCP reload mutates TOOLS on the loop thread while a tool thread iterates here
-    return {name: spec for name, spec in list(TOOLS.items()) if origin in spec.origins}
 
 
 _BOOL = {"true": True, "false": False, "1": True, "0": False}

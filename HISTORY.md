@@ -1614,7 +1614,7 @@ comes back as a report item), the root as one asyncio clone, the Anthropic adapt
 `openai_compat`, a router with role chains and fallback, and the harness fold (V5). U9 deleted the old engine (loop,
 jobs, slot, the memory pass, `summarize`, `rules.judge`); U10a/U10b trimmed state and keys and landed the invariant
 table. "It runs" passed live on Haiku 5.5 (6/6). M6, a synthetic day, failed its first run and passed after one more
-unit (U13, D76). M8 is not yet run. 715 tests at the end, from 820 before the switch (U8a); 86 retired in U9 and 28
+unit (U13, D76). M8 passed on the owner's 10-14 session the next day. 715 tests at the end, from 820 before the switch (U8a); 86 retired in U9 and 28
 in U10a with the code they pinned. Commits 19218e6 (the contract) through f337c01.
 
 ### The units
@@ -1716,6 +1716,36 @@ longer (112 against 86 requests, 9 against 5 folds, 46.9k against 32.9k output t
 complete instead of failing; the cost rose with it and is still 13× under the ceiling. The failed first run's JSON
 is kept beside the second.
 
+### M8 — the fold keeps facts: PASS on the owner's 10-14 session (2026-10-19)
+
+`bench/v2/m8_fold.py`, record `docs/measurements/v2-m8-claude-haiku-5-5-2026-10-19.json`. The owner's longest v1
+session (10-14, 41 turns, the Notion MCP install and clean-up) replayed into a v2 home as root events, the real
+fold after every turn, then ten pre-registered questions (written outside the repository, with the answers; the
+record holds ids and verdicts only), each on its own copy of the replayed home with `read_result` as the only tool.
+Haiku 5.5 as root and summarizer, api-default effort, 47 requests, about $0.035.
+
+| turns kept / skipped | results | folds | handles covered / missing | read_result on a folded handle | correct / miss / factual error / pending |
+|---|---|---|---|---|---|
+| 17 / 24 | 11 | 12 | 63 / 0 | 8 / 8 ok | 10 / 0 / 0 / 0 |
+
+- **Pass line met in full:** folds happened, every folded handle is in its summary's `handles`, every `read_result`
+  on a folded handle succeeded, and all ten answers are right by the pre-registered keys - five of them facts from the
+  first third of the session (reachable only through a summary and a folded handle), six facts that live only in a
+  stored result body (an exception class in a failed install, a `total` in one search of five, a bot id, a page id in
+  the one clip that reached it), and the trap (a page whose id is in no clip) answered "not in the record".
+- **The bench's fold budget was lowered to 3,000 chars** (`--history-budget`, recorded in the JSON; the product's is
+  24,000). A v2 window of handles and summaries is small: the whole replayed session is about 9,100 chars, so at the
+  product budget nothing would have folded and the measurement would have measured nothing. The lower budget folds
+  the same material more often (12 folds), which is the harder case for fact loss, not the easier one.
+- **What the replay drops:** `v1_turns` keeps a turn only if it holds a `user` event, so the 7 signal turns and the
+  17 approval-continuation turns of v1 are skipped; all 14 `pages` calls (the archives and restores) are in those,
+  and the record holds 11 results. v1 also clipped every result at 2,000 chars, so the live v1 assistant saw pages
+  the ledger never kept; no question asks for those, except the trap.
+- **Seen in the answers, not scored:** two answers (q2, q5) appended a paragraph about the session's unfinished
+  clean-up ("I have not run the clean-up; the stored list is cut; which way do you want it?") - the fold summary
+  carries the pending task forward and the model picks it up even on an unrelated question. Right for an assistant,
+  noise for a bench; a later M8 run should ask with a "this is a question, not a request" line.
+
 ### What changed against the plan
 
 - **The live check ran once on Haiku**, after U10b and the owner's decisions; after U8b only its mechanics ran,
@@ -1780,8 +1810,8 @@ is kept beside the second.
 
 ### Left open on purpose
 
-- **M8** (the fold loses no fact, on the owner's long 10-14 session) is not yet run: it needs the owner's session id
-  and ten questions written outside the repo.
+- **M8 ran at a bench fold budget of 3,000 chars**, not the product's 24,000: the product budget has not been
+  exercised by a real session's folds yet (a v2 session long enough to fold at 24,000 is a P5 matter).
 - **D76's residual:** an MCP install or unload, or a skill write, still changes the tool bytes under a live thinking
   epoch. Whether the epoch advances on a tool change is the owner's call later.
 - **Thinking removal after a restart** rests on M2 and live step 3 only (one run, three blocks); a run with k = 0

@@ -1,0 +1,86 @@
+{
+ "measurement": "v2-m8",
+ "models": {
+  "root": "anthropic:claude-haiku-5-5",
+  "summarize": "anthropic:claude-haiku-5-5"
+ },
+ "effort": "api default",
+ "date": "2026-10-19",
+ "turns": 17,
+ "skipped_turns": 24,
+ "results": 11,
+ "folds": 12,
+ "covered_handles": 63,
+ "missing_handles": 0,
+ "read_result_on_folded": {
+  "calls": 8,
+  "ok": 8
+ },
+ "requests": 47,
+ "usage": {
+  "input_tokens": 948,
+  "output_tokens": 45977,
+  "cache_read_input_tokens": 122820,
+  "cache_creation_input_tokens": 77672
+ },
+ "questions": [
+  {
+   "id": "q1",
+   "verdict": "correct",
+   "read_result_on_folded": 0
+  },
+  {
+   "id": "q2",
+   "verdict": "correct",
+   "read_result_on_folded": 1
+  },
+  {
+   "id": "q3",
+   "verdict": "correct",
+   "read_result_on_folded": 1
+  },
+  {
+   "id": "q4",
+   "verdict": "correct",
+   "read_result_on_folded": 1
+  },
+  {
+   "id": "q5",
+   "verdict": "correct",
+   "read_result_on_folded": 1
+  },
+  {
+   "id": "q6",
+   "verdict": "correct",
+   "read_result_on_folded": 1
+  },
+  {
+   "id": "q7",
+   "verdict": "correct",
+   "read_result_on_folded": 1
+  },
+  {
+   "id": "q8",
+   "verdict": "correct",
+   "read_result_on_folded": 0
+  },
+  {
+   "id": "q9",
+   "verdict": "correct",
+   "read_result_on_folded": 1
+  },
+  {
+   "id": "q10",
+   "verdict": "correct",
+   "read_result_on_folded": 1
+  }
+ ],
+ "counts": {
+  "correct": 10,
+  "miss": 0,
+  "factual error": 0,
+  "pending": 0
+ },
+ "pass": true,
+ "history_budget": 3000
+}

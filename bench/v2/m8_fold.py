@@ -24,7 +24,7 @@ from unittest import mock
 import m6_stub  # next to this file; puts this tree's pathfinder on sys.path
 from m6_stub import Home, requests, text
 from m8_stub import MISS, check, coverage, dry_run, finish, rescore, verdict
-from pathfinder import clock, ledger, tools
+from pathfinder import assemble, clock, ledger, tools
 from pathfinder.clone import Item
 
 ASK = ("[bench] Answer from this conversation's record only; open a stored result with read_result when the record "
@@ -141,6 +141,8 @@ def main():
     ap.add_argument("--effort", default="", choices=["", "low", "medium", "high", "xhigh", "max"])
     ap.add_argument("--date", default=datetime.date.today().isoformat())
     ap.add_argument("--out", default=str(m6_stub.ROOT / "docs" / "measurements"))
+    ap.add_argument("--history-budget", type=int, default=0, help="chars of window before a fold; 0 = the product's "
+                    "(a v2 window of handles is small: a v1 session may need a lower one to fold at all)")
     ap.add_argument("--rescore", help="an output JSON to rescore in place with --verdicts")
     ap.add_argument("--verdicts", help='JSON {"<question id>": "correct" | "miss" | "factual error"}')
     a = ap.parse_args()
@@ -160,8 +162,10 @@ def main():
     answers_path = outside_repos(Path(a.answers) if a.answers else qpath.with_suffix(".answers.json"))
     m6_stub.key()
     refs = {"root": a.root_model, "summarize": a.summarize_model or a.root_model}
-    with tempfile.TemporaryDirectory(prefix="pf-m8-") as tmp:
+    budget = a.history_budget or assemble.HISTORY_BUDGET
+    with tempfile.TemporaryDirectory(prefix="pf-m8-") as tmp, mock.patch.object(assemble, "HISTORY_BUDGET", budget):
         out, answers = asyncio.run(measure(a, refs, Path(a.ledger), questions, Path(tmp)))
+    out["history_budget"] = budget
     with os.fdopen(os.open(answers_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w", encoding="utf-8") as f:
         f.write(json.dumps(answers, ensure_ascii=False, indent=1) + "\n")  # private from its first byte
     model = refs["root"].partition(":")[2].replace("/", "-").replace(":", "-")

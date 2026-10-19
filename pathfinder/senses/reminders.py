@@ -112,6 +112,6 @@ TOOLS = {
     ),
     "delete_reminder": ToolSpec(
         name="delete_reminder", description="Delete a reminder. To mark one done, use complete_reminder.",
-        params=_ID, required=["id"], handler=_delete_reminder, write=True,
+        params=_ID, required=["id"], handler=_delete_reminder, write=True, effect="destructive",
     ),
 }

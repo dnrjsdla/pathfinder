@@ -2,7 +2,7 @@
 file's own `poll`, below), `tool_held` (the daemon's pin check, on a rug pull), `install_done`/
 `install_failed` (the installer, a later unit). Only `tool_candidate` is polled here.
 
-`search_tools` (below) is registered only while this sense is on - `signals.load` merges a
+`search_registry` (below) is registered only while this sense is on - `signals.load` merges a
 sense's `TOOLS` into the shared registry only for senses named in `cfg["senses"]`."""
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ KINDS = {
 }
 CADENCE_S = 24 * 3600
 
-# `signals.load` sets this to the sense's configured `registry` option - `_search_tools` below
+# `signals.load` sets this to the sense's configured `registry` option - `_search_registry` below
 # gets no `options` (a tool handler never does), so it reads the registry from here instead,
 # the way `schedule.py`'s tools read its module-level `HOME`.
 REGISTRY_URL = None
@@ -105,9 +105,9 @@ def _poll(options, now, state, home):
     return out
 
 
-def _search_tools(query, control=None):
+def _search_registry(query, control=None):
     if not query.split():
-        raise ValueError("search_tools needs English words for what the tool does or is called")
+        raise ValueError("search_registry needs English words for what the tool does or is called")
     items, note = mirror.search(HOME, query, REGISTRY_URL or catalog.REGISTRY)
     lines = [catalog.listing(item) for item in items]
     # live: an empty list read as "the registry has no such server", and the model offered to
@@ -122,16 +122,16 @@ def _propose_install(name, control=None):
 
 
 TOOLS = {
-    "search_tools": ToolSpec(
-        name="search_tools",
+    "search_registry": ToolSpec(
+        name="search_registry",
         description="Search the public MCP registry for servers by name and description (the user asks what tools "
                     "exist for X). The registry is in English: search English words for what the tool does or is called.",
         params={"query": {"type": "string", "description": "English words for what the tool does or is called (names and descriptions are searched): gmail, brave search, weather"}},
-        required=["query"], handler=_search_tools, origins=frozenset({"user"}), network=True,
+        required=["query"], handler=_search_registry, origins=frozenset({"user"}), network=True,
     ),
     "propose_install": ToolSpec(
         name="propose_install",
-        description="Check and propose installing an MCP server by name (as search_tools or the registry shows "
+        description="Check and propose installing an MCP server by name (as search_registry or the registry shows "
                     "it) - runs the checks and queues one approval; tell the user what it found.",
         params={"name": {"type": "string", "description": "the server name"}},
         required=["name"], handler=_propose_install, origins=frozenset({"user"}), network=True,

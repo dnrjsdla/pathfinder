@@ -110,7 +110,7 @@ def _natives() -> dict:
 
 
 # The Behaviour list's natives that write; every other native is a read (mail, memory and registry reads,
-# propose_install with `network` among them). delete_reminder and add_schedule get their rows in U0.
+# propose_install with `network` among them). delete_reminder and add_schedule are graded by hand (below).
 WRITES = {"write_file", "add_event", "add_reminder", "complete_reminder", "remove_schedule", "edit_memory", "run_command"}
 LATER = {"delete_reminder", "add_schedule"}
 
@@ -145,6 +145,13 @@ class VerdictTest(unittest.TestCase):
             self.assertEqual(policy.effect(shell, {"escalate": True}, {})[0], "destructive")
         with mock.patch("pathfinder.policy._exec.available", return_value=False):
             self.assertEqual(policy.effect(shell, {}, {})[0], "destructive")  # no sandbox on the machine
+        self.assertEqual(policy.effect(natives["delete_reminder"], {}, {}), ("destructive", None))
+        schedule = natives["add_schedule"]
+        self.assertEqual(policy.effect(schedule, {}, {}), ("external_send", None))
+        for mode in ("manual", "auto"):  # asks in every mode that can run it (read-only denies), no grant lifts it
+            for grants, session in (({}, ()), ({"add_schedule": "allow"}, {"add_schedule"})):
+                self.assertEqual(_verdict(schedule, mode=mode, grants=grants, session=session), "ask", mode)
+        self.assertEqual(_verdict(schedule, mode="read-only"), "deny")
 
         self.assertEqual(set(policy.MODES), set(config._APPROVAL_MODES))  # no full-auto in either
         self.assertEqual(set(GRADED), {*config.GRADES, "unknown"})

@@ -1550,7 +1550,7 @@ class InstallerDaemonTest(DaemonHarness):
 
     def test_signal_turn_cannot_propose_install(self):
         config.set(self.home, "senses", {"catalog": {}})
-        self.addCleanup(tools_mod.TOOLS.pop, "search_tools", None)
+        self.addCleanup(tools_mod.TOOLS.pop, "search_registry", None)
         self.addCleanup(tools_mod.TOOLS.pop, "propose_install", None)
 
         async def scenario(daemon):
@@ -1558,7 +1558,7 @@ class InstallerDaemonTest(DaemonHarness):
 
         registry = self.run_with(fake_model("ok"), scenario)
         self.assertIn("propose_install", registry)
-        for name in ("propose_install", "search_tools"):  # D76: in the one list, refused at the door
+        for name in ("propose_install", "search_registry"):  # D76: in the one list, refused at the door
             self.assertEqual(Broker(registry, "signal", {}, control=None).call("c1", name, {})["error"],
                              f"{name} is not available in a signal turn")
 

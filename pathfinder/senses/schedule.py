@@ -99,6 +99,7 @@ TOOLS = {
         },
         required=["at", "text"], handler=_add_schedule, normalize=normalize_local_datetime("at"),
         write=True,  # not reversible: a due schedule runs as a user turn, so adding one asks (amends D22)
+        effect="external_send",  # until P5's schedule origin re-decides it (P2 decision Q9; D71)
     ),
     "list_schedules": ToolSpec(
         name="list_schedules", description="List scheduled notes.",

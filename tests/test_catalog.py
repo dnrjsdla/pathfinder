@@ -435,7 +435,7 @@ class SearchToolsTest(unittest.TestCase):
     def _add(self, item):
         mirror._upsert(self.db, item, 0)
 
-    def test_search_tools_reads_the_copy(self):
+    def test_search_registry_reads_the_copy(self):
         odd = json.loads(json.dumps(FIXTURE_NPM_ITEM))
         odd["server"]["name"] = "io.github.example/myapp\x1b[31m-tool"
         odd["server"]["description"] = "A myapp helper.\nSecond line " + "x" * 300
@@ -445,7 +445,7 @@ class SearchToolsTest(unittest.TestCase):
         dead["server"]["name"] = "io.github.example/myapp-dead"
         dead["_meta"]["io.modelcontextprotocol.registry/official"]["status"] = "deprecated"
         self._add(dead)
-        lines = catalog_sense._search_tools("myapp  helper")  # words, not one hyphenated name
+        lines = catalog_sense._search_registry("myapp  helper")  # words, not one hyphenated name
         self.assertEqual(len(lines), 2)  # the deprecated row is left out
         for line in lines:
             self.assertNotIn("\n", line)
@@ -454,12 +454,12 @@ class SearchToolsTest(unittest.TestCase):
         self.assertIn("license not checked", lines[0])
         self.assertTrue(any("remote" in line for line in lines))
         with self.assertRaises(ValueError):
-            catalog_sense._search_tools("   ")
+            catalog_sense._search_registry("   ")
 
-    def test_hostile_rows_stay_one_clean_line_in_search_tools_and_the_cli(self):
+    def test_hostile_rows_stay_one_clean_line_in_search_registry_and_the_cli(self):
         from pathfinder.__main__ import search_cmd
         self._add(_hostile_item())
-        for line in catalog_sense._search_tools("evil"):
+        for line in catalog_sense._search_registry("evil"):
             _clean(self, line, 300)
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
@@ -505,17 +505,17 @@ class SearchToolsTest(unittest.TestCase):
             main(["search", "brave", "search"])
         self.assertEqual(cmd.call_args.args[1], "brave search")
 
-    def test_search_tools_says_when_nothing_matched_and_when_the_copy_is_partial(self):
+    def test_search_registry_says_when_nothing_matched_and_when_the_copy_is_partial(self):
         self.db.execute("DELETE FROM meta WHERE key = 'complete'")
         mirror._put(self.db, started_at=time.time())
         self._add(FIXTURE_NPM_ITEM)
-        out = catalog_sense._search_tools("weather")
+        out = catalog_sense._search_registry("weather")
         self.assertEqual(len(out), 2)
         self.assertIn("no server in the registry copy matches 'weather'", out[0])
         self.assertIn("English", out[0])
         self.assertIn("still syncing (1 so far", out[1])
-        self.assertIn("English", catalog_sense.TOOLS["search_tools"].description)
-        self.assertIn("English", catalog_sense.TOOLS["search_tools"].params["query"]["description"])
+        self.assertIn("English", catalog_sense.TOOLS["search_registry"].description)
+        self.assertIn("English", catalog_sense.TOOLS["search_registry"].params["query"]["description"])
 
 
 if __name__ == "__main__":

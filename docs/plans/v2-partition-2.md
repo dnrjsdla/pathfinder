@@ -245,8 +245,8 @@ Where it is seen and written (one writer, two moments):
 
 | Moment | What happens |
 |---|---|
-| Install approval (installer trial) | `draft_server` over the trial's tools is **displayed**: every non-read value by name (25 for this server, `tool.value: grade`), not counts only. Nothing is written. |
-| First load (`Attach.register`, U2b) | for each server whose `tools.<server>` is absent, `draft_server` over the definitions that just passed the pin check (held tools left out) is written once through `config.set("tools", …)` (the ledger's `config_set` records it). Installed and hand-configured servers alike; the owner's pre-P2 Notion server takes this path at its first P2 load — there is no separate backfill. An existing entry is never overwritten (the owner's edits and `--grade` answers stay). |
+| Install approval (installer trial) | `draft_server` over the trial's tools is **displayed**: every value that is not read by name, unmapped ones as `asks` (26 for this server, `tool.value: grade`), not counts only. Nothing is written. |
+| First load (`Attach.register`, U2b) | for each server whose `tools.<server>` is absent, `draft_server` over its definitions is written once, at the first load where none of the server's tools is held (a partly held server is drafted after the owner accepts the hold, never from the passed tools alone: a held tool must not end up on annotations alone) through `config.set("tools", …)` (the ledger's `config_set` records it). Installed and hand-configured servers alike; the owner's pre-P2 Notion server takes this path at its first P2 load — there is no separate backfill. An existing entry is never overwritten (the owner's edits and `--grade` answers stay). |
 | Later | a tool added to a known server (held, then accepted) has no map entry: annotations + ask, answered by `--grade`. |
 
 **Thinking epoch on a tool change** (Q8 (a)): the clone keeps the hash of the last tool list it sent per session;

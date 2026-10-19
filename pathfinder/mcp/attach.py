@@ -1,5 +1,5 @@
 """The daemon's MCP seam: load the configured servers, pin-check, register passing tools,
-hold the rest as `accept_pins` proposals, reload one server after an approve."""
+hold the rest as `accept_pins` proposals, draft a server's absent map once, reload one server after an approve."""
 from __future__ import annotations
 
 import asyncio
@@ -62,7 +62,8 @@ class Attach:
     def register(self, entries, *, server_id=None) -> None:
         """Pin-check; replace stale `mcp__` keys (scoped to `server_id`, never accumulating); propose+signal each held server."""
         store = mcp_pins.PinStore.load(self.state)
-        report = mcp_pins.check([e for e in entries if not mcp_tools.refused(e)], store)  # never held, never pinned
+        listed = [e for e in entries if not mcp_tools.refused(e)]  # never held, pinned or drafted
+        report = mcp_pins.check(listed, store)
         store.save(self.record)
         for name in [n for n in tools.TOOLS if n.startswith("mcp__")
                     and (server_id is None or n.startswith(f"mcp__{server_id}__"))]:
@@ -80,14 +81,25 @@ class Attach:
             prints = {h.qualified_name: mcp_pins.fingerprint(by_name[h.qualified_name].definition) for h in held_list}
             rows = [{"name": h.tool_name, "description_hash": prints[h.qualified_name]["description"],
                     "schema_hash": prints[h.qualified_name]["inputSchema"],
+                    "annotations_hash": prints[h.qualified_name]["annotations"],
                     "params": mcp_pins.param_names(by_name[h.qualified_name].definition)} for h in held_list]
             if (sid, json.dumps(rows, sort_keys=True)) in pending:
                 continue  # the same hold already waits in the box: a restart is not news (review)
             self.record("approval_pending", origin="system", id=aid, call_id=aid, session="", turn="", tool="accept_pins",
                         args={"server": sid, "held": [h.line() for h in held_list], "tools": rows}, messages=[])
             self.push_signal(signals.Signal(sense="catalog", kind="tool_held", key=f"tool_held:{sid}:{aid}",
-                summary=f"Held {len(held_list)} tool(s) of '{sid}': description or schema changed - approve {aid} to accept",
+                summary=f"Held {len(held_list)} tool(s) of '{sid}': definition changed - approve {aid} to accept",
                 fields={"server": sid, "held": len(held_list), "approval": aid}, trust="self"))
+        self._draft([e for e in listed if e.qualified_name in report.passed], report.held)
+
+    def _draft(self, passed, held) -> None:
+        """Q3 (b), the one writer of a drafted map: a server with no `tools.<server>` and no held tool gets `draft_server`."""
+        current = config.load(self.home)["tools"]
+        new = {e.server_id for e in passed} - current.keys() - {h.server_id for h in held}  # a held tool waits
+        drafted = {sid: mcp_tools.draft_server([e.definition for e in passed if e.server_id == sid]) for sid in new}
+        if drafted:
+            config.set(self.home, "tools", {**current, **drafted})
+            self.record("config_set", key="tools")  # what `config.set(..., ledger=)` records: the key, never the value
 
     async def accept_pins(self, approval_id: str, decision: str) -> None:
         """approved: one `pin_accept` per tool, then reload the server. denied: nothing."""
@@ -97,7 +109,8 @@ class Attach:
         server_id = row["args"]["server"]
         for tool in row["args"]["tools"]:
             self.record("pin_accept", server=server_id, tool=tool["name"], description_hash=tool["description_hash"],
-                        schema_hash=tool["schema_hash"], params=tool["params"])
+                        schema_hash=tool["schema_hash"], annotations_hash=tool.get("annotations_hash"),
+                        params=tool["params"])
         await self.reload(server_id)
 
     def close(self) -> None:

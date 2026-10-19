@@ -43,7 +43,7 @@ CREATE TABLE IF NOT EXISTS memory_applies (
 );
 CREATE TABLE IF NOT EXISTS pins (
     server TEXT, tool TEXT, description_hash TEXT, schema_hash TEXT, params_json TEXT, ts REAL,
-    PRIMARY KEY (server, tool)
+    annotations_hash TEXT, PRIMARY KEY (server, tool)
 );
 CREATE TABLE IF NOT EXISTS installs (
     id TEXT PRIMARY KEY, name TEXT, version TEXT, state TEXT, ts REAL, detail TEXT
@@ -100,6 +100,8 @@ class State:
         for column in ("title", "recipient", "scope"):  # P2: what a gate names, and an approval's "always" scope
             if column not in gate_columns:
                 self.db.execute(f"ALTER TABLE gates ADD COLUMN {column} TEXT")
+        if "annotations_hash" not in {r[1] for r in self.db.execute("PRAGMA table_info(pins)")}:
+            self.db.execute("ALTER TABLE pins ADD COLUMN annotations_hash TEXT")  # P2: annotations are pinned
         self.db.execute("INSERT OR IGNORE INTO meta (key, value) VALUES ('cursor', '0')")
         self.db.commit()
 
@@ -183,10 +185,10 @@ class State:
                  event.get("approval")))
         if event["type"] == "pin_accept":
             self.db.execute(
-                "INSERT OR REPLACE INTO pins (server, tool, description_hash, schema_hash, params_json, ts) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
+                "INSERT OR REPLACE INTO pins (server, tool, description_hash, schema_hash, params_json, ts, "
+                "annotations_hash) VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (event["server"], event["tool"], event["description_hash"], event["schema_hash"],
-                 json.dumps(event["params"]), event["ts"]))
+                 json.dumps(event["params"]), event["ts"], event.get("annotations_hash")))
         if event["type"] == "pin_revoke":
             if event.get("tool"):
                 self.db.execute("DELETE FROM pins WHERE server = ? AND tool = ?", (event["server"], event["tool"]))
@@ -583,13 +585,14 @@ class State:
         return {"id": row[0], "name": row[1], "version": row[2], "state": row[3], "ts": row[4], "detail": row[5]}
 
     def pins(self) -> dict:
-        """server -> tool -> {"description": hash, "schema": hash, "params": [...]} -
-        `mcp.pins.PinStore.load`'s source, rebuilt by `pin_accept`/`pin_revoke` events."""
+        """server -> tool -> {"description": hash, "schema": hash, "annotations": hash or None (a pin from
+        before P2), "params": [...]} - `mcp.pins.PinStore.load`'s source, rebuilt by `pin_accept`/`pin_revoke`."""
         rows = self.db.execute(
-            "SELECT server, tool, description_hash, schema_hash, params_json FROM pins").fetchall()
+            "SELECT server, tool, description_hash, schema_hash, annotations_hash, params_json FROM pins").fetchall()
         out: dict = {}
-        for server, tool, description_hash, schema_hash, params_json in rows:
+        for server, tool, description_hash, schema_hash, annotations_hash, params_json in rows:
             out.setdefault(server, {})[tool] = {
-                "description": description_hash, "schema": schema_hash, "params": json.loads(params_json),
+                "description": description_hash, "schema": schema_hash, "annotations": annotations_hash,
+                "params": json.loads(params_json),
             }
         return out

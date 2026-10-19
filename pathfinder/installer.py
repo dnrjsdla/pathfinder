@@ -353,7 +353,7 @@ class Installer:
             prints = mcp_pins.fingerprint(t)
             out.append({"name": entry.tool_name, "description_hash": prints["description"],
                        "schema_hash": prints["inputSchema"], "not_read": _not_read(entry.tool_name, t),  # displayed, never written
-                       "params": mcp_pins.param_names(t)})
+                       "annotations_hash": prints["annotations"], "params": mcp_pins.param_names(t)})
         return out, skipped
 
     # -- propose -------------------------------------------------------------------------
@@ -548,7 +548,8 @@ class Installer:
         try:
             for t in candidate["verification"]["sandbox_trial"]["tools"]:
                 self.record("pin_accept", server=id, tool=t["name"], description_hash=t["description_hash"],
-                            schema_hash=t["schema_hash"], params=t.get("params", []))
+                            schema_hash=t["schema_hash"], annotations_hash=t.get("annotations_hash"),
+                            params=t.get("params", []))
             self.record("install_step", id=id, step="pins", ok=True, detail="")
             out["done"].append("pins")
         except Exception as e:

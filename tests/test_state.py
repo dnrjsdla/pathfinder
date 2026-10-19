@@ -203,12 +203,14 @@ class PinsTest(unittest.TestCase):
         self._record("pin_accept", server="gh", tool="alpha",
                      description_hash="sha256:d1", schema_hash="sha256:s1", params=["owner"])
         self.assertEqual(self.state.pins(), {
-            "gh": {"alpha": {"description": "sha256:d1", "schema": "sha256:s1", "params": ["owner"]}},
+            "gh": {"alpha": {"description": "sha256:d1", "schema": "sha256:s1", "annotations": None,
+                             "params": ["owner"]}},  # a pin with no annotations digest: one from before P2
         })
         # a second accept for the same (server, tool) replaces, never duplicates
-        self._record("pin_accept", server="gh", tool="alpha",
-                     description_hash="sha256:d2", schema_hash="sha256:s1", params=["owner"])
+        self._record("pin_accept", server="gh", tool="alpha", description_hash="sha256:d2", schema_hash="sha256:s1",
+                     annotations_hash="sha256:a1", params=["owner"])
         self.assertEqual(self.state.pins()["gh"]["alpha"]["description"], "sha256:d2")
+        self.assertEqual(self.state.pins()["gh"]["alpha"]["annotations"], "sha256:a1")
 
     def test_pin_revoke_forgets_the_server(self):
         self._record("pin_accept", server="gh", tool="alpha",

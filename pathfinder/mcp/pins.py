@@ -10,10 +10,13 @@ difference afterward stops and asks a person. Storage is the ledger (`state.pins
 `record("pin_accept", ...)`) - not a local file - so a pin survives `state.db`
 deletion the same way everything else derived does.
 
-What gets hashed: exactly what reaches the model - name (the dict key), description,
-inputSchema. Not `annotations` or `outputSchema`, which we never show the model -
-hashing those would raise an alarm over something nobody looked at, and an alarm
-that fires on nothing gets ignored a few times in.
+What gets hashed: what reaches the model - name (the dict key), description,
+inputSchema - and `annotations`, which the model never sees but policy reads: they
+grade every tool the owner's map leaves out (`readOnlyHint` flipped to true would
+turn a write into a read nobody is asked about). Not `outputSchema` or `title`, which
+nothing reads - an alarm over those fires on nothing and gets ignored a few times in.
+A pin from before annotations were hashed has no digest for them: it takes the current
+one once, silently - a field added to the baseline, not a change.
 
 One tool, one hash - hashing the whole list as a blob would false-alarm on a mere
 reorder, and the spec only SHOULDs a stable order from the server.
@@ -45,13 +48,13 @@ from typing import Any
 from ..tools import visible
 from .protocol import sanitize
 
-# The fields that go into the hash. This list IS the definition of "what the model sees".
-FIELDS = ("description", "inputSchema")
+# The fields that go into the hash: what the model sees, and what policy grades a tool by.
+FIELDS = ("description", "inputSchema", "annotations")
 
 # Evidence recorded alongside a pin. NOT a fingerprint (not in FIELDS).
 PARAMS_KEY = "params"
 
-_LABELS = {"description": "description", "inputSchema": "schema"}
+_LABELS = {"description": "description", "inputSchema": "schema", "annotations": "annotations"}
 
 
 def _digest(value: Any) -> str:
@@ -104,6 +107,7 @@ class Held:
     # the first time).
     incoming_params: list[str] = field(default_factory=list)
     pinned_params: list[str] | None = None
+    incoming_annotations: Any = None  # the judgment target when the annotations changed
 
     def param_delta(self) -> str:
         """How the arguments moved. With no old list, only the incoming ones are said."""
@@ -130,6 +134,9 @@ class Held:
         body = " ".join(sanitize(self.incoming_description or "").split())
         if "description" in self.changed and body:
             out.append(f"      incoming description: {body[:200]}")
+        if "annotations" in self.changed:
+            shown = sanitize(json.dumps(self.incoming_annotations, sort_keys=True))
+            out.append(f"      incoming annotations: {shown[:200]}")
         return "\n".join(out)
 
 
@@ -162,13 +169,13 @@ class PinStore:
     @classmethod
     def load(cls, state) -> "PinStore":
         """Build from `state.pins()`: `{server: {tool: {"description": h, "schema": h,
-        "params": [...]}}}` -> this store's own shape (`FIELDS` names, so `check()`
-        can compare against `fingerprint()` output directly)."""
+        "annotations": h or None, "params": [...]}}}` -> this store's own shape (`FIELDS`
+        names, so `check()` can compare against `fingerprint()` output directly)."""
         servers: dict[str, dict[str, dict[str, Any]]] = {}
         for server_id, tools in state.pins().items():
             servers[server_id] = {
                 tool_name: {"description": prints["description"], "inputSchema": prints["schema"],
-                           PARAMS_KEY: prints["params"]}
+                           "annotations": prints["annotations"], PARAMS_KEY: prints["params"]}
                 for tool_name, prints in tools.items()
             }
         return cls(servers)
@@ -193,7 +200,7 @@ class PinStore:
             prints = self._servers[server_id][tool_name]
             record("pin_accept", server=server_id, tool=tool_name,
                   description_hash=prints["description"], schema_hash=prints["inputSchema"],
-                  params=prints.get(PARAMS_KEY, []))
+                  annotations_hash=prints.get("annotations"), params=prints.get(PARAMS_KEY, []))
         self._dirty.clear()
 
 
@@ -239,7 +246,8 @@ def check(entries, store: PinStore, *, accept: bool = False) -> PinReport:
                     tool_name=entry.tool_name, reason=reason, changed=changed,
                     incoming_description=str(entry.definition.get("description") or ""),
                     incoming_params=param_names(entry.definition),
-                    pinned_params=was if isinstance(was, list) else None))
+                    pinned_params=was if isinstance(was, list) else None,
+                    incoming_annotations=entry.definition.get("annotations")))
 
             if accept or not known:
                 store.set(server_id, entry.tool_name,
@@ -256,6 +264,10 @@ def check(entries, store: PinStore, *, accept: bool = False) -> PinReport:
                 continue
 
             changed = _changed_fields(pinned, prints)
+            if pinned.get("annotations") is None:  # a pin from before annotations were hashed: adopt, never hold
+                changed = tuple(f for f in changed if f != "annotations")
+                if not changed:
+                    store.set(server_id, entry.tool_name, {**pinned, "annotations": prints["annotations"]})
             if changed:
                 hold(f"{'/'.join(_LABELS[f] for f in changed)} differs from what is pinned", changed)
                 continue

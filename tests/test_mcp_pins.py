@@ -1,11 +1,15 @@
 """Pinning a tool definition - catching a rug pull (converted from Mark.5's
 `test_mcp_pins.py`; `PinStore` here is backed by the ledger, not a JSON file)."""
+import asyncio
 import tempfile
 import unittest
 from pathlib import Path
 
+from pathfinder import config, tools as tools_mod
 from pathfinder.ledger import Ledger
+from pathfinder.mcp import attach as mcp_attach
 from pathfinder.mcp import pins as mp
+from pathfinder.mcp import tools as mcp_tools
 from pathfinder.state import State
 
 
@@ -33,11 +37,13 @@ def _props(*names):
 
 
 class FingerprintTest(unittest.TestCase):
-    def test_fingerprint_covers_exactly_what_the_model_sees(self):
+    def test_fingerprint_covers_what_the_model_sees_and_policy_reads(self):
+        """P2 (Deviation 13): annotations grade a tool the map leaves out, so they are pinned; what nothing
+        reads (outputSchema, title) is still not."""
         base = _tool("t", schema={"type": "object"})
-        same_but_noisy = dict(base, annotations={"readOnlyHint": True},
-                              outputSchema={"type": "string"}, title="a different title")
+        same_but_noisy = dict(base, outputSchema={"type": "string"}, title="a different title")
         self.assertEqual(mp.fingerprint(base), mp.fingerprint(same_but_noisy))
+        self.assertNotEqual(mp.fingerprint(base), mp.fingerprint(dict(base, annotations={"readOnlyHint": True})))
         self.assertNotEqual(mp.fingerprint(base), mp.fingerprint(_tool("t", description="changed")))
         self.assertNotEqual(mp.fingerprint(base),
                             mp.fingerprint(_tool("t", schema={"type": "object", "required": ["x"]})))
@@ -217,6 +223,85 @@ class PinStoreLedgerTest(unittest.TestCase):
         before = len(list(self.ledger.read()))
         reloaded.save(self.ledger.append)
         self.assertEqual(len(list(self.ledger.read())), before)
+
+
+class FirstLoadTest(unittest.TestCase):
+    """U2b: `Attach.register` is the one writer of a drafted map (Q3 (b)); annotations are pinned."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.home = Path(self._tmp.name)
+        self.ledger = Ledger(self.home)
+        self.state = State(self.home / "state.db")
+        self.attach = mcp_attach.Attach(self.home, self.state, self._record, lambda signal: None, lambda fn: fn())
+
+    def tearDown(self):
+        self.attach.close()
+        self.state.close()
+        self._tmp.cleanup()
+
+    def _record(self, type, **fields):
+        event = self.ledger.append(type, **fields)
+        self.state.apply(event)
+        return event
+
+    def _config_sets(self):
+        return [e for e in self.ledger.read() if e["type"] == "config_set"]
+
+    def test_first_load_drafts_once_and_pins_annotations(self):
+        pages = {"name": "pages", "description": "pages", "annotations": {"destructiveHint": False},
+                 "inputSchema": {"type": "object", "properties": {"action": {"type": "string", "enum": ["get", "archive"]}}}}
+        info = {"name": "info", "description": "info", "annotations": {"readOnlyHint": True}}
+        entries = [FakeEntry("gh", d["name"], d) for d in (pages, info)]
+        self.attach.register(entries)  # a server with no map, installed or hand-configured alike
+        self.assertEqual(config.load(self.home)["tools"]["gh"], mcp_tools.draft_server([pages, info]))
+        self.assertEqual(config.load(self.home)["tools"]["gh"]["pages"],
+                         {"effect_by": {"action": {"get": "read", "archive": "write"}}})
+        self.assertEqual(len(self._config_sets()), 1)
+        self.attach.register(entries)  # a second load leaves the map alone
+        self.assertEqual(len(self._config_sets()), 1)
+
+        owned = {"pages": {"effect": "write"}}  # the owner's own entry is never overwritten
+        config.set(self.home, "tools", {**config.load(self.home)["tools"], "kept": owned})
+        self.attach.register([FakeEntry("kept", "pages", pages)], server_id="kept")
+        self.assertEqual(config.load(self.home)["tools"]["kept"], owned)
+        self.assertEqual(len(self._config_sets()), 1)
+
+        # a pre-P2 server: pinned with no annotations digest, no map yet; one tool's description has changed
+        old = {"name": "a", "description": "same", "annotations": {"destructiveHint": False}}
+        moved = {"name": "b", "description": "changed", "annotations": {"readOnlyHint": True}, "inputSchema": {
+            "type": "object", "properties": {"action": {"type": "string", "enum": ["get", "delete"]}}}}
+        for name, text in (("a", "same"), ("b", "was")):
+            prints = mp.fingerprint({"description": text})
+            self._record("pin_accept", server="old", tool=name, description_hash=prints["description"],
+                         schema_hash=prints["inputSchema"], params=[])
+        self.assertIsNone(self.state.pins()["old"]["a"]["annotations"])
+        both = [FakeEntry("old", "a", old), FakeEntry("old", "b", moved)]
+        self.attach.register(both, server_id="old")
+        self.assertNotIn("old", config.load(self.home)["tools"])  # partly held: no map until nothing is held
+        self.assertIn("mcp__old__a", tools_mod.TOOLS)  # adopted without a hold
+        self.assertNotIn("mcp__old__b", tools_mod.TOOLS)
+        self.assertEqual(self.state.pins()["old"]["a"]["annotations"], mp.fingerprint(old)["annotations"])
+        [held] = [r for r in self.state.pending() if r["tool"] == "accept_pins"]
+        self.assertEqual([t["name"] for t in held["args"]["tools"]], ["b"])
+
+        async def reload(server_id):  # the real reload re-lists from the server; here the same two tools
+            self.attach.register(both, server_id=server_id)
+        self.attach.reload = reload
+        asyncio.run(self.attach.accept_pins(held["id"], "approved"))
+        self.assertIn("mcp__old__b", tools_mod.TOOLS)
+        self.assertEqual(config.load(self.home)["tools"]["old"], mcp_tools.draft_server([old, moved]))
+        self.assertEqual(config.load(self.home)["tools"]["old"]["b"],
+                         {"effect_by": {"action": {"get": "read", "delete": "destructive"}}})  # never read by its hint
+        self.assertEqual(len(self._config_sets()), 2)
+
+        flipped = dict(old, annotations={"readOnlyHint": True})  # a flipped readOnlyHint holds like a description
+        self.attach.register([FakeEntry("old", "a", flipped)], server_id="old")
+        self.assertNotIn("mcp__old__a", tools_mod.TOOLS)
+        report = mp.check([FakeEntry("old", "a", flipped)], mp.PinStore.load(self.state))
+        [line] = [h.line() for h in report.held]
+        self.assertIn("annotations differs", line)
+        self.assertIn('incoming annotations: {"readOnlyHint": true}', line)
 
 
 if __name__ == "__main__":

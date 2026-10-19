@@ -12,10 +12,13 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from pathfinder import catalog, config, mirror, tools as tools_mod
+from pathfinder import catalog, config, mirror, policy, tools as tools_mod
 from pathfinder.config import merge_json_file
 from pathfinder.installer import Installer, _not_read, render_row, server_id
 from pathfinder.ledger import Ledger
+from pathfinder.mcp import attach as mcp_attach
+from pathfinder.mcp import pins as mcp_pins
+from pathfinder.mcp import tools as mcp_tools
 from pathfinder.state import State
 
 FAKE_SERVER = Path(__file__).parent / "mcp_fake_server.py"
@@ -598,6 +601,67 @@ class InstallerTest(unittest.TestCase):
         steps = [e["step"] for e in self.ledger.read() if e["type"] == "install_step"]
         self.assertNotIn("grants", steps)
 
+
+    def test_new_server_needs_no_core_change(self):
+        """§15-7: a new MCP server is one install approval plus a drafted map - no source file names it."""
+        definition = {"name": "zorbtool", "description": "zorb things", "annotations": {"destructiveHint": False},
+                      "inputSchema": {"type": "object", "properties": {"op": {"type": "string", "enum": [
+                          "fetch_zorb", "rename_zorb", "purge_zorb", "publish_zorb"]}}}}
+        prints = mcp_pins.fingerprint(definition)  # the trial pins what the first load then lists
+        trial = [{"name": "zorbtool", "description_hash": prints["description"], "schema_hash": prints["inputSchema"],
+                  "annotations_hash": prints["annotations"], "not_read": _not_read("zorbtool", definition), "params": ["op"]}]
+        with mock.patch.object(Installer, "_trial", return_value=(trial, [])):
+            cand = self.installer.check(_candidate(name="io.github.acme/zorbserver"), run=_fake_run())
+        id = self.installer._server_id(cand["name"])
+        aid = self._install(cand)
+        self.assertEqual([e["tool"] for e in self.ledger.read() if e["type"] == "approval_pending"],
+                         ["install_server"])  # one approval, the install's
+        line = render_row(self.state.approval(aid))
+        self.assertIn("not read: zorbtool.rename_zorb: write, zorbtool.purge_zorb: destructive, "
+                      "zorbtool.publish_zorb: external_send", line)
+        self.assertNotIn(id, config.load(self.home)["tools"])  # install writes no map
+
+        entry = SimpleNamespace(server_id=id, tool_name="zorbtool", qualified_name=f"mcp__{id}__zorbtool",
+                                definition=definition)
+        attach = mcp_attach.Attach(self.home, self.state, self._record, self.signals.append, lambda fn: fn())
+        try:
+            attach.register([entry], server_id=id)  # its first load
+        finally:
+            attach.close()
+        drafted = config.load(self.home)["tools"]
+        self.assertEqual(drafted[id], mcp_tools.draft_server([definition]))
+        spec = SimpleNamespace(name=entry.qualified_name, effect="write")
+        grades = {v: policy.effect(spec, {"op": v}, drafted)[0]
+                  for v in ("fetch_zorb", "rename_zorb", "purge_zorb", "publish_zorb")}
+        self.assertEqual(grades, {"fetch_zorb": "read", "rename_zorb": "write", "purge_zorb": "destructive",
+                                  "publish_zorb": "external_send"})
+        source = Path(__file__).resolve().parent.parent / "pathfinder"
+        named = [p for p in source.rglob("*.py") if "zorb" in p.read_text(encoding="utf-8").lower()]
+        self.assertEqual(named, [])
+
+    def test_annotations_changed_after_the_trial_are_held_at_first_load(self):
+        """The install pins the trial's annotations: a server that flips readOnlyHint before its first load is held."""
+        definition = {"name": "zorbtool", "description": "zorb things", "annotations": {"destructiveHint": False}}
+        prints = mcp_pins.fingerprint(definition)
+        trial = [{"name": "zorbtool", "description_hash": prints["description"], "schema_hash": prints["inputSchema"],
+                  "annotations_hash": prints["annotations"], "not_read": _not_read("zorbtool", definition), "params": []}]
+        with mock.patch.object(Installer, "_trial", return_value=(trial, [])):
+            cand = self.installer.check(_candidate(name="io.github.acme/zorbserver"), run=_fake_run())
+        id = self.installer._server_id(cand["name"])
+        self._install(cand)
+        self.assertEqual(self.state.pins()[id]["zorbtool"]["annotations"], prints["annotations"])
+        flipped = dict(definition, annotations={"readOnlyHint": True})
+        entry = SimpleNamespace(server_id=id, tool_name="zorbtool", qualified_name=f"mcp__{id}__zorbtool",
+                                definition=flipped)
+        attach = mcp_attach.Attach(self.home, self.state, self._record, self.signals.append, lambda fn: fn())
+        try:
+            attach.register([entry], server_id=id)
+        finally:
+            attach.close()
+        self.assertNotIn(entry.qualified_name, tools_mod.TOOLS)
+        [held] = [r for r in self.state.pending() if r["tool"] == "accept_pins"]
+        self.assertIn("annotations differs", held["args"]["held"][0])
+        self.assertNotIn(id, config.load(self.home)["tools"])  # nothing passed: nothing drafted yet
 
     def test_missing_secret_is_still_referenced_in_both_configs(self):
         """B6: adding the secret to the Keychain later must be all it takes."""

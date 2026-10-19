@@ -14,11 +14,12 @@
   8,301 chars with `read_result` (P1's test pins ≤ 8,000 with fewer senses on).
 - **The owner's own server has no map yet:** better-notion-mcp was installed before P2, so `tools.<id>` is absent and,
   by annotations alone, `pages` (readOnlyHint false, destructiveHint false) is a whole-tool write: `pages.get` would
-  still ask. U2b backfills the map once for every installed server without one (Behaviour, "The backfill"); M3 measures it.
-- **Decided:** nothing yet; review round 1 folded in. **Next:** the owner answers Q1–Q9; then U1.
+  still ask. Under Q3 (b) `Attach` drafts the map at the server's first P2 load, the same path as for any new server
+  (Behaviour, "The draft"); M3 measures it.
+- **Decided (2026-10-19):** Q1–Q9 (Decisions); M5b approved; review round 1 folded in. **Next:** U1, then U0 ∥ U2a.
 
 **"It runs" =** M3 passes: the owner's 10-14 session replayed offline through the real `policy.verdict` and the
-drafted Notion map (the map U2b's backfill writes into the owner's home) gates 0 of its 16 read calls (v1 gated 5)
+drafted Notion map (the map `Attach` writes into the owner's home at its first P2 load) gates 0 of its 16 read calls (v1 gated 5)
 and asks for every one of its 14 writes in the default mode, and opens ≤ 4 gates in `auto` (Q6); the live check passes: the root on Haiku finds a Notion tool with
 `search_tools`, calls it through `call_tool` with no gate for a read and no fabricated ID, an archive is gated with the
 page's **title** in the gate, an Ollama `call_tool` with an inner `properties` argument arrives intact, and with the embedding model unreachable the root still finishes a Notion read; the
@@ -35,10 +36,12 @@ rm -rf /tmp/pf2 /tmp/pf2-venv && mkdir -m 700 /tmp/pf2 /tmp/pf2/check && python3
 $PF config set providers '{"anthropic": {"api": "anthropic", "base_url": "https://api.anthropic.com", "effort": "xhigh"}, "ollama": {"base_url": "http://localhost:11434/v1"}}'
 $PF config set models "{\"root\": [\"anthropic:$ROOT_MODEL\"]}" && $PF config set embed_model "ollama:$EMBED_MODEL"
 $PF config set mcp_servers.fake-notion "{\"transport\": \"stdio\", \"command\": [\"python3\", \"$WT/bench/v2/fake_notion_mcp.py\", \"/tmp/pf2/check/world.json\"]}"
-$PF config set tools.fake-notion "$($CHK draft)"      # mcp_tools.draft over the fixture: what an install would write
+# no `tools.fake-notion` is set by hand: Attach drafts and writes it at the server's first load (Q3 (b))
 start() / stop()  as in the P1 contract, with /tmp/pf2
 ```
-1. `start && $PF say "In Notion, when was the page titled '휴가 계획' last edited?"` → `$CHK find /tmp/pf2`: a
+1. `start && $PF config get tools.fake-notion` → the draft (`pages.effect_by.action.get: read`, `archive: write`), one
+   `config_set {key: tools}` in the ledger. `$PF say "In Notion, when was the page titled '휴가 계획' last edited?"` →
+   `$CHK find /tmp/pf2`: a
    `search_tools` result naming `mcp__fake-notion__*` tools; ≥ 1 `call_tool` whose `result.tool` is
    `mcp__fake-notion__workspace` or `…__pages` (action `get`/`search`), `ok: true`; **no `gate`**; every page id in any
    call's arguments occurs in an earlier `result` body (fabricated IDs 0); the final text holds the world's time.
@@ -100,7 +103,8 @@ Public interfaces (one line each; everything else private):
   "summary-renderer hint", Deviation 3) · `title(state, seen: set[int], args: dict) -> str` ("" when none).
 - `state`: gate rows gain `title`, `recipient`, `scope` · `session_grants(session: str) -> set[str]`.
 - `mcp.tools`: `grade_of(annotations) -> str` · `draft(definition) -> dict | None` (one tool's map entry) ·
-  `draft_server(definitions) -> dict`. `mcp.pins`: `FIELDS` += `"annotations"`. `mcp.attach`: the backfill (U2b).
+  `draft_server(definitions) -> dict`. `mcp.pins`: `FIELDS` += `"annotations"`. `mcp.attach`: the one writer of a
+  drafted map (U2b).
 - `clone`: `decide(gate, decision, by, scope="", grade="") -> bool`.
 
 ## Data
@@ -135,9 +139,10 @@ TABLE, the existing pattern). `session_grants(s)` = the tools of gates in sessio
 `approval_mode` ∈ `read-only | manual | auto` (no `full-auto` in P2: Q5). `tools.<server>.
 <tool>` holds `effect` (the per-server override, first in V6's order) or `effect_by.<arg>.<value>`; values are
 `config.GRADES`; `config set tools.<server> JSON` sets one server (D75's KEY.SUB). `grants` keys gain the server form
-`mcp__<server>__*`; values unchanged. `embed_model` is read by `search` (and memory, as now). Install writes
-`tools.<id>` instead of D31's grants (Q3); an installed server without a map gets one from U2b's backfill; existing
-D31 grants stay valid and harmless (they name read tools).
+`mcp__<server>__*`; values unchanged. `embed_model` is read by `search` (and memory, as now). Writers of `tools`:
+`Attach` (a drafted server, once, Q3 (b)), `decide --grade` (one value), the owner (`config set`), and uninstall (drops
+`tools.<id>` where D31's grant removal was). Install no longer writes grants; existing D31 grants stay valid and harmless
+(they name read tools).
 
 ## Behaviour
 
@@ -222,7 +227,7 @@ tool|server|session] [--grade G]`):
 | any `--always` | refused (one line, nothing recorded, the gate stays open) for a destructive, external_send or unknown gate; `server` also for a native tool |
 | `--grade G` (unknown gates only) | `resume {grade: G}`, then the map entry is written: `tools.<server>.<tool>.effect_by.<arg>.<value> = G`, or `.effect = G` when the tool had no map and no annotations, through `config.set("tools", …)`; the call runs once. Refused when the miss was an absent argument (`unknown.value` missing: nothing to key on) — a plain approve still runs it |
 
-**The draft** (`mcp_tools.draft(definition)`, called by the installer's trial on each listed tool, Q3 (a)): a tool with
+**The draft** (`mcp_tools.draft(definition)`; `draft_server` maps it over a server's tools; Q3 (b)): a tool with
 `readOnlyHint: true` → `{"effect": "read"}`; else the first string-enum parameter whose values match the verb table →
 `{"effect_by": {arg: {value: grade}}}` for the matching values (a value matching nothing is left out: it asks); else
 `{"effect": grade_of(annotations)}` when that is decisive; else nothing. A value's grade is the strictest over all its
@@ -234,13 +239,15 @@ fixture's draft: pages get/get_property read, archive/restore write; databases d
 status/setup_status read, setup_reset/cache_clear destructive, setup_start unknown; file_uploads send external_send
 (the owner may correct it); users, workspace, content_convert, help read. For the fixture (counted with this rule,
 2026-10-19): 4 read tools, 6 mixed tools whose 38 action values draft as 13 read, 19 write, 4 destructive, 1
-external_send and 1 unknown (`config.setup_start`), and 1 whole-tool write by annotation (`config__open_relay`). The
-install approval lists every non-read value by name (25 for this server, `tool.value: grade`), not counts only.
+external_send and 1 unknown (`config.setup_start`), and 1 whole-tool write by annotation (`config__open_relay`).
 
-**The backfill** (U2b, `Attach.register`): a server in `state.installed_names()` with no `tools.<id>` gets
-`draft_server` over the definitions that just passed the pin check, written once through `config.set("tools", …)` (the
-ledger's `config_set` event records it). Only installed servers: their install was an owner approval (the owner's Notion
-server is one: it is in `installs`). A hand-configured server gets no draft (Q3 (a)).
+Where it is seen and written (one writer, two moments):
+
+| Moment | What happens |
+|---|---|
+| Install approval (installer trial) | `draft_server` over the trial's tools is **displayed**: every non-read value by name (25 for this server, `tool.value: grade`), not counts only. Nothing is written. |
+| First load (`Attach.register`, U2b) | for each server whose `tools.<server>` is absent, `draft_server` over the definitions that just passed the pin check (held tools left out) is written once through `config.set("tools", …)` (the ledger's `config_set` records it). Installed and hand-configured servers alike; the owner's pre-P2 Notion server takes this path at its first P2 load — there is no separate backfill. An existing entry is never overwritten (the owner's edits and `--grade` answers stay). |
+| Later | a tool added to a known server (held, then accepted) has no map entry: annotations + ask, answered by `--grade`. |
 
 **Thinking epoch on a tool change** (Q8 (a)): the clone keeps the hash of the last tool list it sent per session;
 a different hash moves `View.epoch` to the ledger's last seq before the request is assembled (thinking up to it is
@@ -251,17 +258,17 @@ or a code change; an MCP install or unload no longer touches the list.
 
 | Test | Unit, file | Asserts |
 |---|---|---|
-| `test_effect_table` | U1 test_policy | every native in the registry (all senses imported) has the grade the Behaviour list names; the full mode × origin × grade matrix of the table; `sandboxed`/`reversible` lift write only in user · manual; escalate and no-sandbox are destructive |
+| `test_effect_table` | U1 test_policy (U0 adds two rows) | every native in the registry (all senses imported) has the grade the Behaviour list names — `delete_reminder` destructive, `add_schedule` external_send "until P5's schedule origin" (Q9); the read-only / manual / auto × origin × grade matrix (no full-auto row); `sandboxed`/`reversible` lift write only in user · manual; escalate and no-sandbox are destructive |
 | `test_unknown_effect_asks` | U1 test_policy | an MCP tool with no map and no annotations, and an `effect_by` miss (value absent, arg absent; annotations saying read do not rescue it), ask in `read-only`, `manual` and `auto`; a user grant of allow does not lift it |
 | `test_grants_never_lift_destructive` | U1 test_policy | tool, server and session allows on destructive/external_send/unknown leave ask; a deny in any scope beats an allow in another; a server `ask` does not block a session allow on a write |
 | `test_batch_stops_at_refusal` | U5 test_clone | a step of 4 calls: refusal at call 2 → calls 3–4 `SKIPPED`, never run; the same with an error at call 2; a gate at call 2 → call 3 (a read) runs, call 4 (a write) gates |
-| `test_new_server_needs_no_core_change` (§15-7) | U2a test_installer | a fake server (annotations + an `op` enum, a fake registry and trial session) installed through `Installer.check` → one approval → `install`: `tools.<id>` equals `draft` per tool; after `Attach.register`, `policy.effect` gives the drafted grades; no source file under `pathfinder/` names the server or its verbs (grep in the test) |
+| `test_new_server_needs_no_core_change` (§15-7) | U2b test_installer | a fake server (annotations + an `op` enum, a fake registry and trial session) through `Installer.check` → one approval whose text lists its non-read values → `install` writes no `tools.<id>` → after `Attach.register` (its first load) `tools.<id>` equals `draft_server` and `policy.effect` gives the drafted grades; no source file under `pathfinder/` names the server or its verbs (grep in the test) |
 | `test_search_falls_back_without_embeddings` | U3 test_search | `embed_model` "" and an embed that raises → the name list, ≤ 6,000 chars, no exception; with a fake embed the nearest spec comes first and only changed texts are re-embedded |
 | `test_call_tool_goes_through_the_door` | U5 test_broker | `call_tool` reaches the real spec's coerce, policy and gate; the `Gate` names the real tool; a nested `call_tool` and an unknown inner name are refused with ≤ 3 suggestions |
 | `test_gate_carries_title_and_effect` | U5 test_clone | a gate on `pages.archive {page_id}` after a search result holding that id records `title` and `effect: write`; no seen match → `title: ""` |
 | `test_unknown_answer_written_to_map` | U5 test_clone | `decide(N, approved, grade="read")` on an unknown gate writes `tools.<server>.<tool>.effect_by.action.<value>`, records `resume {grade}`, runs the call once; a second call with that value is allowed without a gate |
 | `test_tool_list_change_advances_epoch` | U5 test_clone | a skill write between two turns → the second request has no thinking from before it; with no change, the clone's next request replays the thinking byte for byte (asserted here on the clone's requests; P1's `test_append_only_history` covers the adapter only) |
-| `test_backfill_and_pinned_annotations` | U2b test_mcp_pins | an installed server without a map gets `draft_server` once, a hand-configured one none; a flipped `readOnlyHint` holds the tool; a pre-P2 pin without an annotations digest adopts it without a hold |
+| `test_first_load_drafts_once_and_pins_annotations` | U2b test_mcp_pins | a server without a map — installed or hand-configured — gets `draft_server` once (one `config_set`); a second load and an existing entry are left alone; held tools are not drafted; a flipped `readOnlyHint` holds the tool; a pre-P2 pin without an annotations digest adopts it without a hold |
 | `test_single_assembler` | U3 test_invariants | memory + search the named `openai_compat.embed` exemption (else U3 fails the suite) |
 | `test_module_ceilings`, `test_core_under_6000`, `test_coupling_ceilings` | U7b test_invariants | rows from the Shape table; `search` in the core list; `search` and `policy` under the coupling ceilings |
 
@@ -270,7 +277,8 @@ Also: U1 `test_coerce_parses_json_for_object_and_array`; U2a `test_draft_of_the_
 `test_session_grants_survive_rebuild`; U6 `test_approve_flags` (`--always`, `--grade`, the refusals).
 
 **Retired or rewritten** with the unit that changes what they pin:
-- U2a: the installer's D31 grant assertions (`permissions`, the `grants` install/rollback/uninstall steps) → `tools.<id>`.
+- U2a: the installer's D31 grant assertions (`permissions`, the `grants` install/rollback/uninstall steps) → the
+  displayed draft (install), nothing (rollback), dropping `tools.<id>` (uninstall).
 - U5 (the `Broker` signature: `cfg` and `session_grants` replace `grants`): test_broker.py (all `Broker(` builders,
   `test_broker_unknown_deny_ask_allow` on `verdict`), test_skills.py:101–128 and :161, test_memory.py:149,
   test_calendar.py:47 and :54, test_installer.py:201, test_mcp_tools.py:145, test_daemon.py:1562 — each passes a cfg
@@ -287,12 +295,14 @@ Also: U1 `test_coerce_parses_json_for_object_and_array`; U2a `test_draft_of_the_
 ## Discarded here, and what is only stubbed
 
 Discarded: v1's category table (`_TABLE`, `_category`, `decide`); the `job` and `memory` origins for new events; D31's
-install-time `readOnlyHint` grants (§12) → the drafted map; `mcp/tools.py`'s `write=True` on every MCP tool (`network`
+install-time `readOnlyHint` grant step (§12) → the map `Attach` drafts; `mcp/tools.py`'s `write=True` on every MCP tool (`network`
 stays: an attribute); exec's 8,000-char output clip (the store caps at 256 KB and renders a summary; Deviation 8);
 `clone._batch`'s own effect mapping (U7 review note: one place, `policy.effect`); the second-error rule of the batch.
 
-Stubbed: waiting clones, gate expiry and M2's in-place resume (3, with children); `full-auto` (not in `MODES`; P3
-decides it against §11, Q5); the night clone's map proposals from gate history (4); `schedule` origin (5); multi-id
+Stubbed: waiting clones, gate expiry and M2's in-place resume (3, with children); **full-auto: the P3 contract must put
+V17 ("allow everything", clone-only) against §11 (destructive and external_send always ask) to the owner as a
+question, together with the spawn override — the owner asked that this not be forgotten (2026-10-19)**; until then it is
+in neither `MODES` nor config; the night clone's map proposals from gate history (4); `schedule` origin (5); multi-id
 approve and `list_approvals` (6). Not built (Deviation 3): `parallel_safe` and `source` on ToolSpec, a `gates.grade`
 column (no reader: the answer lives on `resume.grade` and in the map).
 
@@ -305,7 +315,8 @@ call id (31 expected). Each call goes through the real `policy.verdict` with: na
 `search_tools` → `search_registry`); Notion specs built by `mcp/tools.py` from `bench/v2/fixtures/notion_tools.json`
 under the session's server id. A v1 approval that is not a tool call (`install_server`) is counted apart. Map arms:
 (1) **no map** — the owner's home as it stands before P2's first start (annotations only; expected 19: the motive for
-U2b); (2) **backfilled** — `draft_server` over the fixture, i.e. what U2b writes into the home; (3) **home** — the
+the first-load draft); (2) **drafted** — `draft_server` over the fixture, i.e. what `Attach` writes into the home at
+its first P2 load; (3) **home** — the
 `tools` entry read from `<owner home>/config.json`, re-run after P2's first daemon start there and required to equal (2)
 (if the live server's definitions differ from the fixture, its pins hold them and (3) says so). Policy arms for each:
 v1 (the ledger's own approvals), `manual` without grants, `manual` with the owner's grants (names only), `auto`.
@@ -323,19 +334,19 @@ mapped v1 → v2 (a query whose tool no longer exists is dropped and reported). 
 18/20). Truncation probe (M5's open question): the longest `text(spec)` (~3,000 chars now) embedded whole and cut in
 half; cosine < 0.999 between them → not truncated. Output `docs/measurements/v2-m5-registry-<date>.json`.
 
-**M5b (proposed, only on the lead's go-ahead before U5) — the proxy call.** The one assumption P2's tool exposure rests
+**M5b (approved 2026-10-19; between U4 and U5) — the proxy call.** The one assumption P2's tool exposure rests
 on and nothing has measured: Haiku calls a tool well when its schema arrives as text in a `search_tools` result and the
 call goes through `call_tool`. M1's nine tasks on fake_notion with the Notion tools behind `search_tools`/`call_tool`
 (store arm otherwise unchanged): ~45 requests ≈ $0.03, plus 3 gemma4 runs of the one task whose call carries an inner
 `properties` argument (Deviation 12). Pass: fabricated IDs 0 and passes ≥ M1 store arm's (5/9 by the pre-registered
-scorers), first-call argument errors ≤ 2, the inner `properties` arrives on all 3. Fail → Q4 (a). Without it, the
-live check's tasks are the only evidence.
+scorers), first-call argument errors ≤ 2, the inner `properties` arrives on all 3. Fail → back to the owner with
+Q4's rejected option (found tools join the list, the epoch advances).
 
 ## Deviations from the blueprint
 
 1. **M3's "19 → ≤ 4" rests on a miscount.** The blueprint read the 19 Notion gates as reads ("pages reads asked");
    the ledger says 5 reads and 14 writes. No honest grading of archive and restore gets the default mode under 14;
-   ≤ 4 holds only in `auto` (expected 0). Q6 proposes the pass line; P1's reality (the ledger) is taken.
+   ≤ 4 holds only in `auto` (expected 0). Q6 sets the pass line; P1's reality (the ledger) is taken.
 2. **"0 fabricated IDs" is not an offline number.** A replay sends v1's own calls (which held the 10-14 fabrications)
    through the door; a door cannot change an argument's truth. It moves to the live check (and M5b), beside M1's 0 in
    18 Haiku runs.
@@ -366,100 +377,42 @@ live check's tasks are the only evidence.
 13. **Annotations join the pin hash** (`mcp/pins.py`), against its docstring's reasoning, which no longer holds: they
     decide policy for any tool the map leaves out.
 
-## Questions for the owner (each: options, cost to reverse, a recommendation)
+## Decisions (2026-10-19)
 
-**Q1. Gate waiting.** The root hands off (V22) and children arrive in P3. (a) Build the V17 gate fields now (effect,
-title from r:N, recipient, one-line brief, `unknown`); no waiting machinery, no timeout — an open root gate costs nothing
-and V7's timeout returns "pending" to a parent, a child's concern; P3 builds waiting and expiry with its caller. Reverse:
-free. (b) (a) + a root gate expiry (24 h → `resume {decision: expired, by: timeout}`, report "gate N expired, not run"):
-an approval days later runs an action against a world that moved; ~25 lines and a daemon timer. Reverse: cheap. (c) (a) +
-V7 waiting against a fake child: P3's machinery without its caller, while V18 says the pair is reconsidered at P3's start.
-Reverse: a rewrite if P3 changes the shape. **Recommend (a).**
-
-**Q2. Folding v1's categories into V6.** (a) Four grades; `sandboxed`, `network`, `reversible` stay as attributes on
-ToolSpec; under `manual` a sandboxed or reversible write is allowed for the user (v1's behaviour exactly: the sandboxed
-shell, `remove_schedule`, wiki edits); escalate / no sandbox and `delete_reminder` are destructive; rows user, signal,
-system; `job`/`memory` dropped (no writers since U9), `schedule` added by P5. Reverse: cheap. (b) Four grades with
-`sandboxed` and `network` only: `reversible` goes, so `remove_schedule` and every wiki edit ask under `manual` unless
-granted — stricter, more gates in daily use (D22, D28 lost). Reverse: cheap. (c) (a) + a `schedule` row now (user's
-row, D71's trust) and the daemon's schedule path switched to origin `schedule`: V10's axis complete early, a second edit
-of D71's path before P5 rewrites it. Reverse: cheap. **Recommend (a).**
-
-**Q3. The effect map.** Shape fixed above; fixed in all options: annotations are pinned and the owner's already
-installed server is backfilled once (U2b). (a) The installer's trial drafts each tool from its string enums and
-annotations with the verb table (strictest word wins); the approval lists every non-read value; the install step writes
-`tools.<id>` (D31's grant step goes); a hand-configured server has no draft (annotations + ask). An unknown action asks; `approve N --grade G` writes
-that value into the map (evidence: the `resume {grade}` event and the gate seq); a plain approve runs once and writes
-nothing. Archive = write (Deviation 7). Reverse: cheap (config only). (b) As (a), but `Attach` drafts at a server's first
-load whenever `tools.<server>` is absent (hand-configured servers too); the installer only displays it — two triggers,
-one writer, nobody reviews a hand-configured draft. Reverse: cheap. (c) No stored draft: the verb table runs at call time
-and config holds only the owner's answers — fewer parts, but a server's action names decide policy unreviewed (tool
-poisoning by naming). Reverse: cheap. Sub-choice: archive = destructive instead — 12 of the 14 writes would ask even in
-`auto`, and `update {archived: true}` stays a write path around it. **Recommend (a), archive = write.**
-
-**Q4. search_tools.** Fixed in all options: the index lives in memory (derived from the registry, not the ledger); Ollama
-down → the name list, listed tools unaffected; core = `read_result`, `search_tools`, `call_tool`, `search_memory`,
-`read_memory` (`note_self` P4, `spawn`/`ask_user` P3); natives stay listed (Deviation 4; the sub-choice is sense tools
-behind search too, ≤ 8,000 but a search step for every schedule, mail or calendar call). How a found tool is called:
-(a) it joins the clone's list for the rest of the session and the epoch advances (Q8): native tool_use, but every
-first-time load rewrites the cache and strips thinking — unmeasured on Haiku mid-turn (M2 saw one pending-turn strip
-pass). Reverse: moderate. (b) Through `call_tool {name, arguments}` with the schema delivered as text in the search
-result: the list never changes (D76, append-only, the cache all hold; one path for both providers); the cost is calling
-from text, unmeasured (M5b). Reverse: cheap — (a) can be added later behind the same search. (c) Anthropic's server-side
-`defer_loading` on Anthropic and (b) on Ollama: two paths by provider (a patching signal). **Recommend (b), with M5b.**
-
-**Q5. V17 in this partition.** (a) Build `approval_mode` (read-only / manual / auto) and the three "always allow"
-scopes (tool and server into `grants`, session on `resume`), with the CLI flags; M3's `auto` arm needs the mode.
-Reverse: cheap. (b) Only the grade × origin table; modes and scopes with spawn in P3 — M3 then reports `manual` only.
-Reverse: cheap. (c) Modes now, scopes with the socket view messages in P6. Sub-choice, `full-auto`: V17 makes it
-"allow everything" (clone-only), while §11 says destructive and external_send always ask; it is unreachable before
-spawn. (i) Leave it out of `MODES` until P3, which settles V17 against §11 with a caller in hand; (ii) build V17's row
-now (untestable by any real path in P2); (iii) build it with §11's floor (destructive/external_send ask). **Recommend
-(a) with (i).**
-
-**Q6. M3's pass line** (definition as in Measurements; offline, 0 requests). (a) The blueprint's literal "≤ 4 gates" in
-the default mode — unreachable without grading archive/restore as read or simulating grants. (b) Split: `manual` gates 0
-of 16 reads and asks all 14 writes with 0 unknown; `auto` ≤ 4; v1's 19 beside. (c) (b) + an arm that simulates a
-session-scope "always allow" at the first approval of each tool (expected 1 gate in `manual`), reported, not judged — it
-measures the scope mechanism, not what the owner would choose. **Recommend (b); (c) costs one arm if wanted.**
-
-**Q7. The batch and the nearest-name cap.** (a) Blueprint: stop at the first refusal or the first error; a gate does not
-stop the batch; suggestions ≤ 3 names; the third unknown-name refusal in a turn stops tool use. A failed call usually
-means the model's picture is wrong (a wrong ID), and later calls were planned on the same picture — the 10-14 failure.
-Reverse: free. (b) P1 as is: a deny or a second error in a row; a suggestion only. (c) (a) + a gate also stops the batch
-(the rest "not run: waiting on gate N"): stricter, but a following read the model needed is lost. **Recommend (a).**
-
-**Q8. D76's residual: a tool-list change under a live thinking epoch.** (a) The clone hashes the list it sends; a change
-advances the epoch (thinking stripped, one cache rewrite). With Q4 (b) it fires only on a skill write or a deploy.
-~8 lines. Reverse: free. (b) Leave it: a skill written mid-session can turn the next replay into an HTTP 400 (M6's
-mechanism). (c) Freeze the list per session (a new skill shows next session): more state, a skill the owner just
-approved is invisible until then. **Recommend (a).**
-
-**Q9. `add_schedule` under `auto` (D71).** D71 made `add_schedule` ask for the user too: a schedule the model registers
-while reading someone else's text later runs as the owner's own turn. `auto` lifts every write, so it would run
-ungated. (a) Grade `add_schedule` `external_send` until P5's `schedule` origin re-decides it: its text is delivered
-later into the owner's most trusted channel, so it asks in every mode and no grant lifts it (v1 allowed a grant; one
-field, no new mechanism). Reverse: free. (b) Accept it: choosing `auto` is the owner's opt-in to that risk; `manual`
-keeps D71. Reverse: free. (c) A per-tool "never auto" attribute: a new slot for one tool (D8 says cut it). Reverse:
-cheap. **Recommend (a).**
-
-## Decisions
-
-(empty until the owner answers)
+- **Q1 = (a):** the V17 gate fields now (effect, `arg: title` from r:N, recipient, one-line brief, `unknown`); no
+  waiting machinery and no gate timeout in P2 — both come with the children in P3.
+- **Q2 = (a):** four grades; `sandboxed`, `network`, `reversible` stay as ToolSpec attributes, so `manual` behaves as
+  v1 did; escalate / no sandbox and `delete_reminder` are destructive; origins user / signal / system.
+- **Q3 = (b), archive = write:** `Attach` drafts `tools.<server>` at a server's first load whenever it is absent —
+  installed and hand-configured servers alike, and the owner's already-installed Notion server at its first P2 load —
+  and writes it once through `config.set`; the installer's trial only displays the draft (every non-read value listed
+  in the install approval). One writer, two moments it is seen. **Accepted cost:** a hand-configured server's draft is
+  written without review; the owner corrects it with `config set tools.<server>` or `approve N --grade G`.
+- **Q4 = (b):** a found tool is called through `call_tool`, its schema delivered as text in the search result; the
+  list never changes. **M5b approved** (between U4 and U5).
+- **Q5 = (a) with (i):** `approval_mode` read-only / manual / auto and the tool / server / session "always allow"
+  scopes, with the CLI flags; `full-auto` stays out of `MODES` and config until P3 (Stubbed).
+- **Q6 = (b):** M3 passes when `manual` gates 0 of 16 reads and asks for all 14 writes with 0 unknown, and `auto`
+  opens ≤ 4; v1's 19 reported beside.
+- **Q7 = (a):** a batch stops at the first refusal or the first error; a gate does not stop it; ≤ 3 nearest names;
+  the third unknown-name refusal in a turn stops tool use.
+- **Q8 = (a):** the clone hashes the tool list it sends; a change advances the thinking epoch (one cache rewrite).
+- **Q9 = (a):** `add_schedule` is graded external_send until P5's `schedule` origin re-decides it: it asks in every
+  mode and no grant lifts it (v1 allowed a grant; accepted).
 
 ## Units and build order
 
 Each unit is one implementer call (≤ 3 edited files plus tests, briefed from a scratchpad file, worktree). U1–U4 only
-add (U0 renames and marks one native; U2b backfills config and pins one more field); U5 switches; U6 wires the CLI and
-the daemon; U7a–U7c delete. After each: tests green, `scan_personal.py --all`, review. Written for the recommended
-options; a different answer changes the named unit only. Order: U1 → (U0 ∥ U2a) → (U2b ∥ U3 ∥ U4) → U5 → U6 → U7a ∥ U7b ∥ U7c.
+add (U0 renames and grades two natives; U2b writes drafted maps and pins one more field); U5 switches; U6 wires the CLI
+and the daemon; U7a–U7c delete. After each: tests green, `scan_personal.py --all`, review. Written for the Decisions.
+Order: U1 → (U0 ∥ U2a) → (U2b ∥ U3 ∥ U4) → U5 → U6 → U7a ∥ U7b ∥ U7c.
 
 | # | Unit | Files | Size | After | Parallel | Done when | Calls |
 |---|---|---|---|---|---|---|---|
 | U1 | Grades and the table | `tools.py` (`effect`, CALL_TOOL spec, object/array coerce), `policy.py` (`effect`, `MODES` without full-auto, `verdict` beside v1 `decide`, the grant order), `config.py` (`GRADES`, `approval_mode`, `tools` validated) (+ test_policy, test_tools, test_config) | +~150 | — | — | `test_effect_table` (every native but `delete_reminder` and `add_schedule`, which land in U0), `test_unknown_effect_asks`, `test_grants_never_lift_destructive`; v1 `decide` untouched, its tests green | 30 |
-| U0 | Free the name, mark two natives | `senses/catalog.py` (`search_tools` → `search_registry`), `senses/reminders.py` (`delete_reminder` destructive), `senses/schedule.py` (`add_schedule` external_send, Q9) (+ test_catalog, test_daemon, their `test_effect_table` rows) | ±0 | U1 | U2a | no `search_tools` left in `pathfinder/` but `catalog.py`'s docstring (U3) and the installer's hint (U2a); suite green | 15 |
-| U2a | The draft and the install | `mcp/tools.py` (`grade_of`, `draft`, `draft_server`, `effect` from annotations; `read_only` goes; `write=True` kept until U7b), `installer.py` (trial → `effects`; the brief lists every non-read value; install/rollback/uninstall write or drop `tools.<id>`; hint "try search_registry"; ≤ 700) (+ test_mcp_tools, test_installer) | +~75 | U1 | U0 | `test_new_server_needs_no_core_change`, `test_draft_of_the_notion_fixture` (strictest-word rule); installer ≤ 700 | 30 |
-| U2b | Backfill and pinned annotations | `mcp/pins.py` (`FIELDS` += annotations; a pin without that digest adopts it once), `mcp/attach.py` (backfill installed servers without a map) (+ test_mcp_pins, test_mcp_servers) | +~25 | U2a | U3, U4 | `test_backfill_and_pinned_annotations`; existing pin tests green | 20 |
+| U0 | Free the name, grade two natives | `senses/catalog.py` (`search_tools` → `search_registry`), `senses/reminders.py` (`delete_reminder` destructive), `senses/schedule.py` (`add_schedule` external_send until P5's schedule origin, Q9) (+ test_catalog, test_daemon, their two `test_effect_table` rows) | ±0 | U1 | U2a | no `search_tools` left in `pathfinder/` but `catalog.py`'s docstring (U3) and the installer's hint (U2a); suite green | 15 |
+| U2a | The draft, displayed | `mcp/tools.py` (`grade_of`, `draft`, `draft_server`, `effect` from annotations; `read_only` goes; `write=True` kept until U7b), `installer.py` (the trial displays the draft — every non-read value in the approval; the D31 grant step goes; uninstall drops `tools.<id>`; hint "try search_registry"; ≤ 700) (+ test_mcp_tools, test_installer) | +~60 | U1 | U0 | `test_draft_of_the_notion_fixture` (strictest-word rule); install writes neither grants nor `tools`; installer ≤ 700 | 30 |
+| U2b | The one writer, pinned annotations | `mcp/attach.py` (first load: draft and write an absent `tools.<server>` once), `mcp/pins.py` (`FIELDS` += annotations; a pin without that digest adopts it once) (+ test_mcp_pins, test_mcp_servers, test_installer) | +~30 | U2a | U3, U4 | `test_first_load_drafts_once_and_pins_annotations`, `test_new_server_needs_no_core_change`; existing pin tests green | 25 |
 | U3 | search_tools | `search.py`, `catalog.py` (docstring: `search_registry`), `tests/test_invariants.py` (the `embed` exemption for search) (+ test_search) | ~110 | U0, U1 | U2b, U4 | `test_search_falls_back_without_embeddings`, `test_single_assembler`; ≤ 6,000 chars; the M5 re-check run (local) | 25 |
 | U4 | Inline, titles, scopes | `results.py` (`INLINE`, `title` by `_ID`, lists, `parent_*` last), `assemble.py` (line 59 reads `INLINE`), `state.py` (gate columns `title`, `recipient`, `scope`; `session_grants`) (+ test_results, test_assemble, test_state) | +~55 | U0 (else `INLINE` shows v1's registry search uncapped) | U2b, U3 | its three tests; `rebuild` restores the new columns | 25 |
 | U5 | The switch | `broker.py` (`Broker(tools, origin, cfg, session_grants=…)`, `verdict`, nearest names, `Gate.effect/unknown`), `clone.py` (the only `Broker` builder, :179 and :345; `call_tool` unwrapped before the `read_result` branch; list = core + non-MCP; gate fields; batch rule; unknown-name cap; epoch on list change; `decide(scope, grade)` with the map and grant writes) (+ test_broker, test_clone, and the Retired U5 list) | +~75 | U1–U4 | — | the five U5 tests; every `Broker(` test builder rewritten (Retired, U5) and green | 35 |
@@ -470,5 +423,5 @@ options; a different answer changes the named unit only. Order: U1 → (U0 ∥ U
 
 R1 `bench/v2/m3_gates.py` (researcher; written after U2b, run after U5, arm (3) again after the first P2 start in the
 owner's home — free; the lead's go-ahead only for the commit). R2 `bench/v2/fake_notion_mcp.py` (a stdio MCP server over
-`fake_notion.World` serving the fixture's specs, modelled on `tests/mcp_fake_server.py`, ≤ 150 lines; before U6). M5b,
-if approved, runs between U4 and U5.
+`fake_notion.World` serving the fixture's specs, modelled on `tests/mcp_fake_server.py`, ≤ 150 lines; before U6). M5b
+(approved) runs between U4 and U5.

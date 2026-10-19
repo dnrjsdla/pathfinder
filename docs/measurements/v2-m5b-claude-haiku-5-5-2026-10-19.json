@@ -1,0 +1,942 @@
+{
+  "measurement": "M5b proxy call (v2 partition 2)",
+  "provider": "anthropic",
+  "model": "claude-haiku-5-5",
+  "date": "2026-10-19",
+  "embed_model": "ollama:bge-m3:latest",
+  "max_steps": 8,
+  "max_requests": 60,
+  "prices_per_mtok": {
+    "in": 0.1,
+    "out": 0.5
+  },
+  "summary": {
+    "passed": 6,
+    "of": 9,
+    "m1_store_passed": 5,
+    "fabricated_total": 0,
+    "first_call_arg_errors": 1,
+    "arg_error_calls": 2,
+    "requests": 57,
+    "prompt_tokens": 303472,
+    "completion_tokens": 11508,
+    "cost_usd": 0.0361,
+    "by_task": {
+      "N1": true,
+      "N2": true,
+      "N3": false,
+      "N4": true,
+      "N5": true,
+      "N6": false,
+      "N7": false,
+      "N9": true,
+      "N10": true
+    },
+    "pass": true
+  },
+  "results": [
+    {
+      "id": "N1",
+      "passed": true,
+      "reason": "searches=1 missing=[]",
+      "error": null,
+      "requests": 7,
+      "searches": 1,
+      "call_tools": 1,
+      "first_call_arg_error": false,
+      "arg_error_calls": 0,
+      "final_text": "노션에서 찾을 수 있는 페이지는 총 99개입니다. 그중 13개는 제목이 있고, 나머지 86개는 제목이 없는 `Untitled` 페이지입니다.\n\n**제목이 있는 페이지 (최근 수정순)**\n- 운동 기록 (9/30)\n- 아이디어 메모 (9/20)\n- 주간 플래너 템플릿 (9/18)\n- 프로젝트 계획 (9/16)\n- 휴가 계획 (9/6)\n- 강의 노트 (8/31)\n- 가계부 (8/25)\n- 여행 체크리스트 (8/24)\n- 회의록 (8/19)\n- 월간 플래너 템플릿 (8/2)\n- 독서 목록 (7/25)\n- 레시피 모음 (7/24)\n- 연간 플래너 템플릿 (7/16)\n\n**제목 없는 페이지**는 가장 최근 것이 10/12에 수정됐고, 대부분 7~9월에 수정되었습니다. 내용을 보면 어떤 페이지인지 알 수 있을 것 같습니다. 특정 페이지의 내용이 궁금하면 말씀해 주세요. 제목 없는 페이지도 내용을 열어서 확인해 드릴 수 있습니다.",
+      "steps": 7,
+      "calls": [
+        {
+          "turn": 0,
+          "name": "search_tools",
+          "action": null,
+          "args": {
+            "query": "Notion search pages in workspace"
+          },
+          "seen_before": 1
+        },
+        {
+          "turn": 0,
+          "name": "workspace",
+          "action": "search",
+          "args": {
+            "action": "search",
+            "filter": {
+              "object": "page"
+            },
+            "sort": {
+              "direction": "descending",
+              "timestamp": "last_edited_time"
+            },
+            "limit": 100
+          },
+          "seen_before": 2,
+          "via": "call_tool",
+          "arg_problems": []
+        },
+        {
+          "turn": 0,
+          "name": "read_result",
+          "action": null,
+          "args": {
+            "handle": "r:1",
+            "range": [
+              0,
+              100
+            ]
+          },
+          "seen_before": 3
+        },
+        {
+          "turn": 0,
+          "name": "read_result",
+          "action": null,
+          "args": {
+            "handle": "r:1",
+            "range": [
+              31,
+              99
+            ]
+          },
+          "seen_before": 4
+        },
+        {
+          "turn": 0,
+          "name": "read_result",
+          "action": null,
+          "args": {
+            "handle": "r:1",
+            "range": [
+              62,
+              99
+            ]
+          },
+          "seen_before": 5
+        },
+        {
+          "turn": 0,
+          "name": "read_result",
+          "action": null,
+          "args": {
+            "handle": "r:1",
+            "range": [
+              93,
+              99
+            ]
+          },
+          "seen_before": 6
+        }
+      ],
+      "texts": [
+        "노션에서 찾을 수 있는 페이지는 총 99개입니다. 그중 13개는 제목이 있고, 나머지 86개는 제목이 없는 `Untitled` 페이지입니다.\n\n**제목이 있는 페이지 (최근 수정순)**\n- 운동 기록 (9/30)\n- 아이디어 메모 (9/20)\n- 주간 플래너 템플릿 (9/18)\n- 프로젝트 계획 (9/16)\n- 휴가 계획 (9/6)\n- 강의 노트 (8/31)\n- 가계부 (8/25)\n- 여행 체크리스트 (8/24)\n- 회의록 (8/19)\n- 월간 플래너 템플릿 (8/2)\n- 독서 목록 (7/25)\n- 레시피 모음 (7/24)\n- 연간 플래너 템플릿 (7/16)\n\n**제목 없는 페이지**는 가장 최근 것이 10/12에 수정됐고, 대부분 7~9월에 수정되었습니다. 내용을 보면 어떤 페이지인지 알 수 있을 것 같습니다. 특정 페이지의 내용이 궁금하면 말씀해 주세요. 제목 없는 페이지도 내용을 열어서 확인해 드릴 수 있습니다."
+      ],
+      "prompt_tokens": 53845,
+      "completion_tokens": 1702,
+      "latencies": [
+        1.19,
+        1.36,
+        0.89,
+        1.36,
+        2.05,
+        1.44,
+        3.82
+      ],
+      "fabricated_ids": []
+    },
+    {
+      "id": "N2",
+      "passed": true,
+      "reason": "T2 archived=['e3e70682c2094caca29f6fbed82c07cd']",
+      "error": null,
+      "requests": 10,
+      "searches": 2,
+      "call_tools": 3,
+      "first_call_arg_error": false,
+      "arg_error_calls": 0,
+      "final_text": "'휴가 계획' 페이지를 삭제했습니다. 노션에서는 페이지를 보관(아카이브)하는 방식이라, 필요하면 다시 복원할 수 있습니다.",
+      "steps": 10,
+      "calls": [
+        {
+          "turn": 0,
+          "name": "search_tools",
+          "action": null,
+          "args": {
+            "query": "Notion search pages list workspace"
+          },
+          "seen_before": 1
+        },
+        {
+          "turn": 0,
+          "name": "workspace",
+          "action": "search",
+          "args": {
+            "action": "search",
+            "query": "",
+            "limit": 100
+          },
+          "seen_before": 2,
+          "via": "call_tool",
+          "arg_problems": []
+        },
+        {
+          "turn": 0,
+          "name": "read_result",
+          "action": null,
+          "args": {
+            "handle": "r:1",
+            "path": "results"
+          },
+          "seen_before": 3
+        },
+        {
+          "turn": 0,
+          "name": "read_result",
+          "action": null,
+          "args": {
+            "handle": "r:1",
+            "range": [
+              40,
+              100
+            ]
+          },
+          "seen_before": 4
+        },
+        {
+          "turn": 1,
+          "name": "workspace",
+          "action": "search",
+          "args": {
+            "action": "search",
+            "query": "휴가 계획",
+            "limit": 20
+          },
+          "seen_before": 6,
+          "via": "call_tool",
+          "arg_problems": []
+        },
+        {
+          "turn": 1,
+          "name": "read_result",
+          "action": null,
+          "args": {
+            "handle": "r:2"
+          },
+          "seen_before": 7
+        },
+        {
+          "turn": 1,
+          "name": "search_tools",
+          "action": null,
+          "args": {
+            "query": "mcp__fake-notion__pages"
+          },
+          "seen_before": 8
+        },
+        {
+          "turn": 1,
+          "name": "pages",
+          "action": "archive",
+          "args": {
+            "action": "archive",
+            "page_id": "e3e70682-c209-4cac-a29f-6fbed82c07cd"
+          },
+          "seen_before": 9,
+          "via": "call_tool",
+          "arg_problems": []
+        }
+      ],
+      "texts": [
+        "노션에서 찾은 페이지 중 제목이 있는 것은 아래와 같습니다.\n\n- **운동 기록** (9/30 수정)\n- **아이디어 메모** (9/20 수정)\n- **주간 플래너 템플릿** (9/18 수정)\n- **프로젝트 계획** (9/16 수정)\n- **강의 노트** (8/31 수정)\n- **가계부** (8/25 수정)\n- **여행 체크리스트** (8/24 수정)\n- **회의록** (8/19 수정)\n\n나머지는 제목이 없는 \"Untitled\" 페이지이고, 대부분 10월 초에서 8월 초 사이에 수정됐습니다. 검색 결과가 일부만 표시되어 전체 목록은 아닐 수 있습니다. 특정 페이지 내용을 보고 싶거나 Untitled 페이지를 정리하고 싶으면 말씀해 주세요.",
+        "'휴가 계획' 페이지를 삭제했습니다. 노션에서는 페이지를 보관(아카이브)하는 방식이라, 필요하면 다시 복원할 수 있습니다."
+      ],
+      "prompt_tokens": 81075,
+      "completion_tokens": 1724,
+      "latencies": [
+        1.31,
+        1.12,
+        0.95,
+        1.5,
+        3.68,
+        1.6,
+        1.17,
+        1.75,
+        1.1,
+        1.1
+      ],
+      "fabricated_ids": []
+    },
+    {
+      "id": "N3",
+      "passed": false,
+      "reason": "printed: 주간 플래너 템플릿 (2026-09-18)",
+      "error": null,
+      "requests": 8,
+      "searches": 1,
+      "call_tools": 2,
+      "first_call_arg_error": false,
+      "arg_error_calls": 0,
+      "final_text": "3번째 페이지는 제목이 \"Untitled\"이고 내용이 비어 있습니다.\n\n- 최종 수정: 2026-10-12 09:45\n- 링크: https://www.notion.so/9b02524409504d139db53334fb0323a1\n\n내용을 채우거나 제목을 바꾸고 싶으면 말씀해 주세요.",
+      "steps": 8,
+      "calls": [
+        {
+          "turn": 0,
+          "name": "search_tools",
+          "action": null,
+          "args": {
+            "query": "Notion 페이지 목록 검색"
+          },
+          "seen_before": 1
+        },
+        {
+          "turn": 0,
+          "name": "workspace",
+          "action": "search",
+          "args": {
+            "action": "search",
+            "query": ""
+          },
+          "seen_before": 2,
+          "via": "call_tool",
+          "arg_problems": []
+        },
+        {
+          "turn": 0,
+          "name": "read_result",
+          "action": null,
+          "args": {
+            "handle": "r:1",
+            "range": [
+              0,
+              100
+            ]
+          },
+          "seen_before": 3
+        },
+        {
+          "turn": 1,
+          "name": "pages",
+          "action": "get",
+          "args": {
+            "action": "get",
+            "page_id": "9b025244-0950-4d13-9db5-3334fb0323a1"
+          },
+          "seen_before": 5,
+          "via": "call_tool",
+          "arg_problems": []
+        },
+        {
+          "turn": 1,
+          "name": "read_result",
+          "action": null,
+          "args": {
+            "handle": "r:2",
+            "path": "content"
+          },
+          "seen_before": 6
+        },
+        {
+          "turn": 1,
+          "name": "read_result",
+          "action": null,
+          "args": {
+            "handle": "r:2",
+            "path": "properties"
+          },
+          "seen_before": 7
+        }
+      ],
+      "texts": [
+        "노션에서 찾은 페이지 목록입니다. 최근 수정일 순으로 정렬되어 있고, 제목이 없는 페이지는 \"Untitled\"로 표시됩니다.\n\n**제목이 있는 페이지**\n- 운동 기록 (2026-09-30)\n- 아이디어 메모 (2026-09-20)\n- 주간 플래너 템플릿 (2026-09-18)\n- 프로젝트 계획 (2026-09-16)\n\n**제목 없는 페이지 (Untitled)**\n- 2026-10-12 21:36\n- 2026-10-12 16:26\n- 2026-10-12 09:45\n- 2026-10-10 20:00\n- 2026-10-07 01:16\n- 2026-10-06 04:47\n- 2026-10-05 11:24\n- 2026-10-03 21:33\n- 2026-10-03 20:05\n- 2026-10-03 01:09\n- 2026-10-01 09:43\n- 2026-10-01 01:17\n- 2026-09-30 18:19\n- 2026-09-30 09:52\n- 2026-09-27 03:17\n- 2026-09-26 07:21\n- 2026-09-24 22:33\n- 2026-09-24 18:54\n- 2026-09-24 07:24\n- 2026-09-20 17:12\n- 2026-09-19 08:53\n- 2026-09-19 06:53\n- 2026-09-17 21:07\n- 2026-09-16 23:20\n- 2026-09-16 03:09\n- 2026-09-15 12:25\n- 2026-09-14 20:31\n\n검색 결과는 전체 100개라고 표시되었지만, 실제로 받은 것은 31개뿐이었습니다. 나머지 페이지를 보려면 특정 키워드로 검색하거나 다시 조회해 드릴 수 있습니다. 특정 페이지의 내용을 열어보고 싶으면 제목이나 날짜를 알려주세요.",
+        "3번째 페이지는 제목이 \"Untitled\"이고 내용이 비어 있습니다.\n\n- 최종 수정: 2026-10-12 09:45\n- 링크: https://www.notion.so/9b02524409504d139db53334fb0323a1\n\n내용을 채우거나 제목을 바꾸고 싶으면 말씀해 주세요."
+      ],
+      "prompt_tokens": 46792,
+      "completion_tokens": 1587,
+      "latencies": [
+        1.48,
+        1.06,
+        0.86,
+        3.53,
+        3.59,
+        0.9,
+        1.07,
+        2.23
+      ],
+      "fabricated_ids": []
+    },
+    {
+      "id": "N4",
+      "passed": true,
+      "reason": "gets=2",
+      "error": null,
+      "requests": 8,
+      "searches": 1,
+      "call_tools": 3,
+      "first_call_arg_error": false,
+      "arg_error_calls": 0,
+      "final_text": "'강의 노트' 페이지를 끝까지 읽었습니다. 두 번에 나눠 불러왔고, 마지막 부분에서 더 이상 내용이 없음을 확인했습니다.\n\n**1주차 ~ 8주차**\n- 1주차: 핵심 개념 1-1, 1-2 정리 / 과제: 연습문제 1장\n- 2주차: 핵심 개념 2-1, 2-2 정리 / 과제: 연습문제 2장\n- 3주차: 핵심 개념 3-1, 3-2 정리 / 과제: 연습문제 3장\n- 4주차: 핵심 개념 4-1, 4-2 정리 / 과제: 연습문제 4장\n- 5주차: 핵심 개념 5-1, 5-2 정리 / 과제: 연습문제 5장\n- 6주차: 핵심 개념 6-1, 6-2 정리 / 과제: 연습문제 6장\n- 7주차: 핵심 개념 7-1, 7-2 정리 / 과제: 연습문제 7장\n- 8주차: 핵심 개념 8-1, 8-2 정리 / 과제: 연습문제 8장\n\n**9주차 ~ 15주차**\n- 9주차: 핵심 개념 9-1 정리 / 과제: 연습문제 9장\n- 10주차: 핵심 개념 10-1 정리 / 과제: 연습문제 10장\n- 11주차: 핵심 개념 11-1 정리 / 과제: 연습문제 11장\n- 12주차: 핵심 개념 12-1 정리 / 과제: 연습문제 12장\n- 13주차: 핵심 개념 13-1 정리 / 과제: 연습문제 13장\n- 14주차: 핵심 개념 14-1 정리 / 과제: 연습문제 14장\n- 15주차: 핵심 개념 15-1 정리 / 과제: 연습문제 15장\n\n**마지막 메모**\n- 기말고사 범위: 9~15주차\n\n페이지 내용은 주차별 개념 정리와 과제 목록이 전부였습니다. 실제 필기 내용은 적혀 있지 않았습니다. 같은 이름의 '강의 노트 DB'도 있는데, 그쪽을 보길 원하시면 말씀해 주세요.",
+      "steps": 8,
+      "calls": [
+        {
+          "turn": 0,
+          "name": "search_tools",
+          "action": null,
+          "args": {
+            "query": "Notion search pages by title"
+          },
+          "seen_before": 1
+        },
+        {
+          "turn": 0,
+          "name": "workspace",
+          "action": "search",
+          "args": {
+            "action": "search",
+            "query": "강의 노트"
+          },
+          "seen_before": 2,
+          "via": "call_tool",
+          "arg_problems": []
+        },
+        {
+          "turn": 0,
+          "name": "read_result",
+          "action": null,
+          "args": {
+            "handle": "r:1"
+          },
+          "seen_before": 3
+        },
+        {
+          "turn": 0,
+          "name": "pages",
+          "action": "get",
+          "args": {
+            "action": "get",
+            "page_id": "82e2e662-f728-44fa-8248-5e3a0a5d2f34"
+          },
+          "seen_before": 4,
+          "via": "call_tool",
+          "arg_problems": []
+        },
+        {
+          "turn": 0,
+          "name": "read_result",
+          "action": null,
+          "args": {
+            "handle": "r:2",
+            "path": "content"
+          },
+          "seen_before": 5
+        },
+        {
+          "turn": 0,
+          "name": "read_result",
+          "action": null,
+          "args": {
+            "handle": "r:2",
+            "path": "next_cursor"
+          },
+          "seen_before": 5
+        },
+        {
+          "turn": 0,
+          "name": "pages",
+          "action": "get",
+          "args": {
+            "action": "get",
+            "page_id": "82e2e662-f728-44fa-8248-5e3a0a5d2f34",
+            "content_cursor": "cur-fd1ac7ce1ad0"
+          },
+          "seen_before": 7,
+          "via": "call_tool",
+          "arg_problems": []
+        },
+        {
+          "turn": 0,
+          "name": "read_result",
+          "action": null,
+          "args": {
+            "handle": "r:2",
+            "path": "has_more"
+          },
+          "seen_before": 7
+        },
+        {
+          "turn": 0,
+          "name": "read_result",
+          "action": null,
+          "args": {
+            "handle": "r:3",
+            "path": "content"
+          },
+          "seen_before": 9
+        },
+        {
+          "turn": 0,
+          "name": "read_result",
+          "action": null,
+          "args": {
+            "handle": "r:3",
+            "path": "has_more"
+          },
+          "seen_before": 9
+        }
+      ],
+      "texts": [
+        "'강의 노트' 페이지를 끝까지 읽었습니다. 두 번에 나눠 불러왔고, 마지막 부분에서 더 이상 내용이 없음을 확인했습니다.\n\n**1주차 ~ 8주차**\n- 1주차: 핵심 개념 1-1, 1-2 정리 / 과제: 연습문제 1장\n- 2주차: 핵심 개념 2-1, 2-2 정리 / 과제: 연습문제 2장\n- 3주차: 핵심 개념 3-1, 3-2 정리 / 과제: 연습문제 3장\n- 4주차: 핵심 개념 4-1, 4-2 정리 / 과제: 연습문제 4장\n- 5주차: 핵심 개념 5-1, 5-2 정리 / 과제: 연습문제 5장\n- 6주차: 핵심 개념 6-1, 6-2 정리 / 과제: 연습문제 6장\n- 7주차: 핵심 개념 7-1, 7-2 정리 / 과제: 연습문제 7장\n- 8주차: 핵심 개념 8-1, 8-2 정리 / 과제: 연습문제 8장\n\n**9주차 ~ 15주차**\n- 9주차: 핵심 개념 9-1 정리 / 과제: 연습문제 9장\n- 10주차: 핵심 개념 10-1 정리 / 과제: 연습문제 10장\n- 11주차: 핵심 개념 11-1 정리 / 과제: 연습문제 11장\n- 12주차: 핵심 개념 12-1 정리 / 과제: 연습문제 12장\n- 13주차: 핵심 개념 13-1 정리 / 과제: 연습문제 13장\n- 14주차: 핵심 개념 14-1 정리 / 과제: 연습문제 14장\n- 15주차: 핵심 개념 15-1 정리 / 과제: 연습문제 15장\n\n**마지막 메모**\n- 기말고사 범위: 9~15주차\n\n페이지 내용은 주차별 개념 정리와 과제 목록이 전부였습니다. 실제 필기 내용은 적혀 있지 않았습니다. 같은 이름의 '강의 노트 DB'도 있는데, 그쪽을 보길 원하시면 말씀해 주세요."
+      ],
+      "prompt_tokens": 32026,
+      "completion_tokens": 1841,
+      "latencies": [
+        1.61,
+        1.21,
+        1.81,
+        1.24,
+        1.2,
+        1.76,
+        1.27,
+        3.73
+      ],
+      "fabricated_ids": []
+    },
+    {
+      "id": "N5",
+      "passed": true,
+      "reason": "want 86 or partial",
+      "error": null,
+      "requests": 5,
+      "searches": 1,
+      "call_tools": 1,
+      "first_call_arg_error": false,
+      "arg_error_calls": 0,
+      "final_text": "Notion 검색 결과 'Untitled' 제목의 페이지는 **86개**입니다. 검색 결과에서 `has_more`가 false라 더 이상 불러올 페이지는 없습니다.\n\n다만 결과를 열람할 때 일부가 잘려 표시돼서, 제가 확인한 항목은 모두 제목이 'Untitled'였지만 나머지 항목의 제목을 하나하나 전부 확인하지는 못했습니다. 가장 최근 수정된 것은 2026-10-12, 가장 오래된 것은 2026-08-09입니다.\n\n정리하거나 삭제하길 원하시면 목록을 제목과 함께 먼저 보여드리고 확인받은 뒤 진행하겠습니다.",
+      "steps": 5,
+      "calls": [
+        {
+          "turn": 0,
+          "name": "search_tools",
+          "action": null,
+          "args": {
+            "query": "Notion search pages by title"
+          },
+          "seen_before": 1
+        },
+        {
+          "turn": 0,
+          "name": "workspace",
+          "action": "search",
+          "args": {
+            "action": "search",
+            "query": "Untitled"
+          },
+          "seen_before": 2,
+          "via": "call_tool",
+          "arg_problems": []
+        },
+        {
+          "turn": 0,
+          "name": "read_result",
+          "action": null,
+          "args": {
+            "handle": "r:1",
+            "path": "results"
+          },
+          "seen_before": 3
+        },
+        {
+          "turn": 0,
+          "name": "read_result",
+          "action": null,
+          "args": {
+            "handle": "r:1",
+            "range": [
+              30,
+              86
+            ]
+          },
+          "seen_before": 4
+        }
+      ],
+      "texts": [
+        "Notion 검색 결과 'Untitled' 제목의 페이지는 **86개**입니다. 검색 결과에서 `has_more`가 false라 더 이상 불러올 페이지는 없습니다.\n\n다만 결과를 열람할 때 일부가 잘려 표시돼서, 제가 확인한 항목은 모두 제목이 'Untitled'였지만 나머지 항목의 제목을 하나하나 전부 확인하지는 못했습니다. 가장 최근 수정된 것은 2026-10-12, 가장 오래된 것은 2026-08-09입니다.\n\n정리하거나 삭제하길 원하시면 목록을 제목과 함께 먼저 보여드리고 확인받은 뒤 진행하겠습니다."
+      ],
+      "prompt_tokens": 25463,
+      "completion_tokens": 1004,
+      "latencies": [
+        1.12,
+        1.0,
+        1.06,
+        1.87,
+        3.29
+      ],
+      "fabricated_ids": []
+    },
+    {
+      "id": "N6",
+      "passed": false,
+      "reason": "step cap",
+      "error": "step cap",
+      "requests": 8,
+      "searches": 1,
+      "call_tools": 5,
+      "first_call_arg_error": true,
+      "arg_error_calls": 2,
+      "final_text": "",
+      "steps": 8,
+      "calls": [
+        {
+          "turn": 0,
+          "name": "search_tools",
+          "action": null,
+          "args": {
+            "query": "Notion search pages by title"
+          },
+          "seen_before": 1
+        },
+        {
+          "turn": 0,
+          "name": "workspace",
+          "action": null,
+          "args": {
+            "query": "독서 목록"
+          },
+          "seen_before": 2,
+          "via": "call_tool",
+          "arg_problems": [
+            "missing action"
+          ]
+        },
+        {
+          "turn": 0,
+          "name": "help",
+          "action": null,
+          "args": {
+            "tool": "workspace"
+          },
+          "seen_before": 3,
+          "via": "call_tool",
+          "arg_problems": [
+            "missing tool_name"
+          ]
+        },
+        {
+          "turn": 0,
+          "name": "workspace",
+          "action": "search",
+          "args": {
+            "action": "search",
+            "query": "독서 목록"
+          },
+          "seen_before": 4,
+          "via": "call_tool",
+          "arg_problems": []
+        },
+        {
+          "turn": 0,
+          "name": "read_result",
+          "action": null,
+          "args": {
+            "handle": "r:1"
+          },
+          "seen_before": 5
+        },
+        {
+          "turn": 0,
+          "name": "pages",
+          "action": "archive",
+          "args": {
+            "action": "archive",
+            "page_id": "9558867f-5ba9-4faf-ba02-4204f7c1bd87"
+          },
+          "seen_before": 6,
+          "via": "call_tool",
+          "arg_problems": []
+        },
+        {
+          "turn": 0,
+          "name": "pages",
+          "action": "archive",
+          "args": {
+            "action": "archive",
+            "page_id": "9558867f5ba94fafba024204f7c1bd87"
+          },
+          "seen_before": 7,
+          "via": "call_tool",
+          "arg_problems": []
+        },
+        {
+          "turn": 0,
+          "name": "read_result",
+          "action": null,
+          "args": {
+            "handle": "r:2"
+          },
+          "seen_before": 8
+        }
+      ],
+      "texts": [],
+      "prompt_tokens": 28441,
+      "completion_tokens": 910,
+      "latencies": [
+        1.13,
+        1.71,
+        1.76,
+        1.05,
+        0.9,
+        1.61,
+        1.29,
+        1.53
+      ],
+      "fabricated_ids": []
+    },
+    {
+      "id": "N7",
+      "passed": false,
+      "reason": "archives=0 titles=4",
+      "error": null,
+      "requests": 4,
+      "searches": 1,
+      "call_tools": 1,
+      "first_call_arg_error": false,
+      "arg_error_calls": 0,
+      "final_text": "워크스페이스에 페이지가 100개 있는데, 제목이 없는 \"Untitled\" 페이지가 대부분입니다. 최근 목록 기준으로 일부만 보면 이렇습니다.\n\n- 제목 있는 페이지: 운동 기록, 아이디어 메모, 주간 플래너 템플릿, 프로젝트 계획\n- 나머지는 제목 없는 페이지(Untitled)이고, 대부분 9월 중순부터 10월 중순 사이에 수정됐습니다.\n\n제목만으로는 어떤 게 필요 없는지 판단할 수 없어서 아직 아무것도 지우지 않았습니다. 아래 중 어떻게 할지 알려주세요.\n\n1. 제목이 없는(Untitled) 페이지를 모두 삭제 (약 100개 중 대부분이라 목록을 다시 뽑아 확인하겠습니다)\n2. 특정 기간보다 오래된 페이지 삭제 (예: 9월 말 이전)\n3. 내용을 확인한 뒤 빈 페이지만 삭제 (각 페이지 내용을 읽어서 비어 있는 것만 골라 보여드림)\n4. 직접 고른 페이지만 삭제\n\n삭제 대상 목록을 제목과 함께 보여드리고, 확인을 받은 뒤에 보관(archive) 처리하겠습니다.",
+      "steps": 4,
+      "calls": [
+        {
+          "turn": 0,
+          "name": "search_tools",
+          "action": null,
+          "args": {
+            "query": "Notion search pages"
+          },
+          "seen_before": 1
+        },
+        {
+          "turn": 0,
+          "name": "workspace",
+          "action": "search",
+          "args": {
+            "action": "search",
+            "query": ""
+          },
+          "seen_before": 2,
+          "via": "call_tool",
+          "arg_problems": []
+        },
+        {
+          "turn": 0,
+          "name": "read_result",
+          "action": null,
+          "args": {
+            "handle": "r:1"
+          },
+          "seen_before": 3
+        }
+      ],
+      "texts": [
+        "워크스페이스에 페이지가 100개 있는데, 제목이 없는 \"Untitled\" 페이지가 대부분입니다. 최근 목록 기준으로 일부만 보면 이렇습니다.\n\n- 제목 있는 페이지: 운동 기록, 아이디어 메모, 주간 플래너 템플릿, 프로젝트 계획\n- 나머지는 제목 없는 페이지(Untitled)이고, 대부분 9월 중순부터 10월 중순 사이에 수정됐습니다.\n\n제목만으로는 어떤 게 필요 없는지 판단할 수 없어서 아직 아무것도 지우지 않았습니다. 아래 중 어떻게 할지 알려주세요.\n\n1. 제목이 없는(Untitled) 페이지를 모두 삭제 (약 100개 중 대부분이라 목록을 다시 뽑아 확인하겠습니다)\n2. 특정 기간보다 오래된 페이지 삭제 (예: 9월 말 이전)\n3. 내용을 확인한 뒤 빈 페이지만 삭제 (각 페이지 내용을 읽어서 비어 있는 것만 골라 보여드림)\n4. 직접 고른 페이지만 삭제\n\n삭제 대상 목록을 제목과 함께 보여드리고, 확인을 받은 뒤에 보관(archive) 처리하겠습니다."
+      ],
+      "prompt_tokens": 14827,
+      "completion_tokens": 1328,
+      "latencies": [
+        1.2,
+        1.12,
+        1.05,
+        5.57
+      ],
+      "fabricated_ids": []
+    },
+    {
+      "id": "N9",
+      "passed": true,
+      "reason": "queries=1 good=1",
+      "error": null,
+      "requests": 6,
+      "searches": 1,
+      "call_tools": 2,
+      "first_call_arg_error": false,
+      "arg_error_calls": 0,
+      "final_text": "'강의 노트 DB'에서 Status가 Done인 항목은 3개입니다.\n\n1. 1주차 강의: https://www.notion.so/c6f0093395d1405182cb6d1dffc573d5\n2. 2주차 강의: https://www.notion.so/1d7173e55bc74debb1234efe6e648043\n3. 3주차 강의: https://www.notion.so/b3b68b57da5442679d138266d26d5396",
+      "steps": 6,
+      "calls": [
+        {
+          "turn": 0,
+          "name": "search_tools",
+          "action": null,
+          "args": {
+            "query": "Notion 데이터베이스 검색 및 쿼리 (강의 노트)"
+          },
+          "seen_before": 1
+        },
+        {
+          "turn": 0,
+          "name": "workspace",
+          "action": "search",
+          "args": {
+            "action": "search",
+            "query": "강의 노트",
+            "filter": {
+              "object": "data_source"
+            }
+          },
+          "seen_before": 2,
+          "via": "call_tool",
+          "arg_problems": []
+        },
+        {
+          "turn": 0,
+          "name": "read_result",
+          "action": null,
+          "args": {
+            "handle": "r:1"
+          },
+          "seen_before": 3
+        },
+        {
+          "turn": 0,
+          "name": "databases",
+          "action": "query",
+          "args": {
+            "action": "query",
+            "database_id": "385af463-5e4a-4862-956a-f4586c4c3935",
+            "filters": {
+              "property": "Status",
+              "status": {
+                "equals": "Done"
+              }
+            }
+          },
+          "seen_before": 4,
+          "via": "call_tool",
+          "arg_problems": []
+        },
+        {
+          "turn": 0,
+          "name": "read_result",
+          "action": null,
+          "args": {
+            "handle": "r:2"
+          },
+          "seen_before": 5
+        }
+      ],
+      "texts": [
+        "'강의 노트 DB'에서 Status가 Done인 항목은 3개입니다.\n\n1. 1주차 강의: https://www.notion.so/c6f0093395d1405182cb6d1dffc573d5\n2. 2주차 강의: https://www.notion.so/1d7173e55bc74debb1234efe6e648043\n3. 3주차 강의: https://www.notion.so/b3b68b57da5442679d138266d26d5396"
+      ],
+      "prompt_tokens": 19956,
+      "completion_tokens": 661,
+      "latencies": [
+        1.16,
+        1.16,
+        0.99,
+        1.72,
+        1.42,
+        1.47
+      ],
+      "fabricated_ids": []
+    },
+    {
+      "id": "N10",
+      "passed": true,
+      "reason": "calls=0",
+      "error": null,
+      "requests": 1,
+      "searches": 0,
+      "call_tools": 0,
+      "first_call_arg_error": false,
+      "arg_error_calls": 0,
+      "final_text": "노션(Notion)은 **문서 작성, 메모, 할 일 관리, 데이터베이스, 프로젝트 관리를 한곳에서 할 수 있는 올인원 워크스페이스 앱**입니다.\n\n주요 기능은 다음과 같습니다.\n\n- **문서와 메모**: 블록 단위로 글, 이미지, 표, 체크리스트, 코드 등을 자유롭게 배치합니다.\n- **데이터베이스**: 표, 칸반 보드, 캘린더, 갤러리 형태로 정보를 정리하고 필터, 정렬, 검색을 할 수 있습니다. 예를 들어 독서 목록, 콘텐츠 일정, 고객 관리 표 등을 만들 수 있습니다.\n- **프로젝트·업무 관리**: 담당자, 마감일, 진행 상태를 지정해 팀 업무를 추적합니다.\n- **위키와 지식 관리**: 회사나 팀의 규칙, 매뉴얼, 회의록을 쌓아 두고 검색합니다.\n- **협업**: 페이지를 공유하고 댓글을 달거나 함께 편집할 수 있습니다.\n- **템플릿**: 여행 계획, 주간 회고, 가계부 같은 양식을 바로 가져다 쓸 수 있습니다.\n\n개인용으로는 무료 플랜이 제공되며, 개인 일정이나 공부 기록, 여러 도구에 흩어진 메모를 한데 모으는 용도로 많이 씁니다. 또한 Notion AI 같은 기능이나 다른 서비스와의 연동도 지원합니다.\n\n제가 노션 워크스페이스에 연결되어 있어서 페이지 검색, 내용 확인, 정리 같은 작업도 도와드릴 수 있습니다. 특정 용도(개인 할 일 관리, 팀 위키 등)로 쓰고 싶으신지 알려주시면 구성 방법도 제안해 드릴게요.",
+      "steps": 1,
+      "calls": [],
+      "texts": [
+        "노션(Notion)은 **문서 작성, 메모, 할 일 관리, 데이터베이스, 프로젝트 관리를 한곳에서 할 수 있는 올인원 워크스페이스 앱**입니다.\n\n주요 기능은 다음과 같습니다.\n\n- **문서와 메모**: 블록 단위로 글, 이미지, 표, 체크리스트, 코드 등을 자유롭게 배치합니다.\n- **데이터베이스**: 표, 칸반 보드, 캘린더, 갤러리 형태로 정보를 정리하고 필터, 정렬, 검색을 할 수 있습니다. 예를 들어 독서 목록, 콘텐츠 일정, 고객 관리 표 등을 만들 수 있습니다.\n- **프로젝트·업무 관리**: 담당자, 마감일, 진행 상태를 지정해 팀 업무를 추적합니다.\n- **위키와 지식 관리**: 회사나 팀의 규칙, 매뉴얼, 회의록을 쌓아 두고 검색합니다.\n- **협업**: 페이지를 공유하고 댓글을 달거나 함께 편집할 수 있습니다.\n- **템플릿**: 여행 계획, 주간 회고, 가계부 같은 양식을 바로 가져다 쓸 수 있습니다.\n\n개인용으로는 무료 플랜이 제공되며, 개인 일정이나 공부 기록, 여러 도구에 흩어진 메모를 한데 모으는 용도로 많이 씁니다. 또한 Notion AI 같은 기능이나 다른 서비스와의 연동도 지원합니다.\n\n제가 노션 워크스페이스에 연결되어 있어서 페이지 검색, 내용 확인, 정리 같은 작업도 도와드릴 수 있습니다. 특정 용도(개인 할 일 관리, 팀 위키 등)로 쓰고 싶으신지 알려주시면 구성 방법도 제안해 드릴게요."
+      ],
+      "prompt_tokens": 1047,
+      "completion_tokens": 751,
+      "latencies": [
+        4.52
+      ],
+      "fabricated_ids": []
+    }
+  ],
+  "rule": "fabricated 0, passes >= M1 store (5/9), first-call argument errors <= 2",
+  "gemma4": {
+    "model": "gemma4:31b-cloud",
+    "task": "강의 노트 DB(ID {db})에 새 행 추가해줘: 이름 '9주차 보강', Status는 Not started",
+    "runs": [
+      {
+        "requests": 2,
+        "calls": [
+          {
+            "name": "search_tools",
+            "args": {
+              "query": "Notion create database page"
+            }
+          }
+        ],
+        "properties_intact": false,
+        "error": null,
+        "final_text": null
+      },
+      {
+        "requests": 2,
+        "calls": [
+          {
+            "name": "search_tools",
+            "args": {
+              "query": "notion create database page"
+            }
+          },
+          {
+            "name": "databases",
+            "args": {
+              "action": "create_page",
+              "database_id": "385af463-5e4a-4862-956a-f4586c4c3935",
+              "pages": [
+                {
+                  "properties": {
+                    "Name": {
+                      "title": [
+                        {
+                          "text": {
+                            "content": "9주차 보강"
+                          }
+                        }
+                      ]
+                    },
+                    "Status": {
+                      "select": {
+                        "name": "Not started"
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        ],
+        "properties_intact": true,
+        "error": "request cap reached",
+        "final_text": null
+      },
+      {
+        "requests": 2,
+        "calls": [
+          {
+            "name": "search_tools",
+            "args": {
+              "query": "Notion create database page"
+            }
+          }
+        ],
+        "properties_intact": false,
+        "error": null,
+        "final_text": null
+      }
+    ],
+    "properties_intact": "1/3",
+    "note": "properties_intact recomputed after the run with the recursive check (the run's check read only the top level); final_text was not recorded in these runs; runs 1 and 3 ended after search_tools without a call_tool"
+  }
+}

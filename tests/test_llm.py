@@ -14,7 +14,7 @@ from pathlib import Path
 from unittest import mock
 
 from pathfinder.llm import Endpoint, LLMError, Request, Response, resolve
-from pathfinder.llm.openai_compat import complete, parse_sse, to_wire, _assemble
+from pathfinder.llm.openai_compat import complete, embed, parse_sse, to_wire, _assemble
 from pathfinder.llm.rename import rename_args_out, rename_in, rename_out
 
 NOTION = Path(__file__).resolve().parent.parent / "bench" / "v2" / "fixtures" / "notion_tools.json"
@@ -160,6 +160,31 @@ class TestStreamFailuresAreLLMErrors(unittest.TestCase):
                 with self.assertRaises(LLMError) as caught:
                     asyncio.run(complete(endpoint, Request("root", "S")))
             self.assertEqual(caught.exception.status, 0)
+
+
+class TestEmbedFailuresAreLLMErrors(unittest.TestCase):
+    """memory and search fall back on LLMError alone: nothing else may escape `embed`."""
+
+    def _embed(self, url):
+        return embed(Endpoint(base_url=url, api_key="", model="fake-model"), ["x"])
+
+    def test_a_base_url_without_a_scheme(self):
+        with self.assertRaises(LLMError):
+            self._embed("localhost:9/v1")
+
+    def test_a_body_that_is_not_utf8(self):
+        with _server(b"\xff\xfe{", content_type="application/json") as url, self.assertRaises(LLMError):
+            self._embed(url)
+
+    def test_an_embedding_that_is_not_a_list_of_numbers(self):
+        for bad in (None, "0.1 0.2", ["0.1"], [True]):
+            body = json.dumps({"data": [{"index": 0, "embedding": bad}]}).encode()
+            with self.subTest(bad=bad), _server(body, content_type="application/json") as url:
+                with self.assertRaises(LLMError):
+                    self._embed(url)
+        body = json.dumps({"data": [{"index": 0, "embedding": [0.5, 1]}]}).encode()
+        with _server(body, content_type="application/json") as url:
+            self.assertEqual(self._embed(url), [[0.5, 1]])
 
 
 def _neutral(spec):

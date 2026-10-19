@@ -187,25 +187,30 @@ async def complete(endpoint, req, on_text=None, cancel=None):
 def embed(endpoint, texts):
     """One batched call to /embeddings (the OpenAI-compatible route Ollama also
     serves). Returns the vectors in input order, regardless of the order the
-    server's `data` list comes back in."""
+    server's `data` list comes back in. Every failure is an LLMError - a vector that is not a list
+    of numbers among them - so a caller falls back on LLMError alone (memory, search)."""
     body = {"model": endpoint.model, "input": texts}
     headers = {"Content-Type": "application/json"}
     if endpoint.api_key:
         headers["Authorization"] = f"Bearer {endpoint.api_key}"
-    req = urllib.request.Request(
-        endpoint.base_url.rstrip("/") + "/embeddings",
-        data=json.dumps(body).encode("utf-8"), headers=headers, method="POST",
-    )
     try:
+        req = urllib.request.Request(  # inside the try: a base_url without a scheme raises ValueError here
+            endpoint.base_url.rstrip("/") + "/embeddings",
+            data=json.dumps(body).encode("utf-8"), headers=headers, method="POST",
+        )
         with urllib.request.urlopen(req, timeout=30) as resp:
             data = json.loads(resp.read().decode("utf-8"))
         items = sorted(data["data"], key=lambda d: d["index"])
-        return [item["embedding"] for item in items]
+        vectors = [item["embedding"] for item in items]
     except urllib.error.HTTPError as e:
         with e:  # e is also the response body; read it before the socket closes
             message = e.read().decode("utf-8", errors="replace")
         raise LLMError(e.code, message[:300])
     except (OSError, http.client.HTTPException) as e:
         raise LLMError(0, f"{type(e).__name__}: {e}"[:300])
-    except (json.JSONDecodeError, KeyError, TypeError) as e:
-        raise LLMError(0, f"bad embeddings response: {type(e).__name__}: {e}"[:300])
+    except (ValueError, KeyError, TypeError) as e:  # ValueError: a bad URL, bad JSON, a non-UTF-8 body
+        raise LLMError(0, f"bad embeddings request or response: {type(e).__name__}: {e}"[:300])
+    if not all(isinstance(v, list) and all(isinstance(x, (int, float)) and not isinstance(x, bool) for x in v)
+               for v in vectors):
+        raise LLMError(0, "bad embeddings response: an embedding is not a list of numbers")
+    return vectors

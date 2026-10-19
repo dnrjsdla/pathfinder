@@ -1,0 +1,383 @@
+{
+  "measurement": "M5 re-check (v2 partition 2)",
+  "date": "2026-10-19",
+  "embed_model": "ollama:bge-m3:latest",
+  "tools": 32,
+  "natives": 21,
+  "notion": 11,
+  "summary": {
+    "en": {
+      "n": 10,
+      "top1": 9,
+      "top3": 10
+    },
+    "ko": {
+      "n": 10,
+      "top1": 6,
+      "top3": 9
+    }
+  },
+  "dropped": [],
+  "chars": {
+    "max": 5960,
+    "median": 4980.5,
+    "limit": 6000
+  },
+  "ms": {
+    "first_search_indexes_all": 2796.7,
+    "median_after": 18.0
+  },
+  "truncation_probe": {
+    "longest_text_chars": 1237,
+    "cosine_whole_vs_half": 0.975639,
+    "truncated": false
+  },
+  "verdict": {
+    "top3": "19/20",
+    "pass": true,
+    "rule": "top-3 >= 90% of the queries whose expected tool still exists"
+  },
+  "rows": [
+    {
+      "lang": "en",
+      "query": "archive a notion page",
+      "expected": [
+        "mcp__fake-notion__pages"
+      ],
+      "top3": [
+        "mcp__fake-notion__pages",
+        "edit_memory",
+        "mcp__fake-notion__databases"
+      ],
+      "top1_hit": true,
+      "top3_hit": true,
+      "chars": 5960,
+      "full_specs": 2,
+      "ms": 2796.7
+    },
+    {
+      "lang": "en",
+      "query": "query a notion database with a filter",
+      "expected": [
+        "mcp__fake-notion__databases"
+      ],
+      "top3": [
+        "mcp__fake-notion__databases",
+        "search_memory",
+        "mcp__fake-notion__workspace"
+      ],
+      "top1_hit": true,
+      "top3_hit": true,
+      "chars": 5930,
+      "full_specs": 3,
+      "ms": 37.3
+    },
+    {
+      "lang": "en",
+      "query": "search my email",
+      "expected": [
+        "search_mail"
+      ],
+      "top3": [
+        "search_mail",
+        "search_memory",
+        "read_mail"
+      ],
+      "top1_hit": true,
+      "top3_hit": true,
+      "chars": 4751,
+      "full_specs": 3,
+      "ms": 24.0
+    },
+    {
+      "lang": "en",
+      "query": "run a shell command",
+      "expected": [
+        "run_command"
+      ],
+      "top3": [
+        "run_command",
+        "read_file",
+        "write_file"
+      ],
+      "top1_hit": true,
+      "top3_hit": true,
+      "chars": 5004,
+      "full_specs": 3,
+      "ms": 20.8
+    },
+    {
+      "lang": "en",
+      "query": "read a note in the vault",
+      "expected": [
+        "read_memory"
+      ],
+      "top3": [
+        "read_memory",
+        "read_file",
+        "read_mail"
+      ],
+      "top1_hit": true,
+      "top3_hit": true,
+      "chars": 4747,
+      "full_specs": 3,
+      "ms": 25.8
+    },
+    {
+      "lang": "en",
+      "query": "install an mcp server",
+      "expected": [
+        "propose_install"
+      ],
+      "top3": [
+        "propose_install",
+        "mcp__fake-notion__config",
+        "mcp__fake-notion__workspace"
+      ],
+      "top1_hit": true,
+      "top3_hit": true,
+      "chars": 5932,
+      "full_specs": 3,
+      "ms": 20.5
+    },
+    {
+      "lang": "en",
+      "query": "add a daily schedule",
+      "expected": [
+        "add_schedule"
+      ],
+      "top3": [
+        "add_event",
+        "add_schedule",
+        "list_schedules"
+      ],
+      "top1_hit": false,
+      "top3_hit": true,
+      "chars": 4957,
+      "full_specs": 3,
+      "ms": 19.7
+    },
+    {
+      "lang": "en",
+      "query": "upload a file to notion",
+      "expected": [
+        "mcp__fake-notion__file_uploads"
+      ],
+      "top3": [
+        "mcp__fake-notion__file_uploads",
+        "mcp__fake-notion__content_convert",
+        "mcp__fake-notion__config"
+      ],
+      "top1_hit": true,
+      "top3_hit": true,
+      "chars": 5945,
+      "full_specs": 3,
+      "ms": 18.0
+    },
+    {
+      "lang": "en",
+      "query": "mark a reminder as done",
+      "expected": [
+        "complete_reminder"
+      ],
+      "top3": [
+        "complete_reminder",
+        "delete_reminder",
+        "add_reminder"
+      ],
+      "top1_hit": true,
+      "top3_hit": true,
+      "chars": 4754,
+      "full_specs": 3,
+      "ms": 17.5
+    },
+    {
+      "lang": "en",
+      "query": "add a comment to a notion page",
+      "expected": [
+        "mcp__fake-notion__comments"
+      ],
+      "top3": [
+        "mcp__fake-notion__comments",
+        "mcp__fake-notion__blocks",
+        "mcp__fake-notion__file_uploads"
+      ],
+      "top1_hit": true,
+      "top3_hit": true,
+      "chars": 5878,
+      "full_specs": 3,
+      "ms": 22.0
+    },
+    {
+      "lang": "ko",
+      "query": "노션 페이지 보관",
+      "expected": [
+        "mcp__fake-notion__pages"
+      ],
+      "top3": [
+        "mcp__fake-notion__content_convert",
+        "search_memory",
+        "mcp__fake-notion__pages"
+      ],
+      "top1_hit": false,
+      "top3_hit": true,
+      "chars": 5846,
+      "full_specs": 3,
+      "ms": 17.7
+    },
+    {
+      "lang": "ko",
+      "query": "내일 일정 추가",
+      "expected": [
+        "add_event"
+      ],
+      "top3": [
+        "list_schedules",
+        "add_reminder",
+        "add_event"
+      ],
+      "top1_hit": false,
+      "top3_hit": true,
+      "chars": 4840,
+      "full_specs": 3,
+      "ms": 51.8
+    },
+    {
+      "lang": "ko",
+      "query": "메일 검색",
+      "expected": [
+        "search_mail"
+      ],
+      "top3": [
+        "search_mail",
+        "read_mail",
+        "list_mail"
+      ],
+      "top1_hit": true,
+      "top3_hit": true,
+      "chars": 4774,
+      "full_specs": 3,
+      "ms": 18.6
+    },
+    {
+      "lang": "ko",
+      "query": "셸 명령 실행",
+      "expected": [
+        "run_command"
+      ],
+      "top3": [
+        "run_command",
+        "read_file",
+        "read_memory"
+      ],
+      "top1_hit": true,
+      "top3_hit": true,
+      "chars": 4876,
+      "full_specs": 3,
+      "ms": 15.8
+    },
+    {
+      "lang": "ko",
+      "query": "메모리에서 기억 찾기",
+      "expected": [
+        "search_memory"
+      ],
+      "top3": [
+        "search_memory",
+        "edit_memory",
+        "read_memory"
+      ],
+      "top1_hit": true,
+      "top3_hit": true,
+      "chars": 5600,
+      "full_specs": 3,
+      "ms": 15.7
+    },
+    {
+      "lang": "ko",
+      "query": "미리 알림 목록 보기",
+      "expected": [
+        "list_reminders"
+      ],
+      "top3": [
+        "list_schedules",
+        "list_reminders",
+        "add_reminder"
+      ],
+      "top1_hit": false,
+      "top3_hit": true,
+      "chars": 4584,
+      "full_specs": 3,
+      "ms": 16.1
+    },
+    {
+      "lang": "ko",
+      "query": "노션 데이터베이스 조회",
+      "expected": [
+        "mcp__fake-notion__databases"
+      ],
+      "top3": [
+        "mcp__fake-notion__content_convert",
+        "search_memory",
+        "mcp__fake-notion__config__open_relay"
+      ],
+      "top1_hit": false,
+      "top3_hit": false,
+      "chars": 5483,
+      "full_specs": 3,
+      "ms": 15.8
+    },
+    {
+      "lang": "ko",
+      "query": "파일 쓰기",
+      "expected": [
+        "write_file"
+      ],
+      "top3": [
+        "write_file",
+        "read_file",
+        "read_memory"
+      ],
+      "top1_hit": true,
+      "top3_hit": true,
+      "chars": 4878,
+      "full_specs": 3,
+      "ms": 15.9
+    },
+    {
+      "lang": "ko",
+      "query": "매일 아침 알림 예약",
+      "expected": [
+        "add_reminder",
+        "add_schedule"
+      ],
+      "top3": [
+        "add_reminder",
+        "complete_reminder",
+        "list_schedules"
+      ],
+      "top1_hit": true,
+      "top3_hit": true,
+      "chars": 4669,
+      "full_specs": 3,
+      "ms": 15.9
+    },
+    {
+      "lang": "ko",
+      "query": "노션에 댓글 달기",
+      "expected": [
+        "mcp__fake-notion__comments"
+      ],
+      "top3": [
+        "mcp__fake-notion__comments",
+        "mcp__fake-notion__content_convert",
+        "mcp__fake-notion__file_uploads"
+      ],
+      "top1_hit": true,
+      "top3_hit": true,
+      "chars": 5918,
+      "full_specs": 3,
+      "ms": 14.7
+    }
+  ]
+}

@@ -158,8 +158,8 @@ class SourceInvariants(unittest.TestCase):
 
     def test_single_assembler(self):
         """V3/V12: one place builds a Request (assemble.py), one place sends one (clone.py, through the
-        router), and only the router imports an adapter - memory's `openai_compat.embed` is the named
-        exemption. By AST: `urllib.request.Request` is not ours, a `Request` imported under another name
+        router), and only the router imports an adapter - memory's and search's `openai_compat.embed` is the
+        named exemption. By AST: `urllib.request.Request` is not ours, a `Request` imported under another name
         is followed, and a `dataclasses.replace` counts as a build wherever it is (the AST cannot see that
         its argument is a Request). Known limit: a router held in a variable (`r = x.router;
         r.complete(...)`) is not detected."""
@@ -178,20 +178,21 @@ class SourceInvariants(unittest.TestCase):
                         where["send"].add(name)
                 if isinstance(node, ast.Attribute) and node.attr in ("anthropic", "openai_compat") \
                         and ast.unparse(node.value).split(".")[-1] == "llm":
-                    self.assertIn(name, ("router.py", "memory.py"), f"{name}:{node.lineno} reaches an adapter")
+                    self.assertIn(name, ("router.py", "memory.py", "search.py"), f"{name}:{node.lineno} reaches an adapter")
         self.assertEqual(where, {"build": {"assemble.py"}, "send": {"clone.py"}})
         adapters = {"pathfinder.llm.anthropic": {"pathfinder.router"},
-                    "pathfinder.llm.openai_compat": {"pathfinder.router", "pathfinder.memory"}}
+                    "pathfinder.llm.openai_compat": {"pathfinder.router", "pathfinder.memory", "pathfinder.search"}}
         for mod, found in package_imports().items():
             for imported, name, _ in found:
                 if imported in adapters:
                     self.assertIn(mod, adapters[imported], f"{mod} imports the adapter {imported}")
-                    if mod == "pathfinder.memory":
-                        self.assertIn(name, (None, "embed"), f"memory imports {name} from openai_compat")
-        memory = ast.parse(sources()["memory.py"])
-        self.assertEqual({n.attr for n in ast.walk(memory)
-                          if isinstance(n, ast.Attribute) and ast.unparse(n.value).split(".")[-1] == "openai_compat"},
-                         {"embed"})
+                    if mod in ("pathfinder.memory", "pathfinder.search"):
+                        self.assertIn(name, (None, "embed"), f"{mod} imports {name} from openai_compat")
+        for name in ("memory.py", "search.py"):
+            tree = ast.parse(sources()[name])
+            self.assertEqual({n.attr for n in ast.walk(tree)
+                              if isinstance(n, ast.Attribute) and ast.unparse(n.value).split(".")[-1] == "openai_compat"},
+                             {"embed"}, name)
 
     def test_coupling_ceilings(self):
         """V14 (blueprint §6): at most 8 package imports and 8 importers (value-only modules exempt from the

@@ -1,7 +1,7 @@
 """The registry reader (D14): no reference-server process, `catalog` reads the official MCP
 registry directly and shapes what it finds into the connection spec v0 (docs/spec/connection-v0.md)
 `candidate` a proposal, and later the installer, read and write. `REGISTRY` is the only place in
-this codebase a registry URL is written - everything else (the sense, `search_tools`) points at
+this codebase a registry URL is written - everything else (the sense, `search_registry`) points at
 this constant, never a copy of the string."""
 from __future__ import annotations
 

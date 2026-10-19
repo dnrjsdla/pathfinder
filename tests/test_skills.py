@@ -95,14 +95,14 @@ class SkillsTest(unittest.TestCase):
 
     def test_write_file_cannot_write_a_skill(self):
         spec = tools_mod.TOOLS["write_file"]
-        for origin, grants in (("user", {"write_file": "allow"}), ("signal", {}), ("job", {})):
+        for origin, grants in (("user", {"write_file": "allow"}), ("signal", {})):  # job: refused at the door (U5)
             for path in (self.home / "skills" / "x.md", self.home / "skills" / "new" / ".." / "y.md"):
                 args = {"path": str(path), "content": _skill("x", "Use for x.")}
-                broker = Broker({"write_file": spec}, origin, grants, control=None)
+                broker = Broker({"write_file": spec}, origin, {"grants": grants}, session_grants=set, control=None)
                 if origin != "user":
                     with self.assertRaises(Gate) as cm:  # policy asks first; the owner says yes
                         broker.call("c1", "write_file", args)
-                    broker = Broker({"write_file": spec}, origin, grants, control=None,
+                    broker = Broker({"write_file": spec}, origin, {"grants": grants}, session_grants=set, control=None,
                                     approved={"c1": ("write_file", cm.exception.arguments)})
                 out = broker.call("c1", "write_file", args)
                 self.assertFalse(out["ok"], (origin, path))
@@ -113,8 +113,8 @@ class SkillsTest(unittest.TestCase):
         link = self.home / "workspace" / "l.md"  # what a user-turn shell can do in the workspace
         link.parent.mkdir()
         link.symlink_to(self.home / "skills" / "a.md")
-        out = Broker({"write_file": spec}, "user", {"write_file": "allow"}, control=None
-                     ).call("c3", "write_file", {"path": str(link), "content": "overwritten"})
+        out = Broker({"write_file": spec}, "user", {"grants": {"write_file": "allow"}}, session_grants=set,
+                     control=None).call("c3", "write_file", {"path": str(link), "content": "overwritten"})
         self.assertIn("a skill is written only by the owner", out["error"])
         for path in (link, self.home / "skills" / "new" / ".." / "b.md"):  # the handler resolves too, no gate in front
             with self.assertRaises(ValueError):
@@ -122,11 +122,11 @@ class SkillsTest(unittest.TestCase):
         self.assertFalse((self.home / "skills" / "new").exists())  # a refused write makes no directory
         self.assertEqual((self.home / "skills" / "a.md").read_text(encoding="utf-8"), seed)
         with self.assertRaises(Gate) as cm:  # no grant: the approval line names the target, not the link
-            Broker({"write_file": spec}, "user", {}, control=None
+            Broker({"write_file": spec}, "user", {}, session_grants=set, control=None
                    ).call("c4", "write_file", {"path": str(link), "content": "overwritten"})
         self.assertEqual(cm.exception.arguments["path"], str((self.home / "skills" / "a.md").resolve()))
-        out = Broker({"write_file": spec}, "user", {"write_file": "allow"}, control=None
-                     ).call("c2", "write_file", {"path": str(self.home / "notes.md"), "content": "ok"})
+        out = Broker({"write_file": spec}, "user", {"grants": {"write_file": "allow"}}, session_grants=set,
+                     control=None).call("c2", "write_file", {"path": str(self.home / "notes.md"), "content": "ok"})
         self.assertTrue(out["ok"])  # anywhere else it writes as before
 
     def test_a_skill_with_a_token_is_not_loaded(self):
@@ -158,7 +158,7 @@ class SkillsTest(unittest.TestCase):
         spec = tools_mod.TOOLS["read_skill"]
         self.assertEqual(spec.origins, {"user", "job"})
         for origin in ("signal", "memory"):  # D76: refused at the door, not left out of the list
-            self.assertEqual(Broker(tools_mod.TOOLS, origin, {}, control=None).call("c1", "read_skill", {})["error"],
+            self.assertEqual(Broker(tools_mod.TOOLS, origin, {}, session_grants=set, control=None).call("c1", "read_skill", {})["error"],
                              f"read_skill is not available in a {origin} turn")
         self.assertFalse(spec.write or spec.network or spec.sandboxed)  # read-only, no gate
         self.write("a", _skill("a", "Use for a."))

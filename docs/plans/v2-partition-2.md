@@ -225,7 +225,7 @@ tool|server|session] [--grade G]`):
 | `--always tool` / `server` | also `config.set("grants", {..., <tool> or mcp__<server>__*: "allow"})` |
 | `--always session` | `resume {scope: session}` only; `state.session_grants` derives it; the broker reads it per call |
 | any `--always` | refused (one line, nothing recorded, the gate stays open) for a destructive, external_send or unknown gate; `server` also for a native tool |
-| `--grade G` (unknown gates only) | `resume {grade: G}`, then the map entry is written: `tools.<server>.<tool>.effect_by.<arg>.<value> = G`, or `.effect = G` when the tool had no map and no annotations, through `config.set("tools", …)`; the call runs once. Refused when the miss was an absent argument (`unknown.value` missing: nothing to key on) — a plain approve still runs it |
+| `--grade G` (unknown gates only) | `resume {grade: G}`, then the map entry is written: `tools.<server>.<tool>.effect_by.<arg>.<value> = G`, or `.effect = G` when the tool had no map and no annotations, through `config.set("tools", …)`; the call runs once. When the miss has no string value to key on (the argument was absent, or its value is not a string), nothing is written to the map: `resume {grade}` is recorded and the call runs once (lead decision, U5) |
 
 **The draft** (`mcp_tools.draft(definition)`; `draft_server` maps it over a server's tools; Q3 (b)): a tool with
 `readOnlyHint: true` → `{"effect": "read"}`; else the first string-enum parameter whose values match the verb table →

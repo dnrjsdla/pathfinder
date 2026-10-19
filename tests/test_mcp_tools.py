@@ -222,11 +222,11 @@ class FlattenTest(unittest.TestCase):
     def test_mcp_is_error_is_a_failed_call(self):
         """U22: a 401 the server reports as `isError` reaches the broker as an exception, so the
         model gets `ok: false`."""
-        entry = _entry()
+        entry = _entry(annotations={"destructiveHint": False})  # a write, which the grant lets run
         name = entry.qualified_name
         spec = _spec_for(entry, results={name: {"content": [{"type": "text", "text": "401 unauthorized"}],
                                                 "isError": True}})
-        broker = Broker({name: spec}, "user", {name: "allow"}, control=None)
+        broker = Broker({name: spec}, "user", {"grants": {name: "allow"}}, session_grants=set, control=None)
         self.assertEqual(broker.call("c1", name, {}), {"ok": False, "error": "401 unauthorized"})
 
 

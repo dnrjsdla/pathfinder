@@ -7,7 +7,7 @@ import uuid
 from pathlib import Path
 from unittest import mock
 
-from pathfinder import assemble, clone as clone_mod, policy, results, router as router_mod, tools
+from pathfinder import assemble, clone as clone_mod, config, policy, results, router as router_mod, tools
 from pathfinder.clone import BUDGET_NOTE, NOT_RUN, NOT_RUN_INTERRUPTED, REFUSED_LINE, SKIPPED, USER_UNKNOWN, Clone, Item
 from pathfinder.ledger import Ledger
 from pathfinder.llm import Endpoint, LLMError, Response, anthropic, openai_compat
@@ -15,6 +15,7 @@ from pathfinder.state import State
 from pathfinder.tools import ToolSpec
 
 REF = "anthropic:fake-model"
+NOTION = "mcp__notion__pages"
 THINK = {"type": "thinking", "thinking": "plan", "signature": "sig-fake"}
 PAGES = {"results": [{"id": str(uuid.UUID(int=i + 1, version=4)), "title": f"Title {i}"} for i in range(5)]}
 USAGE = {"input_tokens": 10, "output_tokens": 5, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}
@@ -24,6 +25,10 @@ ENDPOINTS = (Endpoint("http://127.0.0.1:9", "k-fake", "fake-model", api="anthrop
 
 def call(call_id, name, **args):
     return {"type": "tool_use", "id": call_id, "name": name, "input": args}
+
+
+def proxy(call_id, tool, arguments):
+    return {"type": "tool_use", "id": call_id, "name": "call_tool", "input": {"name": tool, "arguments": arguments}}
 
 
 def text(t):
@@ -121,6 +126,19 @@ class CloneTest(unittest.IsolatedAsyncioTestCase):
     def body(self, call_id):
         [event] = [e for e in self.events("result") if e["call_id"] == call_id]
         return event["body"]
+
+    def notion(self):
+        """A fake MCP tool behind call_tool, with the owner's map for two of its actions; `self.ran` logs its runs."""
+        self.ran = []
+
+        def pages(action="", page_id="", control=None):
+            self.ran.append((action, page_id))
+            return PAGES if action == "search" else {"done": page_id}
+
+        string = {"type": "string"}
+        tools.TOOLS[NOTION] = ToolSpec(NOTION, "Pages.", {"action": string, "page_id": string}, [], pages)
+        tools.TOOLS["mcp__notion__blocks"] = ToolSpec("mcp__notion__blocks", "Blocks.", {}, [], lambda control=None: 1)
+        self.config(tools={"notion": {"pages": {"effect_by": {"action": {"search": "read", "archive": "write"}}}}})
 
     async def gated_turn(self, *first):
         """One turn whose write_file call is handed off at a gate; returns (clone, gate event)."""
@@ -263,7 +281,8 @@ class CloneTest(unittest.IsolatedAsyncioTestCase):
         status = self.router.requests[1].messages[-2]["content"]
         self.assertEqual(status, [{"type": "tool_result", "tool_use_id": "c1",
                                    "content": f'{{"status":"waiting for approval","gate":{n}}}'}])
-        self.assertIn({"type": "gate", "id": n, "tool": "write_file", "args": gate["args"]}, self.sent)
+        self.assertIn({"type": "gate", "id": n, "tool": "write_file", "args": gate["args"], "effect": "write",
+                       "title": ""}, self.sent)
         self.assertEqual(c.state, "parked")
         self.assertFalse(c.decide(n, "approve", "socket"))  # not a decision: nothing recorded
         self.assertEqual(self.events("resume"), [])
@@ -446,15 +465,146 @@ class CloneTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_batch_stop(self):
         c = self.clone(resp(call("a", "fail"), call("b", "fail"), call("c", "read_file", path="/x")),
-                       resp(call("d", "fail")), resp(call("e", "read_file", path="/x")),
+                       resp(call("d", "fail")), resp(call("e", "fail")), resp(call("h", "read_file", path="/x")),
                        resp(call("f", "write_file", path="/a", content="1"), call("g", "read_file", path="/x")),
                        resp(text("ok")))
-        self.assertEqual(await c.run(Item("user", "Try.", "s1")), "error")
-        self.assertEqual([self.body(x) for x in "abcde"], ["boom", "boom", SKIPPED, "boom", NOT_RUN["error"]])
+        self.assertEqual(await c.run(Item("user", "Try.", "s1")), "error")  # three runs failed: a, d, e
+        self.assertEqual([self.body(x) for x in "abcdeh"], ["boom", SKIPPED, SKIPPED, "boom", "boom", NOT_RUN["error"]])
         self.assertIn(clone_mod.FAILED_NOTE.format(tool="fail"), [e["text"] for e in self.events("user")])
         self.config(grants={"write_file": "deny"})
         self.assertEqual(await c.run(Item("user", "Write.", "s1")), "answer")
         self.assertEqual((self.body("f"), self.body("g")), (policy.DENIED_TEXT, SKIPPED))
+
+    async def test_batch_stops_at_refusal(self):
+        """Q7 (a): a refusal or an error at call 2 skips calls 3-4 unrun; a gate at call 2 does not stop the batch
+        (a later read runs, a later write gates too); the turn's third unknown-name refusal stops tool use."""
+        for k, second in enumerate(("nope", "fail")):
+            c = self.clone(resp(call(f"a{k}", "read_file", path="/0"), call(f"b{k}", second),
+                                call(f"c{k}", "write_file", path="/w", content="w"),
+                                call(f"d{k}", "read_file", path="/1")), resp(text("ok")))
+            self.assertEqual(await c.run(Item("user", "Go.", "s1")), "answer")
+            self.assertEqual([self.body(f"{x}{k}") for x in "cd"], [SKIPPED, SKIPPED])
+        self.assertEqual(self.written, [])
+        c = self.clone(resp(call("g1", "read_file", path="/0"), call("g2", "write_file", path="/a", content="1"),
+                            call("x", "read_file", path="/1"), call("y", "write_file", path="/2", content="2"),
+                            call("z", "read_file", path="/3")), resp(text("ok")))
+        self.assertEqual(await c.run(Item("user", "Go.", "s1")), "answer")
+        self.assertEqual([g["call_id"] for g in self.events("gate")], ["g2", "y"])
+        self.assertEqual([self.body(x) for x in ("g1", "x", "z")], [PAGES] * 3)
+        c = self.clone(resp(call("f1", "fail"), call("f2", "fail"), call("f3", "fail")),
+                       resp(call("n1", "no_a"), call("n2", "no_b"), call("n3", "no_c")), resp(text("ok")))
+        self.assertEqual(await c.run(Item("user", "Try all.", "s1")), "answer")  # skipped calls never count as failures
+        self.assertEqual([self.body(x) for x in ("f2", "f3", "n2", "n3")], [SKIPPED] * 4)
+        self.assertEqual([e["text"] for e in self.events("user") if e["text"].startswith("[harness]")], [])
+        c = self.clone(*[resp(call(f"u{i}", f"no_such_{i}")) for i in range(3)], resp(text("I could not.")))
+        self.assertEqual(await c.run(Item("user", "Guess.", "s1")), "error")
+        self.assertIn(clone_mod.FAILED_NOTE.format(tool="calling a tool name that does not exist"),
+                      [e["text"] for e in self.events("user")])
+
+    async def test_gate_carries_title_and_effect(self):
+        """Q1: a call_tool archive after a search result holding the page's id gates with `effect: write` and the
+        page's title; the result and the gate name the real tool, which is never in the list; an id no result
+        holds gives `title: ""`."""
+        self.notion()
+        page = PAGES["results"][1]["id"]
+        c = self.clone(resp(proxy("c1", NOTION, {"action": "search"})),
+                       resp(proxy("c2", NOTION, {"action": "archive", "page_id": page}),
+                            proxy("c3", NOTION, {"action": "archive", "page_id": "ab" * 8})),
+                       resp(text("Asked.")))
+        self.assertEqual(await c.run(Item("user", "Archive  Title 1\nplease.", "s1")), "answer")
+        [found] = self.events("result")
+        self.assertEqual((found["tool"], found["ok"]), (NOTION, True))
+        one, two = self.events("gate")
+        self.assertEqual({k: one[k] for k in ("tool", "effect", "title", "brief")},
+                         {"tool": NOTION, "effect": "write", "title": "page_id: Title 1", "brief": "Archive Title 1 please."})
+        self.assertEqual((two["title"], "unknown" in two, "recipient" in two), ("", False, False))
+        names = [t["name"] for t in self.router.requests[0].tools]
+        self.assertIn("call_tool", names)
+        self.assertNotIn(NOTION, names)
+
+    async def test_unknown_answer_written_to_map(self):
+        """Q3: `--grade` on an unknown gate writes the map entry, records `resume {grade}`, runs the call once, and
+        the next call with that value runs without a gate. An absent map argument has no value to key on: the
+        grade stays on `resume` only. A tool with no map gets `effect`. No "always" scope on an unknown gate."""
+        self.notion()
+        c = self.clone(resp(proxy("c1", NOTION, {"action": "export", "page_id": "p"})),
+                       resp(text("Asked.")))
+        await c.run(Item("user", "Export p.", "s1"))
+        [gate] = self.events("gate")
+        self.assertEqual((gate["effect"], gate["unknown"]), ("unknown", {"arg": "action", "value": "export"}))
+        n = gate["seq"]
+        for scope, grade in (("tool", ""), ("session", ""), ("", "harmless")):
+            self.assertFalse(c.decide(n, "approved", "socket", scope=scope, grade=grade))
+        self.assertFalse(c.decide(n, "denied", "socket", grade="read"))
+        self.assertEqual(self.events("resume", "config_set"), [])
+        self.assertTrue(c.decide(n, "approved", "socket", grade="read"))
+        await self.until(lambda: self.queue)
+        self.assertEqual(config.load(self.home)["tools"]["notion"]["pages"]["effect_by"]["action"],
+                         {"search": "read", "archive": "write", "export": "read"})
+        self.assertEqual(([e["key"] for e in self.events("config_set")], self.events("resume")[0]["grade"]),
+                         (["tools"], "read"))
+        self.assertEqual(self.ran, [("export", "p")])
+        self.router.script += [resp(proxy("c2", NOTION, {"action": "export", "page_id": "q"}),
+                                    proxy("c3", NOTION, {"page_id": "r"}),
+                                    proxy("c4", "mcp__notion__blocks", {})),
+                               resp(text("Asked."))]
+        await c.run(Item("user", "Export q, r.", "s1"))
+        self.assertEqual(self.ran, [("export", "p"), ("export", "q")])
+        absent, blocks = self.events("gate")[1:]
+        self.assertEqual((absent["unknown"], "unknown" in blocks), ({"arg": "action"}, False))
+        before = config.load(self.home)["tools"]
+        self.assertTrue(c.decide(absent["seq"], "approved", "socket", grade="write"))
+        await self.until(lambda: len(self.ran) == 3)
+        self.assertEqual((config.load(self.home)["tools"], self.events("resume")[-1]["grade"]), (before, "write"))
+        self.assertTrue(c.decide(blocks["seq"], "approved", "socket", grade="read"))
+        self.assertEqual(config.load(self.home)["tools"]["notion"]["blocks"], {"effect": "read"})
+        await self.until(lambda: self.events("result")[-1]["tool"] == "mcp__notion__blocks")
+
+    async def test_always_scopes(self):
+        """Q5: `session` is recorded and lifts the tool's next write in that session (read per call); `tool` grants
+        it in config; `server` is refused for a native tool; no scope on a denial."""
+        c, gate = await self.gated_turn()
+        n = gate["seq"]
+        for scope, decision in (("server", "approved"), ("tool", "denied"), ("forever", "approved")):
+            self.assertFalse(c.decide(n, decision, "socket", scope=scope))
+        self.assertTrue(c.decide(n, "approved", "socket", scope="session"))
+        await self.until(lambda: self.queue)
+        self.assertEqual((self.events("resume")[0]["scope"], self.state.session_grants("s1")), ("session", {"write_file"}))
+        self.router.script += [resp(call("c2", "write_file", path="/tmp/q", content="q")), resp(text("Done."))]
+        await c.run(Item("user", "Again.", "s1"))
+        self.assertEqual((len(self.events("gate")), self.written[-1]), (1, ("/tmp/q", "q")))
+        self.router.script += [resp(call("c3", "write_file", path="/tmp/t", content="t")), resp(text("Asked."))]
+        await c.run(Item("user", "Elsewhere.", "s2"))
+        other = self.events("gate")[-1]["seq"]
+        self.assertTrue(c.decide(other, "approved", "socket", scope="tool"))
+        self.assertEqual(config.load(self.home)["grants"], {"write_file": "allow"})
+        await self.until(lambda: self.written[-1] == ("/tmp/t", "t"))
+        tools.TOOLS["wipe"] = ToolSpec("wipe", "Wipe.", {}, [], lambda control=None: 1, effect="destructive")
+        tools.TOOLS["post"] = ToolSpec("post", "Post.", {"channel": {"type": "string"}}, [],
+                                       lambda channel, control=None: 1, effect="external_send")
+        self.router.script += [resp(call("c4", "wipe"), call("c5", "post", channel="team\nroom")), resp(text("Asked."))]
+        await c.run(Item("user", "Wipe and post.", "s3"))
+        wipe, post = self.events("gate")[-2:]
+        self.assertEqual((wipe["effect"], post["effect"], post["recipient"]), ("destructive", "external_send", "team room"))
+        decided = len(self.events("resume", "config_set"))
+        for gate in (wipe, post):
+            for scope in ("tool", "session"):
+                self.assertFalse(c.decide(gate["seq"], "approved", "socket", scope=scope))
+        self.assertEqual(len(self.events("resume", "config_set")), decided)
+
+    async def test_tool_list_change_advances_epoch(self):
+        """Q8 (a): with no change the next request replays the earlier thinking byte for byte; a tool list change
+        between turns (a skill write rewrites read_skill's description) strips the thinking from before it."""
+        c = self.clone(resp(THINK, text("One.")), resp(THINK, text("Two.")), resp(text("Three.")))
+        await c.run(Item("user", "First.", "s1"))
+        await c.run(Item("user", "Second.", "s1"))
+        def thinking(req):
+            return [b for m in req.messages if m["role"] == "assistant" for b in m["content"] if b["type"] == "thinking"]
+
+        self.assertEqual(thinking(self.router.requests[1]), [THINK])
+        tools.TOOLS["read_skill"] = ToolSpec("read_skill", "Skills: a, b.", {}, [], lambda control=None: "")
+        await c.run(Item("user", "Third.", "s1"))
+        self.assertEqual(thinking(self.router.requests[2]), [])
 
     async def test_fold_trigger(self):
         blocked = LLMError(402, "out of credit")

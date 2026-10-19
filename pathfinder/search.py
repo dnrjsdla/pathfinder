@@ -113,8 +113,9 @@ def find(query: str, home: Path) -> str:
         ranked = _rank(query, specs, config.load(home))
     except LLMError as e:
         return _render(f"Tool search is unavailable ({tools_mod.oneline(e.message, 200)}). Every tool, by name - "
-                       "search_tools with an exact name returns its schema:", specs, 0)
-    return _render("Tools nearest to the query, best first. Call one with call_tool {name, arguments}:",
+                       "before calling one through call_tool, search_tools its exact name for its schema:", specs, 0)
+    return _render("Tools nearest to the query, best first. Call one with call_tool {name, arguments}; a one-line "
+                   "entry has no schema here - search_tools its exact name for it first:",
                    ranked, FULL)
 
 

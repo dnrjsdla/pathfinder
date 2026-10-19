@@ -868,13 +868,17 @@ class RootTurnTest(DaemonHarness):
             c.close()
             return seen
 
+        # P2: echo says readOnlyHint (drafted read, never gated); the owner's map grades it write, so a grant matters
+        config.set(self.home, "tools", {"fake": {"echo": {"effect": "write"}}})
         config.set(self.home, "grants", {"mcp__fake__echo": "allow"})
-        seen = self.run_with(fake_model("done", [call("c1", "mcp__fake__echo", text="hi")]), scenario)
+        echo = call("c1", "call_tool", arguments={"text": "hi"})
+        echo["input"]["name"] = "mcp__fake__echo"  # call_tool into a real stdio server (Q4 (b))
+        seen = self.run_with(fake_model("done", [echo]), scenario)
         self.assertEqual(seen[-1]["kind"], "answer")
         self.assertTrue(any(e["tool"] == "mcp__fake__echo" and e["ok"] and "hi" in json.dumps(e["body"])
                             for e in self.events() if e["type"] == "result"))
         config.set(self.home, "grants", {})
-        seen = self.run_with(fake_model("asked", [call("c1", "mcp__fake__echo", text="hi")]), scenario)
+        seen = self.run_with(fake_model("asked", [echo]), scenario)
         self.assertEqual([m["tool"] for m in seen if m["type"] == "gate"], ["mcp__fake__echo"])
 
 
@@ -1559,7 +1563,7 @@ class InstallerDaemonTest(DaemonHarness):
         registry = self.run_with(fake_model("ok"), scenario)
         self.assertIn("propose_install", registry)
         for name in ("propose_install", "search_registry"):  # D76: in the one list, refused at the door
-            self.assertEqual(Broker(registry, "signal", {}, control=None).call("c1", name, {})["error"],
+            self.assertEqual(Broker(registry, "signal", {}, session_grants=set, control=None).call("c1", name, {})["error"],
                              f"{name} is not available in a signal turn")
 
 

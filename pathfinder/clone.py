@@ -6,13 +6,15 @@ from the turn's recorded `assistant` events, so nothing the budget needs lives o
 window may fold (V5). `restore` closes what a dead daemon left open (V12)."""
 import asyncio
 import collections
+import hashlib
+import json
 import threading
 import uuid
 from dataclasses import dataclass
 from types import SimpleNamespace
 
 from . import assemble, config, results, tools
-from .broker import Broker, Gate
+from .broker import Broker, Gate, unwrap
 from .llm import LLMError
 
 TOKEN_BUDGET = 100_000  # per item: input + cache_creation + output tokens (cache reads excluded)
@@ -23,11 +25,15 @@ FAILED_NOTE = ("[harness] {tool} failed 3 times in a row. Do not call tools now:
                "what you would try next.")
 NOT_RUN = {"budget": "not run: budget spent", "error": "not run: stopped after repeated failures",
            "max_tokens": "not run: the answer was cut at the output limit"}
-SKIPPED = "not run: skipped after a denial or a second error in this batch"
+SKIPPED = "not run: skipped after a refusal or an error in this batch"
 USER_UNKNOWN = "outcome unknown: interrupted by the user while it ran"
 NOT_RUN_INTERRUPTED = "not run: interrupted"
 REFUSED_LINE = "the model declined; this exchange is left out of the conversation"
 USAGE_SPENT = ("input_tokens", "cache_creation_input_tokens", "output_tokens")
+UNKNOWN = "?unknown"  # every call of a name the registry lacks counts as this one tool: the third stops tool use (Q7)
+RECIPIENT = ("to", "recipient", "recipients", "cc", "email", "channel")  # a send's gate names the first present
+FLOOR = ("destructive", "external_send", "unknown")  # gates no "always" scope may cover (§8)
+SCOPES = ("", "tool", "server", "session")
 
 
 @dataclass(frozen=True)
@@ -61,11 +67,13 @@ def _failed(e: LLMError) -> list[dict]:
 
 
 def _failing(rows) -> str:
-    """The tool whose last FAILS_TO_STOP results in this turn all failed, or ""."""
+    """The tool whose last FAILS_TO_STOP results in this turn all failed, or "" - UNKNOWN for names the
+    registry lacks (read_result and call_tool are the clone's own). A skipped call never ran: not counted."""
     oks = collections.defaultdict(list)
     for row in rows:
-        if row["type"] == "result":
-            oks[row["tool"]].append(row["ok"])
+        if row["type"] == "result" and not row.get("skipped"):
+            known = row["tool"] in tools.TOOLS or row["tool"] in (results.READ_RESULT["name"], tools.CALL_TOOL["name"])
+            oks[row["tool"] if known else UNKNOWN].append(row["ok"])
     return next((t for t, seen in oks.items() if len(seen) >= FAILS_TO_STOP and not any(seen[-FAILS_TO_STOP:])), "")
 
 
@@ -83,6 +91,7 @@ class Clone:
         self._events = set()      # interrupt Events of the running turn's tools and of approved calls
         self._steers = []         # (session, text) of says that arrived during a turn, recorded at a step boundary
         self._calls = set()       # tasks of approved calls (asyncio keeps only weak references)
+        self._lists = {}          # session -> (hash of the tool list last sent, its thinking epoch) (Q8)
 
     @property
     def state(self) -> str:
@@ -114,7 +123,15 @@ class Clone:
 
     def _view(self, session) -> assemble.View:
         fold = self.db.last_fold(self.id, session)
-        return assemble.View(self.id, self.role, session, max(self._start, fold["seq"] if fold else 0))
+        return assemble.View(self.id, self.role, session,
+                             max(self._start, fold["seq"] if fold else 0, self._lists.get(session, ("", 0))[1]))
+
+    def _listed(self, session, specs) -> None:
+        """Q8 (a): a tool list unlike the one last sent in `session` moves its thinking epoch to the ledger's
+        last seq - a thinking signature is bound to the list it was made with (one cache rewrite)."""
+        digest = hashlib.sha256(json.dumps(specs).encode()).hexdigest()
+        sent, epoch = self._lists.get(session, (digest, 0))
+        self._lists[session] = (digest, epoch if sent == digest else self.db.cursor)
 
     def _rows(self, session, turn, after) -> list[dict]:
         return [r for r in self.db.context(self.id, session, after) if r["turn"] == turn]
@@ -174,10 +191,14 @@ class Clone:
         """`reported`: the results a report turn's opening message names, seen by the model even when the
         turn they were recorded under is out of the window (a refused turn)."""
         cfg = config.load(self.home)
-        registry = dict(tools.TOOLS)  # D76: one list for every origin; a copy: an install thread edits TOOLS
-        specs = [spec.schema()["function"] for spec in registry.values()]
-        broker = Broker(registry, item.origin, cfg["grants"],  # `session`: edit_memory's evidence
-                        control=SimpleNamespace(interrupt=event, session=item.session))
+        # D76, Q4 (b): one list for every origin, the natives and call_tool; an MCP tool is found with search_tools
+        # and called through call_tool, so an install never changes the list. A copy: an install thread edits
+        # TOOLS. Names resolve in the live registry: a tool search_tools lists mid-turn is callable.
+        specs = [s.schema()["function"] for s in dict(tools.TOOLS).values() if not s.name.startswith("mcp__")]
+        specs.append(tools.CALL_TOOL)
+        self._listed(item.session, specs)
+        broker = Broker(tools.TOOLS, item.origin, cfg, session_grants=lambda: self.db.session_grants(item.session),
+                        control=SimpleNamespace(interrupt=event, session=item.session))  # edit_memory's evidence
         end = ""  # set once the turn must end: the next step is its last, and its calls do not run
         while True:
             steps, tokens, _ = _spent(self._rows(item.session, ev["turn"], start))
@@ -234,7 +255,7 @@ class Clone:
             if resp.stop_reason == "max_tokens" or (end and calls):
                 why = "max_tokens" if resp.stop_reason == "max_tokens" else end
                 for call in calls:
-                    self._result(ev, step, call["id"], call["name"], False, NOT_RUN[why])
+                    self._result(ev, step, call["id"], unwrap(call["name"], call["input"])[0], False, NOT_RUN[why])
                 if why == "max_tokens":
                     self.send(item.session, {"type": "error", "message": NOT_RUN[why]})
                 return why
@@ -244,6 +265,7 @@ class Clone:
                 return self._interrupted(ev, step)
             if tool := _failing(self._rows(item.session, ev["turn"], start)):
                 end = "error"
+                tool = "calling a tool name that does not exist" if tool == UNKNOWN else tool
                 self.record("user", **{**ev, "origin": "system"}, text=FAILED_NOTE.format(tool=tool))
 
     def _interrupted(self, ev, step) -> str:
@@ -253,41 +275,55 @@ class Clone:
         return "interrupted"
 
     async def _batch(self, item, ev, step, calls, broker, reported) -> str:
-        """The step's calls in order. A deny or a second error in a row skips the rest; a gate hands its call off.
-        Returns "interrupted" when interrupt() stopped a running call (it and the later ones are recorded)."""
-        errors, skip = 0, False
+        """The step's calls in order (Q7 (a)), a `call_tool` unwrapped first (its `result` and gate name the real
+        tool). The first failed call - a refusal, a denial, an error - skips the rest; a gate hands its call off
+        and the batch goes on. Returns "interrupted" when interrupt() stopped a running call (it and the later
+        ones are recorded)."""
+        skip = False
         for i, call in enumerate(calls):
-            call_id, name = call["id"], call["name"]
+            call_id = call["id"]
+            name, args, refused = unwrap(call["name"], call["input"])
             if skip:
-                self._result(ev, step, call_id, name, False, SKIPPED)
+                self._result(ev, step, call_id, name, False, SKIPPED, skipped=True)
                 continue
-            denied = False
-            if name == results.READ_RESULT["name"]:
+            if refused:
+                ok, body = False, refused
+            elif name == results.READ_RESULT["name"]:
                 seen = assemble.window_handles(self.db, self._view(item.session)) | reported
-                ok, body = results.read(self.db, seen, call["input"])
+                ok, body = results.read(self.db, seen, args)
             else:
                 try:
-                    out = await asyncio.to_thread(broker.call, call_id, name, call["input"])
+                    out = await asyncio.to_thread(broker.call, call_id, name, args, name != call["name"])
                 except Gate as g:
-                    spec = broker.tools[g.name]
-                    gate = self.record("gate", **ev, step=step, call_id=g.id, tool=g.name, args=g.arguments,
-                                       effect="write" if spec.write else "external_send" if spec.network else "read",
-                                       brief=item.text)
-                    self.send(item.session, {"type": "gate", "id": gate["seq"], "tool": g.name, "args": gate["args"]})
+                    self._gate(item, ev, step, g, reported)
                     continue
                 except asyncio.CancelledError:
                     if not self._flag:
                         raise
                     self._result(ev, step, call_id, name, False, USER_UNKNOWN)
                     for later in calls[i + 1:]:
-                        self._result(ev, step, later["id"], later["name"], False, NOT_RUN_INTERRUPTED)
+                        self._result(ev, step, later["id"], unwrap(later["name"], later["input"])[0], False,
+                                     NOT_RUN_INTERRUPTED)
                     return "interrupted"
-                ok, denied = out["ok"], out.get("denied", False)
+                ok = out["ok"]
                 body = out["result"] if ok else out["error"]
             self._result(ev, step, call_id, name, ok, body)
-            errors = 0 if ok else errors + 1
-            skip = denied or errors >= 2
+            skip = not ok
         return ""
+
+    def _gate(self, item, ev, step, g, reported) -> None:
+        """Records a handed-off call's `gate` (Q1): its effect, the missed lookup, the title its ID arguments
+        have in the seen results, a send's recipient, the item's text on one line; and shows it."""
+        seen = assemble.window_handles(self.db, self._view(item.session)) | reported
+        title = results.title(self.db, seen, g.arguments)
+        extra = {"unknown": g.unknown} if g.unknown else {}
+        to = next((g.arguments[k] for k in RECIPIENT if k in g.arguments), None)
+        if g.effect == "external_send" and to is not None:
+            extra["recipient"] = tools.oneline(", ".join(map(str, to)) if isinstance(to, list) else str(to), 120)
+        gate = self.record("gate", **ev, step=step, call_id=g.id, tool=g.name, args=g.arguments, effect=g.effect,
+                           title=title, brief=tools.oneline(item.text, 120), **extra)
+        self.send(item.session, {"type": "gate", "id": gate["seq"], "tool": g.name, "args": gate["args"],
+                                 "effect": g.effect, "title": title})
 
     # -- the fold (V5)
 
@@ -320,15 +356,39 @@ class Clone:
 
     # -- gates (V22): handed off, decided, reported
 
-    def decide(self, gate: int, decision: str, by: str) -> bool:
+    def decide(self, gate: int, decision: str, by: str, scope: str = "", grade: str = "") -> bool:
         """`approved` or `denied`, once: records `resume`; an approval runs the call (a task on this loop); the
-        report item is queued when the outcome is recorded. False for an unknown or already decided gate, or any
-        other decision; then nothing is recorded."""
+        report item is queued when the outcome is recorded. An approval may also carry (Q5) `scope` - `tool` or
+        `server` grants the tool, or every tool of its MCP server, "allow" in config; `session` is recorded on
+        `resume` for `state.session_grants` - and (Q3) `grade`, the owner's grade for an unknown gate's missed
+        lookup, written into the effect map: `effect_by.<arg>.<value>`, or `effect` when the tool had no map
+        and no annotations; a call that lacked the map's argument has no value to key on, so only `resume`
+        holds that grade. False, with nothing recorded, for an unknown or already decided gate, any other
+        decision, a scope on a destructive, external_send or unknown gate, `server` on a native tool, or a
+        grade that is not a grade or is for a gate that was not unknown."""
         row = self.db.gate(gate)
         if decision not in ("approved", "denied") or row is None or row["clone"] != self.id or row["decision"] is not None:
             return False
+        _, server, tool = row["tool"].split("__", 2) if row["tool"].startswith("mcp__") else ("", "", "")
+        if ((scope or grade) and decision != "approved" or scope not in SCOPES or scope and row["effect"] in FLOOR
+                or scope == "server" and not server
+                or grade and (grade not in config.GRADES or row["effect"] != "unknown")):
+            return False
+        cfg = config.load(self.home)
+        if scope in ("tool", "server"):
+            key = row["tool"] if scope == "tool" else f"mcp__{server}__*"
+            config.set(self.home, "grants", {**cfg["grants"], key: "allow"})
+            self.record("config_set", key="grants")  # what `config.set(..., ledger=)` records: the key, never the value
+        missed = self.db.context(self.id, row["session"], gate - 1)[0].get("unknown") if grade else None  # the gate's
+        if grade and (missed is None or isinstance(missed.get("value"), str)):
+            entry = cfg["tools"].get(server, {}).get(tool, {})
+            entry = {"effect": grade} if missed is None else {"effect_by": {missed["arg"]: {
+                **entry.get("effect_by", {}).get(missed["arg"], {}), missed["value"]: grade}}}
+            config.set(self.home, "tools", {**cfg["tools"], server: {**cfg["tools"].get(server, {}), tool: entry}})
+            self.record("config_set", key="tools")
         self.record("resume", session=row["session"], turn=row["turn"], origin="user", trust="user", clone=self.id,
-                    gate=gate, decision=decision, by=by)
+                    gate=gate, decision=decision, by=by, **({"scope": scope} if scope else {}),
+                    **({"grade": grade} if grade else {}))
         if decision == "approved":
             task = asyncio.get_running_loop().create_task(self._run_gate(row))
             self._calls.add(task)
@@ -342,7 +402,7 @@ class Clone:
         outcome unknown. A shutdown records nothing (restore writes "outcome unknown")."""
         event = threading.Event()
         self._events.add(event)
-        broker = Broker(dict(tools.TOOLS), "user", config.load(self.home)["grants"],
+        broker = Broker(dict(tools.TOOLS), "user", config.load(self.home), session_grants=set,
                         control=SimpleNamespace(interrupt=event, session=gate["session"]),
                         approved={gate["call_id"]: (gate["tool"], gate["args"])})
         try:

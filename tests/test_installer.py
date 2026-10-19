@@ -201,7 +201,8 @@ class InstallerTest(unittest.TestCase):
         from pathfinder.senses import catalog as catalog_sense
         self.addCleanup(installer_mod.bind, installer_mod._installer)
         installer_mod.bind(self.installer)
-        broker = Broker(catalog_sense.TOOLS, "user", {"propose_install": "allow"}, control=None)
+        broker = Broker(catalog_sense.TOOLS, "user", {"grants": {"propose_install": "allow"}}, session_grants=set,
+                        control=None)
         with mock.patch.object(catalog, "latest", return_value=None):
             out = broker.call("c1", "propose_install", {"name": "io.github.acme/none"})
         self.assertEqual(out, {"ok": False, "error": "no such server; try search_registry"})

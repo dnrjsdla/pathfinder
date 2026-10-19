@@ -1,7 +1,7 @@
 import unittest
 
 from pathfinder import policy
-from pathfinder.broker import CHAT_APPROVAL, USER_DENIED_TEXT, Broker, Gate, chat_approval
+from pathfinder.broker import CHAT_APPROVAL, USER_DENIED_TEXT, Broker, Gate, chat_approval, unwrap
 from pathfinder.tools import ToolSpec
 
 
@@ -17,7 +17,7 @@ TOOLS = {"read_thing": READ, "write_thing": WRITE}
 
 class BrokerTest(unittest.TestCase):
     def _broker(self, origin="user", grants=None, **kw):
-        return Broker(TOOLS, origin, grants or {}, control=None, **kw)
+        return Broker(TOOLS, origin, {"grants": grants or {}}, session_grants=set, control=None, **kw)
 
     def test_broker_unknown_deny_ask_allow(self):
         b = self._broker()
@@ -31,7 +31,10 @@ class BrokerTest(unittest.TestCase):
         b = self._broker()
         with self.assertRaises(Gate) as cm:
             b.call("c2", "write_thing", {})  # ask
-        self.assertEqual((cm.exception.id, cm.exception.name), ("c2", "write_thing"))
+        self.assertEqual((cm.exception.id, cm.exception.name, cm.exception.effect, cm.exception.unknown),
+                         ("c2", "write_thing", "write", None))
+        session = Broker(TOOLS, "user", {}, session_grants=lambda: {"write_thing"}, control=None)
+        self.assertEqual(session.call("c4", "write_thing", {}), {"ok": True, "result": {"done": True}})  # read per call
 
         b = self._broker(origin="system")
         result = b.call("c3", "write_thing", {})  # deny
@@ -56,13 +59,16 @@ class BrokerTest(unittest.TestCase):
         call before coerce and policy, its handler never run; `memory` is opt-in (not in the default origins)."""
         ran = []
         user_only = _spec("user_only", handler=lambda control=None: ran.append(1), origins=frozenset({"user"}))
-        b = Broker({**TOOLS, "user_only": user_only}, "signal", {}, control=None)
+        b = Broker({**TOOLS, "user_only": user_only}, "signal", {}, session_grants=set, control=None)
         self.assertEqual(b.call("c1", "user_only", {"junk": 1}),
                          {"ok": False, "error": "user_only is not available in a signal turn"})
         self.assertEqual(self._broker(origin="memory").call("c2", "read_thing", {}),
                          {"ok": False, "error": "read_thing is not available in a memory turn"})
+        self.assertEqual(self._broker(origin="job").call("c4", "read_thing", {}),  # no policy row: never a KeyError
+                         {"ok": False, "error": "read_thing is not available in a job turn"})
         self.assertEqual(ran, [])
-        self.assertEqual(Broker({"user_only": user_only}, "user", {}, control=None).call("c3", "user_only", {}),
+        self.assertEqual(Broker({"user_only": user_only}, "user", {}, session_grants=set, control=None
+                                ).call("c3", "user_only", {}),
                          {"ok": True, "result": None})
 
     def test_broker_approved_skips_policy(self):
@@ -111,9 +117,40 @@ class BrokerTest(unittest.TestCase):
         """The clone's path (U7): the store caps and the renderer filters, so the broker hands back the value."""
         raw = {"text": "\x1b[31mred\x1b[0m" + "x" * 20000}
         failing = _spec("f", handler=lambda control=None: (_ for _ in ()).throw(RuntimeError("\x07" + "y" * 9000)))
-        b = Broker({"t": _spec("t", handler=lambda control=None: raw), "f": failing}, "user", {}, control=None)
+        b = Broker({"t": _spec("t", handler=lambda control=None: raw), "f": failing}, "user", {}, session_grants=set,
+                   control=None)
         self.assertEqual(b.call("c1", "t", {}), {"ok": True, "result": raw})
         self.assertEqual(b.call("c2", "f", {}), {"ok": False, "error": "\x07" + "y" * 9000})
+
+    def test_call_tool_goes_through_the_door(self):
+        """Q4 (b): call_tool unwraps to the real spec's coerce, policy and gate; the Gate names the real tool; a
+        nested call_tool, a malformed one and an unknown inner name are refused, the last with <= 3 nearest names;
+        a proxied argument refusal names what the tool takes."""
+        page = _spec("mcp__notion__pages", handler=lambda control=None, **args: {"done": True}, params={"action": {"type": "string"}, "page_id": {"type": "string"}},
+                     required=["action"])
+        registry = {**TOOLS, page.name: page, "mcp__notion__blocks": _spec("mcp__notion__blocks")}
+        cfg = {"tools": {"notion": {"pages": {"effect_by": {"action": {"get": "read", "archive": "write"}}}}}}
+        b = Broker(registry, "user", cfg, session_grants=set, control=None)
+        name, args, refused = unwrap("call_tool", {"name": page.name, "arguments": '{"action": "archive"}'})
+        self.assertEqual((name, args, refused), (page.name, {"action": "archive"}, ""))  # JSON text parsed
+        with self.assertRaises(Gate) as cm:
+            b.call("c1", name, args, proxied=True)
+        self.assertEqual((cm.exception.name, cm.exception.effect), (page.name, "write"))
+        self.assertEqual(b.call("c2", *unwrap("call_tool", {"name": page.name, "arguments": {"action": "get"}})[:2]),
+                         {"ok": True, "result": {"done": True}})
+        with self.assertRaises(Gate) as cm:
+            b.call("c3", page.name, {"action": "export"})
+        self.assertEqual((cm.exception.effect, cm.exception.unknown), ("unknown", {"arg": "action", "value": "export"}))
+        self.assertEqual(unwrap("read_thing", {"x": 1}), ("read_thing", {"x": 1}, ""))
+        self.assertEqual(unwrap("call_tool", {"name": "call_tool", "arguments": {}})[2],
+                         "call_tool: name the tool itself, not call_tool")
+        self.assertEqual(unwrap("call_tool", {"name": page.name})[2], "call_tool: missing required argument 'arguments'")
+        near = b.call("c4", "mcp__notion__page", {}, proxied=True)["error"]
+        self.assertEqual(near, "no such tool: mcp__notion__page; nearest: mcp__notion__pages, mcp__notion__blocks")
+        self.assertEqual(b.call("c5", page.name, {"page_id": "x"}, proxied=True)["error"],
+                         "mcp__notion__pages: missing required argument 'action' - mcp__notion__pages takes: "
+                         "action (required), page_id")
+        self.assertNotIn("takes", b.call("c6", page.name, {"page_id": "x"})["error"])  # a listed tool: schema in hand
 
 
 WAY_OUT = " - if you meant something else, say it again · 다른 뜻이었다면 다시 말해 주세요"

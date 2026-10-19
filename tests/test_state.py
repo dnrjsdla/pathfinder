@@ -1,4 +1,5 @@
 import os
+import sqlite3
 import tempfile
 import time
 import unittest
@@ -431,6 +432,59 @@ class CloneIndexTest(unittest.TestCase):
         self.assertEqual(self.state.clone_row("root")["state"], "running")
         self._record("turn_end", session="s1", turn="t1", kind="answer", steps=1, usage={})
         self.assertEqual(self.state.clone_row("root")["state"], "parked")
+
+    def test_session_grants_survive_rebuild(self):
+        """Q5: an approval with scope `session` is a resume field; session_grants derives the tools from the gates,
+        per session; a gate's title and recipient are stored; an old ledger's gate (no new fields) still projects."""
+        def gate(session, call_id, tool, **extra):
+            return self._record("gate", session=session, turn="t1", origin="user", step=1, call_id=call_id, tool=tool,
+                                args={}, effect="write", brief="b", **extra)
+
+        def resume(g, decision, **extra):
+            self._record("resume", session=g["session"], turn="t1", trust="user", gate=g["seq"], decision=decision,
+                         by="socket", **extra)
+
+        old = gate("s1", "c0", "write_file")
+        titled = gate("s1", "c1", "mcp__fake__pages", title="page_id: Trip plan", recipient="")
+        tool_wide, other, denied = gate("s1", "c2", "add_event"), gate("s2", "c3", "add_reminder"), gate(
+            "s1", "c4", "complete_reminder")
+        resume(old, "approved")
+        resume(titled, "approved", scope="session")
+        resume(tool_wide, "approved", scope="tool")
+        resume(other, "approved", scope="session")
+        resume(denied, "denied", scope="session")
+
+        def check():
+            self.assertEqual(self.state.session_grants("s1"), {"mcp__fake__pages"})
+            self.assertEqual(self.state.session_grants("s2"), {"add_reminder"})
+            self.assertEqual(self.state.session_grants("s3"), set())
+            row = self.state.gate(titled["seq"])
+            self.assertEqual((row["title"], row["recipient"], row["scope"]), ("page_id: Trip plan", "", "session"))
+            row = self.state.gate(old["seq"])
+            self.assertEqual((row["title"], row["recipient"], row["scope"]), ("", "", ""))
+
+        check()
+        self.state.close()
+        for p in self.home.glob("state.db*"):
+            p.unlink()
+        self.state = State(self.home / "state.db")
+        self.state.rebuild(self.ledger)
+        check()
+
+    def test_old_gates_table_gains_columns(self):
+        """A P1 home's `gates` has no title, recipient or scope; State adds them, so its gates still project."""
+        self.state.close()
+        for p in self.home.glob("state.db*"):
+            p.unlink()
+        db = sqlite3.connect(self.home / "state.db")
+        db.execute("CREATE TABLE gates (seq INTEGER PRIMARY KEY, clone TEXT, session TEXT, turn TEXT, call_id TEXT, "
+                   "tool TEXT, args_json TEXT, effect TEXT, brief TEXT, decision TEXT, reported INTEGER, "
+                   "result INTEGER, ts REAL)")
+        db.commit()
+        db.close()
+        self.state = State(self.home / "state.db")
+        g = self._gate("c1", "t1")
+        self.assertEqual(self.state.gate(g["seq"])["title"], "")
 
     def test_rebuild_restores_every_reader(self):
         seqs = self._day()

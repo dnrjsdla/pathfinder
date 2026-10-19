@@ -176,6 +176,50 @@ class ResultsTest(unittest.TestCase):
                 self.assertIn("text", out)
                 self.assertLessEqual(len(json.dumps(out, separators=(",", ":"))), results.READ_CAP)
 
+    def test_title_from_seen_results(self):
+        """Q1: ID-shaped arguments (list elements too) named by seen results' items or objects; `parent*` last."""
+        search = self._result(SEARCH)
+        got = self._result({"object": "page", "id": "f" * 32, "properties": {"title": {"title": "Trip plan"}}})
+        unseen = self._result({"results": [page(40, "Hidden")]})
+        seen = {search["seq"], got["seq"]}
+        p0, p1, p2 = (PAGES[i]["id"] for i in range(3))
+        self.assertEqual(results.title(self.state, seen, {"parent_id": p0, "action": "archive", "page_id": p1}),
+                         "page_id: Page 1; parent_id: Page 0")
+        self.assertEqual(results.title(self.state, seen, {"page_ids": [p1, "nope", p2.replace("-", "").upper()]}),
+                         "page_ids: Page 1; page_ids: Page 2")  # a UUID matches without hyphens, any case
+        self.assertEqual(results.title(self.state, seen, {"page_id": "F" * 32}), "page_id: Trip plan")
+        self.assertEqual(results.title(self.state, seen, {"ids": [PAGES[i]["id"] for i in range(5)]}),
+                         "ids: Page 0; ids: Page 1; ids: Page 2")  # at most 3
+        hidden = page(40, "Hidden")["id"]
+        self.assertEqual(results.title(self.state, seen, {"page_id": hidden}), "")  # its result is not seen
+        self.assertEqual(results.title(self.state, seen | {unseen["seq"]}, {"page_id": hidden}), "page_id: Hidden")
+        self.assertEqual(results.title(self.state, seen, {"title": "Page 1", "n": 3}), "")  # nothing ID-shaped
+        self.assertEqual(results.title(self.state, set(), {"page_id": p1}), "")
+
+    def test_title_of_a_notion_page_object(self):
+        """A real Notion page holds its title in the property of type "title" (any key) as rich text."""
+        pid = str(uuid.UUID(int=99, version=4))
+        rich = [{"type": "text", "text": {"content": "Trip", "link": None}, "plain_text": "Trip"},
+                {"type": "text", "text": {"content": " plan\n2027"}}]  # no plain_text: text.content
+        notion = {"object": "page", "id": pid, "archived": False, "properties": {
+            "Status": {"id": "a1", "type": "select", "select": {"name": "Done"}},
+            "제목": {"id": "title", "type": "title", "title": rich}}}
+        got = self._result(notion)
+        self.assertEqual(results.title(self.state, {got["seq"]}, {"page_id": pid}), "page_id: Trip plan 2027")
+        database = {"object": "database", "id": "e" * 32, "title": rich[:1], "properties": {}}
+        self.assertEqual(results._title(database), "Trip")
+        self.assertIsNone(results._title({"properties": {"Name": {"type": "title", "title": []}}}))
+
+    def test_title_newest_wins_and_arg_name_on_one_line(self):
+        pid = PAGES[1]["id"]
+        old, new = self._result({"id": pid, "title": "Old name"}), self._result({"id": pid, "title": "New name"})
+        seen = {old["seq"], new["seq"]}
+        self.assertEqual(results.title(self.state, seen, {"page_id": pid}), "page_id: New name")
+        shown = results.title(self.state, seen, {"page\nid\x00": pid})
+        self.assertNotIn("\n", shown)
+        self.assertNotIn("\x00", shown)
+        self.assertTrue(shown.endswith(": New name"), shown)
+
     def test_history_has_handles_not_bodies(self):  # the results half; the assembler half is U6's
         marker = "MARKER-7f3k"
         body = "a" * 10_000 + marker + "b" * 10_000

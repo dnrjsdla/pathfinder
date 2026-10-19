@@ -53,7 +53,8 @@ CREATE TABLE IF NOT EXISTS results (seq INTEGER PRIMARY KEY, clone TEXT, session
 CREATE TABLE IF NOT EXISTS clones (id TEXT PRIMARY KEY, parent TEXT, preset TEXT, state TEXT, session TEXT,
   turn TEXT, ts REAL);
 CREATE TABLE IF NOT EXISTS gates (seq INTEGER PRIMARY KEY, clone TEXT, session TEXT, turn TEXT, call_id TEXT,
-  tool TEXT, args_json TEXT, effect TEXT, brief TEXT, decision TEXT, reported INTEGER, result INTEGER, ts REAL);
+  tool TEXT, args_json TEXT, effect TEXT, brief TEXT, decision TEXT, reported INTEGER, result INTEGER, ts REAL,
+  title TEXT, recipient TEXT, scope TEXT);
 CREATE TABLE IF NOT EXISTS context (seq INTEGER PRIMARY KEY, clone TEXT, session TEXT, turn TEXT, type TEXT,
   event_json TEXT);
 CREATE INDEX IF NOT EXISTS context_by_clone ON context (clone, session, seq);
@@ -65,7 +66,8 @@ NEW_TABLES = ("signals", "decisions", "judgments", "deliveries", "reactions", "p
 # the v2 events a clone's window is assembled from (a result's body stays in `results`)
 CONTEXT_TYPES = frozenset({"user", "assistant", "result", "turn_start", "turn_end", "gate", "resume", "interrupted",
                            "summary"})
-_GATE_COLUMNS = "seq, clone, session, turn, call_id, tool, args_json, effect, brief, decision, reported, result, ts"
+_GATE_COLUMNS = ("seq, clone, session, turn, call_id, tool, args_json, effect, brief, decision, reported, result, ts, "
+                 "title, recipient, scope")
 
 
 @dataclass
@@ -94,6 +96,10 @@ class State:
         # shipped (v2: approvals.seq) is added here, so an existing home keeps starting.
         if "seq" not in {r[1] for r in self.db.execute("PRAGMA table_info(approvals)")}:
             self.db.execute("ALTER TABLE approvals ADD COLUMN seq INTEGER")  # v2: one approval-id namespace
+        gate_columns = {r[1] for r in self.db.execute("PRAGMA table_info(gates)")}
+        for column in ("title", "recipient", "scope"):  # P2: what a gate names, and an approval's "always" scope
+            if column not in gate_columns:
+                self.db.execute(f"ALTER TABLE gates ADD COLUMN {column} TEXT")
         self.db.execute("INSERT OR IGNORE INTO meta (key, value) VALUES ('cursor', '0')")
         self.db.commit()
 
@@ -237,12 +243,13 @@ class State:
                 self.db.execute("UPDATE gates SET result = ? WHERE seq = ?", (seq, event["gate"]))
         if kind == "gate":
             self.db.execute(f"INSERT OR IGNORE INTO gates ({_GATE_COLUMNS}) "
-                            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 0, NULL, ?)",
+                            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 0, NULL, ?, ?, ?, NULL)",
                             (seq, clone, session, turn, event["call_id"], event["tool"], json.dumps(event["args"]),
-                             event.get("effect", ""), event.get("brief", ""), event["ts"]))
+                             event.get("effect", ""), event.get("brief", ""), event["ts"], event.get("title", ""),
+                             event.get("recipient", "")))
         if kind == "resume":
-            self.db.execute("UPDATE gates SET decision = ? WHERE seq = ? AND decision IS NULL",  # the first wins
-                            (event["decision"], event["gate"]))
+            self.db.execute("UPDATE gates SET decision = ?, scope = ? WHERE seq = ? AND decision IS NULL",  # first wins
+                            (event["decision"], event.get("scope", ""), event["gate"]))
         if kind == "user" and event.get("gate"):  # a report turn: one event for every gate it reports
             self.db.executemany("UPDATE gates SET reported = 1 WHERE seq = ?", [(g,) for g in event["gate"]])
         if kind == "spawn":
@@ -336,6 +343,12 @@ class State:
         """Every gate not yet reported, decided or not (`decision` None while open), oldest first."""
         rows = self.db.execute(f"SELECT {_GATE_COLUMNS} FROM gates WHERE reported = 0 ORDER BY seq")
         return [self._gate_row(r) for r in rows]
+
+    def session_grants(self, session: str) -> set[str]:
+        """The tools of `session`'s gates approved with scope `session` (Q5: "always allow" for this session)."""
+        rows = self.db.execute("SELECT DISTINCT tool FROM gates WHERE session = ? AND decision = 'approved' "
+                               "AND scope = 'session'", (session,))
+        return {r[0] for r in rows}
 
     def approval_item(self, seq: int) -> dict | None:
         """What `approve <seq>` names: a clone's gate, or a proposal by its `approval_pending` seq."""

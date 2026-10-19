@@ -11,6 +11,7 @@ STORE_CAP = 256 * 1024  # bytes of a body's compact JSON (or of its text) kept i
 READ_CAP = 6000         # chars of one read_result output (Deviation 6)
 RENDER_CAP = 2000       # chars of one rendered result: the handle and summary, or the error inline
 UNKNOWN = {"error": "unknown handle"}  # unknown and unseen answer alike, so a guessed handle learns nothing
+INLINE = {"read_result", "search_tools"}  # tools whose output the model sees in full (each ≤ 6,000), not summarised
 _ID = re.compile(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}|[0-9a-f]{16,}", re.I)  # uuid, or a hex run
 _SCALAR = (str, int, float, bool, type(None))
 _RESERVED = ("type", "count", "keys", "preview", "chars", "lines", "stored")
@@ -72,15 +73,44 @@ def _has_id(value) -> bool:
 
 
 def _title(item):
-    """An item's title: `title`, else `name`, else Notion's `properties.title.title`; None without one."""
+    """An item's title: `title`, else `name`, else Notion's title property (the one whose `type` is "title",
+    whatever its key; else the key `title`); a rich-text list joins its parts' `plain_text` (or `text.content`).
+    None without one."""
     if not isinstance(item, dict):
         return None
     title = item.get("title", item.get("name"))
-    if not isinstance(title, str):
+    if not isinstance(title, (str, list)):
         props = item.get("properties")
-        title = props.get("title") if isinstance(props, dict) else None
-        title = title.get("title") if isinstance(title, dict) else title
+        prop = next((p for p in props.values() if isinstance(p, dict) and p.get("type") == "title"),
+                    props.get("title")) if isinstance(props, dict) else None
+        title = prop.get("title") if isinstance(prop, dict) else prop
+    if isinstance(title, list):  # Notion rich text
+        parts = [p.get("plain_text", p["text"].get("content") if isinstance(p.get("text"), dict) else None)
+                 for p in title if isinstance(p, dict)]
+        title = "".join(s for s in parts if isinstance(s, str)) or None
     return _line(title, 80) if isinstance(title, str) else None
+
+
+def _id_key(text: str) -> str:
+    return text.strip().replace("-", "").lower()  # a UUID with or without hyphens, any case
+
+
+def title(state, seen: set[int], args: dict) -> str:
+    """A gate's title (Q1): every ID-shaped argument value, and every ID-shaped element of a list value, that is
+    the `id` of an item (or of the object) in a seen result's body becomes `<arg>: <title>` (`_title`'s rule);
+    arguments not named `parent*` first, at most 3, joined by "; "; "" when nothing matches."""
+    ranked = sorted(args.items(), key=lambda kv: kv[0].startswith("parent"))
+    wanted = [(arg, v) for arg, value in ranked for v in (value if isinstance(value, list) else [value])
+              if isinstance(v, str) and _ID.fullmatch(v.strip())]
+    names = {}
+    for row in filter(None, map(state.result, sorted(seen) if wanted else ())):  # newer results win
+        value = _value(row["body"])
+        for item in _items(value) or [value]:
+            name = _title(item)
+            if name is not None and isinstance(item.get("id"), str):
+                names[_id_key(item["id"])] = name
+    found = [f"{tools.oneline(arg, 40)}: {names[_id_key(v)]}" for arg, v in wanted if _id_key(v) in names]
+    return "; ".join(found[:3])
 
 
 def _scalars(obj: dict) -> dict:

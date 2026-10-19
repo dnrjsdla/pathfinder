@@ -174,6 +174,26 @@ class AssembleTest(unittest.TestCase):
                         self.assertEqual((b["type"], b["tool_use_id"]), ("tool_result", "c2"))
         self.assertIn("MARKER", json.dumps(reqs[-1].messages))
 
+    def test_inline_outputs_render_in_full(self):
+        """A `results.INLINE` tool's output reaches the model whole (a text as itself, an object as its JSON);
+        the same body from any other tool goes as its handle and summary."""
+        self.assertEqual(results.INLINE, {"read_result", "search_tools"})
+        listing = "mcp__fake__pages: Notion pages.\n" + "\n".join(f"tool_{i}: does thing {i}" for i in range(250))
+        self.assertGreater(len(listing), 4000)
+        self.say("t1", "Find a Notion tool.")
+        self.step("t1", call("c1", "search_tools", query="notion"))
+        self.result("t1", "c1", "search_tools", listing)
+        self.step("t1", call("c2", "read_result", handle="r:1"))
+        self.result("t1", "c2", "read_result", {"handle": "r:1", "value": {"a": 1}})
+        self.step("t1", call("c3", "read_file", path="/tmp/x"))
+        other = self.result("t1", "c3", "read_file", listing)
+        contents = {b["tool_use_id"]: b["content"] for m in self.messages() if isinstance(m["content"], list)
+                    for b in m["content"] if b["type"] == "tool_result"}
+        self.assertEqual(contents["c1"], listing)
+        self.assertEqual(json.loads(contents["c2"]), {"handle": "r:1", "value": {"a": 1}})
+        self.assertEqual(json.loads(contents["c3"])["handle"], f"r:{other['seq']}")
+        self.assertNotIn("tool_249", contents["c3"])  # only the summary's first line
+
     def test_refused_turn_epoch_strip_and_restart_cut(self):
         self.say("t1", "Something declined.")
         self.step("t1", call("c1", "read_file", path="/tmp/x"))

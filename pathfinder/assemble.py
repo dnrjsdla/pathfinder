@@ -53,10 +53,14 @@ def _handles(fold) -> set[int]:
 
 
 def _answer(state, row) -> tuple[str, bool, str]:
-    """(text, is_error, handle) for a `result` row: a read_result output inline (`results.read` cleaned it),
-    anything else `results.render` of the row with its stored body (it cleans). A body never goes inline."""
+    """(text, is_error, handle) for a `result` row: a `results.INLINE` tool's output in full, a text as itself
+    (read_result's is cleaned by `results.read`; search_tools' is registry text, MCP's cleaned at load), anything
+    else `results.render` of the row with its stored body (it cleans). No other body goes inline."""
     body = state.result(row["seq"])["body"]
-    text = _dumps(body) if row["tool"] == results.READ_RESULT["name"] else results.render({**row, "body": body})
+    if row["tool"] in results.INLINE:
+        text = body if isinstance(body, str) else _dumps(body)
+    else:
+        text = results.render({**row, "body": body})
     return text, not row.get("ok"), f"r:{row['seq']}"
 
 

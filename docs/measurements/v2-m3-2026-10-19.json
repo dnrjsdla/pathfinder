@@ -1,0 +1,638 @@
+{
+ "measurement": "v2-m3",
+ "date": "2026-10-19",
+ "model_requests": 0,
+ "server_tools": 11,
+ "grant_names": [
+  "mcp__better-notion-mcp__content_convert",
+  "mcp__better-notion-mcp__help",
+  "mcp__better-notion-mcp__users",
+  "mcp__better-notion-mcp__workspace"
+ ],
+ "counts": {
+  "calls": 31,
+  "tool_calls": 30,
+  "installs": 1,
+  "read": 16,
+  "write": 14,
+  "v1_gates": 19,
+  "no_map_manual_gates": 19,
+  "drafted_manual_gates": 14,
+  "drafted_auto_gates": 0
+ },
+ "mismatches": {},
+ "arms": {
+  "no_map": {
+   "grades": {
+    "read": 11,
+    "write": 19
+   },
+   "policies": {
+    "v1": {
+     "totals": {
+      "gates": 19,
+      "asks": 19,
+      "allows": 11,
+      "denies": 0,
+      "unknown": 0
+     },
+     "rows": [
+      {
+       "tool": "mcp__better-notion-mcp__config",
+       "verb": "status",
+       "grade": "write",
+       "decision": "ask",
+       "count": 1
+      },
+      {
+       "tool": "mcp__better-notion-mcp__pages",
+       "verb": "archive",
+       "grade": "write",
+       "decision": "ask",
+       "count": 12
+      },
+      {
+       "tool": "mcp__better-notion-mcp__pages",
+       "verb": "get",
+       "grade": "write",
+       "decision": "ask",
+       "count": 4
+      },
+      {
+       "tool": "mcp__better-notion-mcp__pages",
+       "verb": "restore",
+       "grade": "write",
+       "decision": "ask",
+       "count": 2
+      },
+      {
+       "tool": "mcp__better-notion-mcp__workspace",
+       "verb": "info",
+       "grade": "read",
+       "decision": "allow",
+       "count": 1
+      },
+      {
+       "tool": "mcp__better-notion-mcp__workspace",
+       "verb": "search",
+       "grade": "read",
+       "decision": "allow",
+       "count": 5
+      },
+      {
+       "tool": "propose_install",
+       "verb": "",
+       "grade": "read",
+       "decision": "allow",
+       "count": 2
+      },
+      {
+       "tool": "read_memory",
+       "verb": "",
+       "grade": "read",
+       "decision": "allow",
+       "count": 2
+      },
+      {
+       "tool": "search_registry",
+       "verb": "",
+       "grade": "read",
+       "decision": "allow",
+       "count": 1
+      }
+     ]
+    },
+    "manual": {
+     "totals": {
+      "gates": 19,
+      "asks": 19,
+      "allows": 11,
+      "denies": 0,
+      "unknown": 0
+     },
+     "rows": [
+      {
+       "tool": "mcp__better-notion-mcp__config",
+       "verb": "status",
+       "grade": "write",
+       "decision": "ask",
+       "count": 1
+      },
+      {
+       "tool": "mcp__better-notion-mcp__pages",
+       "verb": "archive",
+       "grade": "write",
+       "decision": "ask",
+       "count": 12
+      },
+      {
+       "tool": "mcp__better-notion-mcp__pages",
+       "verb": "get",
+       "grade": "write",
+       "decision": "ask",
+       "count": 4
+      },
+      {
+       "tool": "mcp__better-notion-mcp__pages",
+       "verb": "restore",
+       "grade": "write",
+       "decision": "ask",
+       "count": 2
+      },
+      {
+       "tool": "mcp__better-notion-mcp__workspace",
+       "verb": "info",
+       "grade": "read",
+       "decision": "allow",
+       "count": 1
+      },
+      {
+       "tool": "mcp__better-notion-mcp__workspace",
+       "verb": "search",
+       "grade": "read",
+       "decision": "allow",
+       "count": 5
+      },
+      {
+       "tool": "propose_install",
+       "verb": "",
+       "grade": "read",
+       "decision": "allow",
+       "count": 2
+      },
+      {
+       "tool": "read_memory",
+       "verb": "",
+       "grade": "read",
+       "decision": "allow",
+       "count": 2
+      },
+      {
+       "tool": "search_registry",
+       "verb": "",
+       "grade": "read",
+       "decision": "allow",
+       "count": 1
+      }
+     ]
+    },
+    "manual_grants": {
+     "totals": {
+      "gates": 19,
+      "asks": 19,
+      "allows": 11,
+      "denies": 0,
+      "unknown": 0
+     },
+     "rows": [
+      {
+       "tool": "mcp__better-notion-mcp__config",
+       "verb": "status",
+       "grade": "write",
+       "decision": "ask",
+       "count": 1
+      },
+      {
+       "tool": "mcp__better-notion-mcp__pages",
+       "verb": "archive",
+       "grade": "write",
+       "decision": "ask",
+       "count": 12
+      },
+      {
+       "tool": "mcp__better-notion-mcp__pages",
+       "verb": "get",
+       "grade": "write",
+       "decision": "ask",
+       "count": 4
+      },
+      {
+       "tool": "mcp__better-notion-mcp__pages",
+       "verb": "restore",
+       "grade": "write",
+       "decision": "ask",
+       "count": 2
+      },
+      {
+       "tool": "mcp__better-notion-mcp__workspace",
+       "verb": "info",
+       "grade": "read",
+       "decision": "allow",
+       "count": 1
+      },
+      {
+       "tool": "mcp__better-notion-mcp__workspace",
+       "verb": "search",
+       "grade": "read",
+       "decision": "allow",
+       "count": 5
+      },
+      {
+       "tool": "propose_install",
+       "verb": "",
+       "grade": "read",
+       "decision": "allow",
+       "count": 2
+      },
+      {
+       "tool": "read_memory",
+       "verb": "",
+       "grade": "read",
+       "decision": "allow",
+       "count": 2
+      },
+      {
+       "tool": "search_registry",
+       "verb": "",
+       "grade": "read",
+       "decision": "allow",
+       "count": 1
+      }
+     ]
+    },
+    "auto": {
+     "totals": {
+      "gates": 0,
+      "asks": 0,
+      "allows": 30,
+      "denies": 0,
+      "unknown": 0
+     },
+     "rows": [
+      {
+       "tool": "mcp__better-notion-mcp__config",
+       "verb": "status",
+       "grade": "write",
+       "decision": "allow",
+       "count": 1
+      },
+      {
+       "tool": "mcp__better-notion-mcp__pages",
+       "verb": "archive",
+       "grade": "write",
+       "decision": "allow",
+       "count": 12
+      },
+      {
+       "tool": "mcp__better-notion-mcp__pages",
+       "verb": "get",
+       "grade": "write",
+       "decision": "allow",
+       "count": 4
+      },
+      {
+       "tool": "mcp__better-notion-mcp__pages",
+       "verb": "restore",
+       "grade": "write",
+       "decision": "allow",
+       "count": 2
+      },
+      {
+       "tool": "mcp__better-notion-mcp__workspace",
+       "verb": "info",
+       "grade": "read",
+       "decision": "allow",
+       "count": 1
+      },
+      {
+       "tool": "mcp__better-notion-mcp__workspace",
+       "verb": "search",
+       "grade": "read",
+       "decision": "allow",
+       "count": 5
+      },
+      {
+       "tool": "propose_install",
+       "verb": "",
+       "grade": "read",
+       "decision": "allow",
+       "count": 2
+      },
+      {
+       "tool": "read_memory",
+       "verb": "",
+       "grade": "read",
+       "decision": "allow",
+       "count": 2
+      },
+      {
+       "tool": "search_registry",
+       "verb": "",
+       "grade": "read",
+       "decision": "allow",
+       "count": 1
+      }
+     ]
+    }
+   },
+   "pass": false
+  },
+  "drafted": {
+   "grades": {
+    "read": 16,
+    "write": 14
+   },
+   "policies": {
+    "v1": {
+     "totals": {
+      "gates": 19,
+      "asks": 19,
+      "allows": 11,
+      "denies": 0,
+      "unknown": 0
+     },
+     "rows": [
+      {
+       "tool": "mcp__better-notion-mcp__config",
+       "verb": "status",
+       "grade": "read",
+       "decision": "ask",
+       "count": 1
+      },
+      {
+       "tool": "mcp__better-notion-mcp__pages",
+       "verb": "archive",
+       "grade": "write",
+       "decision": "ask",
+       "count": 12
+      },
+      {
+       "tool": "mcp__better-notion-mcp__pages",
+       "verb": "get",
+       "grade": "read",
+       "decision": "ask",
+       "count": 4
+      },
+      {
+       "tool": "mcp__better-notion-mcp__pages",
+       "verb": "restore",
+       "grade": "write",
+       "decision": "ask",
+       "count": 2
+      },
+      {
+       "tool": "mcp__better-notion-mcp__workspace",
+       "verb": "info",
+       "grade": "read",
+       "decision": "allow",
+       "count": 1
+      },
+      {
+       "tool": "mcp__better-notion-mcp__workspace",
+       "verb": "search",
+       "grade": "read",
+       "decision": "allow",
+       "count": 5
+      },
+      {
+       "tool": "propose_install",
+       "verb": "",
+       "grade": "read",
+       "decision": "allow",
+       "count": 2
+      },
+      {
+       "tool": "read_memory",
+       "verb": "",
+       "grade": "read",
+       "decision": "allow",
+       "count": 2
+      },
+      {
+       "tool": "search_registry",
+       "verb": "",
+       "grade": "read",
+       "decision": "allow",
+       "count": 1
+      }
+     ]
+    },
+    "manual": {
+     "totals": {
+      "gates": 14,
+      "asks": 14,
+      "allows": 16,
+      "denies": 0,
+      "unknown": 0
+     },
+     "rows": [
+      {
+       "tool": "mcp__better-notion-mcp__config",
+       "verb": "status",
+       "grade": "read",
+       "decision": "allow",
+       "count": 1
+      },
+      {
+       "tool": "mcp__better-notion-mcp__pages",
+       "verb": "archive",
+       "grade": "write",
+       "decision": "ask",
+       "count": 12
+      },
+      {
+       "tool": "mcp__better-notion-mcp__pages",
+       "verb": "get",
+       "grade": "read",
+       "decision": "allow",
+       "count": 4
+      },
+      {
+       "tool": "mcp__better-notion-mcp__pages",
+       "verb": "restore",
+       "grade": "write",
+       "decision": "ask",
+       "count": 2
+      },
+      {
+       "tool": "mcp__better-notion-mcp__workspace",
+       "verb": "info",
+       "grade": "read",
+       "decision": "allow",
+       "count": 1
+      },
+      {
+       "tool": "mcp__better-notion-mcp__workspace",
+       "verb": "search",
+       "grade": "read",
+       "decision": "allow",
+       "count": 5
+      },
+      {
+       "tool": "propose_install",
+       "verb": "",
+       "grade": "read",
+       "decision": "allow",
+       "count": 2
+      },
+      {
+       "tool": "read_memory",
+       "verb": "",
+       "grade": "read",
+       "decision": "allow",
+       "count": 2
+      },
+      {
+       "tool": "search_registry",
+       "verb": "",
+       "grade": "read",
+       "decision": "allow",
+       "count": 1
+      }
+     ]
+    },
+    "manual_grants": {
+     "totals": {
+      "gates": 14,
+      "asks": 14,
+      "allows": 16,
+      "denies": 0,
+      "unknown": 0
+     },
+     "rows": [
+      {
+       "tool": "mcp__better-notion-mcp__config",
+       "verb": "status",
+       "grade": "read",
+       "decision": "allow",
+       "count": 1
+      },
+      {
+       "tool": "mcp__better-notion-mcp__pages",
+       "verb": "archive",
+       "grade": "write",
+       "decision": "ask",
+       "count": 12
+      },
+      {
+       "tool": "mcp__better-notion-mcp__pages",
+       "verb": "get",
+       "grade": "read",
+       "decision": "allow",
+       "count": 4
+      },
+      {
+       "tool": "mcp__better-notion-mcp__pages",
+       "verb": "restore",
+       "grade": "write",
+       "decision": "ask",
+       "count": 2
+      },
+      {
+       "tool": "mcp__better-notion-mcp__workspace",
+       "verb": "info",
+       "grade": "read",
+       "decision": "allow",
+       "count": 1
+      },
+      {
+       "tool": "mcp__better-notion-mcp__workspace",
+       "verb": "search",
+       "grade": "read",
+       "decision": "allow",
+       "count": 5
+      },
+      {
+       "tool": "propose_install",
+       "verb": "",
+       "grade": "read",
+       "decision": "allow",
+       "count": 2
+      },
+      {
+       "tool": "read_memory",
+       "verb": "",
+       "grade": "read",
+       "decision": "allow",
+       "count": 2
+      },
+      {
+       "tool": "search_registry",
+       "verb": "",
+       "grade": "read",
+       "decision": "allow",
+       "count": 1
+      }
+     ]
+    },
+    "auto": {
+     "totals": {
+      "gates": 0,
+      "asks": 0,
+      "allows": 30,
+      "denies": 0,
+      "unknown": 0
+     },
+     "rows": [
+      {
+       "tool": "mcp__better-notion-mcp__config",
+       "verb": "status",
+       "grade": "read",
+       "decision": "allow",
+       "count": 1
+      },
+      {
+       "tool": "mcp__better-notion-mcp__pages",
+       "verb": "archive",
+       "grade": "write",
+       "decision": "allow",
+       "count": 12
+      },
+      {
+       "tool": "mcp__better-notion-mcp__pages",
+       "verb": "get",
+       "grade": "read",
+       "decision": "allow",
+       "count": 4
+      },
+      {
+       "tool": "mcp__better-notion-mcp__pages",
+       "verb": "restore",
+       "grade": "write",
+       "decision": "allow",
+       "count": 2
+      },
+      {
+       "tool": "mcp__better-notion-mcp__workspace",
+       "verb": "info",
+       "grade": "read",
+       "decision": "allow",
+       "count": 1
+      },
+      {
+       "tool": "mcp__better-notion-mcp__workspace",
+       "verb": "search",
+       "grade": "read",
+       "decision": "allow",
+       "count": 5
+      },
+      {
+       "tool": "propose_install",
+       "verb": "",
+       "grade": "read",
+       "decision": "allow",
+       "count": 2
+      },
+      {
+       "tool": "read_memory",
+       "verb": "",
+       "grade": "read",
+       "decision": "allow",
+       "count": 2
+      },
+      {
+       "tool": "search_registry",
+       "verb": "",
+       "grade": "read",
+       "decision": "allow",
+       "count": 1
+      }
+     ]
+    }
+   },
+   "pass": true
+  },
+  "home": "not yet: run after P2's first start"
+ },
+ "verdict": "pass"
+}

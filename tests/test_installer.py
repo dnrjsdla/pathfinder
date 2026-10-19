@@ -14,7 +14,7 @@ from unittest import mock
 
 from pathfinder import catalog, config, mirror, tools as tools_mod
 from pathfinder.config import merge_json_file
-from pathfinder.installer import Installer, render_row, server_id
+from pathfinder.installer import Installer, _not_read, render_row, server_id
 from pathfinder.ledger import Ledger
 from pathfinder.state import State
 
@@ -60,7 +60,7 @@ def _fake_run(license="MIT", integrity="sha512-abc", returncode=0):
 # depend on) a real child process; `test_trial_runs_in_the_sandbox_and_hashes_tools` and
 # `test_trial_timeout_fails` are the ones that keep the real thing.
 _FAKE_TOOLS = [{"name": "echo", "description_hash": "sha256:" + "a" * 64, "schema_hash": "sha256:" + "b" * 64,
-               "read_only_hint": True, "params": ["text"]}]
+               "not_read": [], "params": ["text"]}]
 
 
 class FakeServers:
@@ -189,7 +189,7 @@ class InstallerTest(unittest.TestCase):
             out = self.installer.propose_by_name("io.github.acme/new", registry="https://registry.example")
         latest.assert_called_once_with("io.github.acme/new", "https://registry.example")
         self.assertEqual(out, {"error": "stop here"})  # found, and it reached the check
-        self.assertEqual(self._by_name("io.github.acme/none")[0], {"error": "no such server; try search_tools"})
+        self.assertEqual(self._by_name("io.github.acme/none")[0], {"error": "no such server; try search_registry"})
 
     def test_propose_install_error_is_a_failed_call(self):
         """U22: the tool's error is raised, so the broker answers `ok: false` with the same text."""
@@ -201,7 +201,7 @@ class InstallerTest(unittest.TestCase):
         broker = Broker(catalog_sense.TOOLS, "user", {"propose_install": "allow"}, control=None)
         with mock.patch.object(catalog, "latest", return_value=None):
             out = broker.call("c1", "propose_install", {"name": "io.github.acme/none"})
-        self.assertEqual(out, {"ok": False, "error": "no such server; try search_tools"})
+        self.assertEqual(out, {"ok": False, "error": "no such server; try search_registry"})
 
     def test_handle_install_and_uninstall_replies(self):
         """U3: the socket's `install`/`uninstall` messages are answered here, the daemon only writes."""
@@ -211,9 +211,9 @@ class InstallerTest(unittest.TestCase):
             self.assertEqual(handle({"type": "install", "name": "widget"}),
                              {"type": "install", "id": "a1", "line": "widget@1.0.0"})
         p.assert_called_once_with("widget")
-        with mock.patch.object(Installer, "propose_by_name", return_value={"error": "no such server; try search_tools"}):
+        with mock.patch.object(Installer, "propose_by_name", return_value={"error": "no such server; try search_registry"}):
             self.assertEqual(handle({"type": "install", "name": "nope"}),
-                             {"type": "error", "message": "no such server; try search_tools"})
+                             {"type": "error", "message": "no such server; try search_registry"})
         with mock.patch.object(Installer, "propose_by_name", side_effect=OSError("boom")):  # a raise still answers
             self.assertEqual(handle({"type": "install", "name": "widget"}), {"type": "error", "message": "OSError: boom"})
         with mock.patch.object(Installer, "uninstall", return_value={"id": "widget"}):
@@ -258,7 +258,7 @@ class InstallerTest(unittest.TestCase):
         tools = out["verification"]["sandbox_trial"]["tools"]
         self.assertEqual(len(tools), 1)
         self.assertEqual(tools[0]["name"], "echo")
-        self.assertTrue(tools[0]["read_only_hint"])
+        self.assertEqual(tools[0]["not_read"], [])  # its readOnlyHint drafts it as read
         self.assertTrue(tools[0]["description_hash"].startswith("sha256:"))
         self.assertTrue(tools[0]["schema_hash"].startswith("sha256:"))
         self.assertFalse(out["verification"]["sandbox_trial"]["file_writes_outside_tmp"])
@@ -266,15 +266,14 @@ class InstallerTest(unittest.TestCase):
         self.assertEqual(out["verification"]["trust_tier"], "checked")
 
     def test_trial_refuses_what_the_loader_refuses(self):
-        """F3: a tool `mcp.tools.specs` would drop is neither counted, granted nor pinned - listed as
+        """F3: a tool `mcp.tools.specs` would drop is neither counted, drafted nor pinned - listed as
         skipped, its name escaped - so "trial ok, N tools" is true."""
         cand = _candidate(args=["-y", "widget@1.0.0", "--refused-tools"])
         out = self.installer.check(cand, run=_fake_run())
         trial = out["verification"]["sandbox_trial"]
         self.assertEqual([t["name"] for t in trial["tools"]], ["echo"])
         self.assertEqual(trial["skipped"], ["bad\\u200bname", "ctl", "badparam"])
-        self.assertEqual([p["tool"] for p in out["install"]["permissions"]], ["echo"])
-        self.assertIn("trial ok, 1 tools (1 read-only), 3 skipped (bad\\u200bname, ctl, badparam)",
+        self.assertIn("trial ok, 1 tools, 3 skipped (bad\\u200bname, ctl, badparam)",
                       render_row({"id": "a1", "args": out}))  # the owner approving sees what will not load
 
     def test_trial_timeout_fails(self):
@@ -284,7 +283,7 @@ class InstallerTest(unittest.TestCase):
         self.assertEqual(out["verification"]["failed_step"], "trial")
 
     # -- proposal row ------------------------------------------------------------------------
-    def test_proposal_row_lists_checks_and_grants(self):
+    def test_proposal_row_lists_checks_and_the_draft(self):
         cand = self._check(_candidate(), run=_fake_run())
         aid = self.installer.propose(cand, "user")
         row = self.state.approval(aid)
@@ -292,7 +291,34 @@ class InstallerTest(unittest.TestCase):
         self.assertIn("install_server", line)
         self.assertIn("license MIT ok", line)
         self.assertIn("integrity ok", line)
-        self.assertIn("trial ok, 1 tools (1 read-only)", line)
+        self.assertIn("trial ok, 1 tools", line)
+        self.assertNotIn("not read", line)  # echo drafts as read: nothing to list
+
+    def test_proposal_row_names_every_non_read_value(self):
+        """Q3 (b): the install approval displays the draft `Attach` will write - each non-read value by name,
+        not counts; a value or a tool the draft leaves out shows as `asks` (it asks as unknown); reads are not listed."""
+        definitions = [
+            {"name": "pages", "annotations": {"destructiveHint": False}, "inputSchema": {"properties": {
+                "action": {"type": "string", "enum": ["get", "archive", "delete_page", "send", "frobnicate"]}}}},
+            {"name": "relay", "annotations": {"destructiveHint": False}},
+            {"name": "info", "annotations": {"readOnlyHint": True}},
+            {"name": "bare"},  # no annotations, no enum: no draft
+        ]
+        tools = [{**_FAKE_TOOLS[0], "name": d["name"], "not_read": _not_read(d["name"], d)} for d in definitions]
+        with mock.patch.object(Installer, "_trial", return_value=(tools, [])):
+            cand = self.installer.check(_candidate(), run=_fake_run())
+        line = render_row(self.state.approval(self.installer.propose(cand, "user")))
+        self.assertIn("trial ok, 4 tools · not read: pages.archive: write, pages.delete_page: destructive, "
+                      "pages.send: external_send, pages.frobnicate: asks, relay: write, bare: asks", line)
+        self.assertNotIn("pages.get", line)
+        self.assertNotIn("info", line)
+
+        fixture = Path(__file__).resolve().parent.parent / "bench/v2/fixtures/notion_tools.json"
+        notion = [x for d in json.loads(fixture.read_text(encoding="utf-8")) for x in _not_read(d["name"], d)]
+        self.assertEqual(len(notion), 26)  # 19 write, 4 destructive, 1 external_send, 1 whole-tool write, 1 asks
+        self.assertIn("config.setup_start: asks", notion)
+        hidden = {"inputSchema": {"properties": {"op": {"enum": ["x​delete", "get"]}}}}
+        self.assertEqual(_not_read("t", hidden), ["t.x\\u200bdelete: destructive"])  # escaped, not dropped
 
     def test_proposal_line_drops_control_characters(self):
         """Registry text reaches a terminal through `say`'s gate line and `approvals` - no ESC."""
@@ -460,6 +486,9 @@ class InstallerTest(unittest.TestCase):
         claude_path = self.home / ".claude.json"
         before = {"untouched": True}
         claude_path.write_text(json.dumps(before), encoding="utf-8")
+        config.set(self.home, "tools", {"kept": {"echo": {"effect": "read"}}})
+        config.set(self.home, "grants", {"mcp__kept__*": "allow"})
+        before_cfg = config.load(self.home)
 
         cand = self._check(_candidate(), run=_fake_run())
         aid = self.installer.propose(cand, "user")
@@ -474,7 +503,7 @@ class InstallerTest(unittest.TestCase):
         self.installer._record = failing_record
         asyncio.run(self.installer.decide(aid, "approved"))
 
-        self.assertEqual(config.load(self.home)["mcp_servers"], pre_servers)
+        self.assertEqual(config.load(self.home), before_cfg)  # the whole config, not only mcp_servers
         self.assertEqual(json.loads(claude_path.read_text(encoding="utf-8")), before)
 
         events = list(self.ledger.read())
@@ -488,8 +517,15 @@ class InstallerTest(unittest.TestCase):
         cand = self._check(_candidate(), run=_fake_run())
         id = self.installer._server_id(cand["name"])
         self.attach.load_result = "dead"
+        before_cfg = config.load(self.home)
+        fake_reload = self.attach.reload
+
+        async def drafting_reload(server):  # `Attach` drafts `tools.<id>` at the first load (U2b)
+            config.set(self.home, "tools", {server: {"echo": {"effect": "read"}}})
+            await fake_reload(server)
+        self.attach.reload = drafting_reload
         self._install(cand)
-        self.assertNotIn(id, config.load(self.home)["mcp_servers"])
+        self.assertEqual(config.load(self.home), before_cfg)  # no stale map for a reinstall under this id
         self.assertEqual(self.state.install(id)["state"], "failed")
         events = [e["type"] for e in self.ledger.read()]
         self.assertNotIn("install_done", events)
@@ -533,6 +569,11 @@ class InstallerTest(unittest.TestCase):
         after_installs["numStartups"] = 7
         claude_path.write_text(json.dumps(after_installs), encoding="utf-8")
 
+        drafted = {"echo": {"effect": "read"}}  # what `Attach` writes at each server's first load (U2b)
+        config.set(self.home, "tools", {id1: drafted, id2: drafted})
+        kept = {f"mcp__{id2}__*": "allow", f"mcp__{id2}__echo": "deny", "write_file": "allow"}
+        config.set(self.home, "grants", {f"mcp__{id1}__*": "allow", f"mcp__{id1}__echo": "deny", **kept})
+
         asyncio.run(self.installer.uninstall(id1))
 
         after = json.loads(claude_path.read_text(encoding="utf-8"))
@@ -541,19 +582,21 @@ class InstallerTest(unittest.TestCase):
         self.assertNotIn(id1, after["mcpServers"])
         self.assertIn(id2, after["mcpServers"])  # the other install survives
         self.assertEqual(after["numStartups"], 7)  # the later write survives too
-        self.assertFalse(any(k.startswith(f"mcp__{id1}__") for k in config.load(self.home)["grants"]))
-        self.assertTrue(any(k.startswith(f"mcp__{id2}__") for k in config.load(self.home)["grants"]))
+        self.assertEqual(config.load(self.home)["tools"], {id2: drafted})  # only the uninstalled server's map goes
+        self.assertEqual(config.load(self.home)["grants"], kept)  # its server-scope allow must not reach a reinstall
         self.assertEqual(self.state.install(id1)["state"], "uninstalled")
         self.assertEqual(self.state.install(id2)["state"], "installed")
 
-    def test_read_only_hint_grants_only_at_approval(self):
+    def test_install_writes_neither_grants_nor_tools(self):
+        """Q3 (b): D31's install-time grant is gone, and the drafted map has one writer, `Attach`."""
         cand = self._check(_candidate(), run=_fake_run())
         id = self.installer._server_id(cand["name"])
-        self.installer.propose(cand, "user")
-        self.assertEqual(config.load(self.home)["grants"], {})
-
         self._install(cand)
-        self.assertEqual(config.load(self.home)["grants"].get(f"mcp__{id}__echo"), "allow")
+        self.assertEqual(self.state.install(id)["state"], "installed")
+        cfg = config.load(self.home)
+        self.assertEqual((cfg["grants"], cfg["tools"]), ({}, {}))
+        steps = [e["step"] for e in self.ledger.read() if e["type"] == "install_step"]
+        self.assertNotIn("grants", steps)
 
 
     def test_missing_secret_is_still_referenced_in_both_configs(self):

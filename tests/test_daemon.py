@@ -1545,7 +1545,7 @@ class InstallerDaemonTest(DaemonHarness):
             snapshot, grants = self.run_with(fake_model("ok"), approve_scenario)
         server_id = next(iter(config.load(self.home)["mcp_servers"]))
         self.assertIn(f"mcp__{server_id}__echo", snapshot)
-        self.assertEqual(grants.get(f"mcp__{server_id}__echo"), "allow")
+        self.assertNotIn(f"mcp__{server_id}__echo", grants)  # install writes no grants (D31 retired, Q3 (b))
         self.assertTrue(any(e["type"] == "install_done" for e in self.events()))
 
     def test_signal_turn_cannot_propose_install(self):

@@ -3,13 +3,17 @@
 1. Only `pins_report.passed` entries become specs - held ones never do.
 2. A qualified name that fails the provider naming rule is skipped, loudly.
 3. The description is prefixed, sanitized and clipped - a server's words are quoted, not obeyed.
-4. `write`/`network` are always true - a `readOnlyHint` never moves the policy category.
+4. `write`/`network` stay true until U7b; `effect` is the annotations' grade (`grade_of`).
 5. `flatten` and the handler match Mark.5's shape, adapted for this codebase's broker.
+6. `draft` grades the fixture's Notion tools by the strictest-word rule (the P2 contract's counts).
 
 No network: entries are built by hand, and `servers.call` is a recording fake."""
 from __future__ import annotations
 
+import collections
+import json
 import unittest
+from pathlib import Path
 
 from pathfinder import policy
 from pathfinder.broker import Broker
@@ -103,6 +107,86 @@ class SpecsTest(unittest.TestCase):
         spec = _spec_for(_entry(annotations={"readOnlyHint": True}))
         self.assertTrue(spec.write)
         self.assertTrue(spec.network)
+        self.assertEqual(spec.effect, "read")  # what policy.effect reads when the map has no entry
+        self.assertEqual(_spec_for(_entry()).effect, "unknown")
+
+
+class DraftTest(unittest.TestCase):
+    def test_grade_of_annotations(self):
+        cases = [
+            (None, "unknown"), ({}, "unknown"), ("junk", "unknown"),
+            ({"readOnlyHint": True}, "read"),
+            ({"readOnlyHint": True, "destructiveHint": True}, "read"),
+            ({"readOnlyHint": False, "destructiveHint": False}, "write"),
+            ({"destructiveHint": False, "openWorldHint": True}, "write"),  # openWorld is not a send
+            ({"readOnlyHint": False, "destructiveHint": True}, "destructive"),
+            ({"readOnlyHint": False}, "destructive"),  # destructiveHint absent: MCP's default
+            ({"title": "x"}, "destructive"),
+        ]
+        for annotations, grade in cases:
+            self.assertEqual(mcp_tools.grade_of(annotations), grade, annotations)
+
+    def test_strictest_word_wins_and_unmatched_values_are_left_out(self):
+        definition = {"name": "t", "annotations": {"destructiveHint": False}, "inputSchema": {"properties": {
+            "mode": {"type": "string", "enum": ["fast", "slow"]},  # no listed word: the next enum is used
+            "op": {"type": "string", "enum": ["get_and_delete", "Send_Now", "frobnicate", "list"]}}}}
+        self.assertEqual(mcp_tools.draft(definition),
+                         {"effect_by": {"op": {"get_and_delete": "destructive", "Send_Now": "external_send",
+                                               "list": "read"}}})
+        hidden = {"name": "h", "inputSchema": {"properties": {"op": {"enum": [
+            "get_page-delete", "deletePage_list", "listPages", "HTTPSend"]}}}}
+        self.assertEqual(mcp_tools.draft(hidden), {"effect_by": {"op": {  # no joiner hides a word
+            "get_page-delete": "destructive", "deletePage_list": "destructive", "listPages": "read",
+            "HTTPSend": "external_send"}}})
+        self.assertIsNone(mcp_tools.draft({"name": "bare"}))  # no annotations, no enum: unknown, asks
+
+    def test_a_non_read_word_in_another_enum_grades_the_whole_tool(self):
+        """Fail-closed (keeps the one-argument map): `{action: get, mode: delete}` cannot be keyed by
+        `action`, so the tool takes the strictest grade found in any enum; a read-only second enum changes nothing."""
+        def tool(mode):
+            return {"name": "t", "annotations": {"destructiveHint": False}, "inputSchema": {"properties": {
+                "action": {"type": "string", "enum": ["get", "update"]}, "mode": {"type": "string", "enum": mode}}}}
+        self.assertEqual(mcp_tools.draft(tool(["plain", "delete"])), {"effect": "destructive"})
+        self.assertEqual(mcp_tools.draft(tool(["notify"])), {"effect": "external_send"})
+        self.assertEqual(mcp_tools.draft(tool(["list", "plain"])),
+                         {"effect_by": {"action": {"get": "read", "update": "write"}}})
+
+    def test_read_only_hint_never_hides_a_non_read_action(self):
+        """Lead's rule on review Q3: `readOnlyHint: true` drafts whole-tool read only while every graded value
+        is read; a value that grades otherwise drafts the map as for any other tool."""
+        def tool(values):
+            return {"name": "t", "annotations": {"readOnlyHint": True},
+                    "inputSchema": {"properties": {"action": {"type": "string", "enum": values}}}}
+        self.assertEqual(mcp_tools.draft(tool(["get", "list", "frobnicate"])), {"effect": "read"})
+        second = tool(["get", "list"])
+        second["inputSchema"]["properties"]["mode"] = {"type": "string", "enum": ["fast", "purge_all"]}
+        self.assertEqual(mcp_tools.draft(second), {"effect": "destructive"})  # whole-tool read is lost too
+        self.assertEqual(mcp_tools.draft(tool(["get", "delete", "update", "frobnicate"])),
+                         {"effect_by": {"action": {"get": "read", "delete": "destructive", "update": "write"}}})
+        self.assertEqual(mcp_tools.draft({"name": "w", "annotations": {"destructiveHint": False}}), {"effect": "write"})
+
+    def test_draft_of_the_notion_fixture(self):
+        path = Path(__file__).resolve().parent.parent / "bench/v2/fixtures/notion_tools.json"
+        definitions = json.loads(path.read_text(encoding="utf-8"))
+        drafted = mcp_tools.draft_server(definitions)
+        self.assertEqual(len(drafted), 11)
+        whole = {name: e["effect"] for name, e in drafted.items() if "effect" in e}
+        self.assertEqual(whole, {"users": "read", "workspace": "read", "content_convert": "read", "help": "read",
+                                 "config__open_relay": "write"})
+        mixed = {name: e["effect_by"]["action"] for name, e in drafted.items() if "effect_by" in e}
+        self.assertEqual(set(mixed), {"pages", "databases", "blocks", "comments", "file_uploads", "config"})
+        enums = sum(len(d["inputSchema"]["properties"]["action"]["enum"]) for d in definitions if d["name"] in mixed)
+        self.assertEqual(enums, 38)
+        counts = collections.Counter(g for table in mixed.values() for g in table.values())
+        self.assertEqual(counts, {"read": 13, "write": 19, "destructive": 4, "external_send": 1})
+        self.assertEqual(enums - sum(counts.values()), 1)  # the one unknown
+        self.assertNotIn("setup_start", mixed["config"])
+        for tool, value, grade in [("pages", "get", "read"), ("pages", "get_property", "read"),
+                                   ("pages", "archive", "write"), ("pages", "restore", "write"),
+                                   ("databases", "delete_page", "destructive"), ("config", "status", "read"),
+                                   ("config", "setup_status", "read"), ("config", "setup_reset", "destructive"),
+                                   ("config", "cache_clear", "destructive"), ("file_uploads", "send", "external_send")]:
+            self.assertEqual(mixed[tool][value], grade, (tool, value))
 
 
 class PolicyTest(unittest.TestCase):

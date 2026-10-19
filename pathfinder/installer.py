@@ -34,7 +34,7 @@ from .mcp import pins as mcp_pins
 from .mcp.protocol import qualify
 from .mcp.servers import Entry, _resolve
 from .mcp.session import ServerSession
-from .mcp.tools import read_only, refused
+from .mcp.tools import draft, refused
 from .mcp.transport import StdioTransport, StreamableHttpTransport
 from .signals import Signal
 from .tools import TOOLS as _TOOLS, visible
@@ -113,11 +113,11 @@ def brief(c: dict) -> str:
     integrity = "ok" if install.get("integrity") else "missing"
     trial = c["verification"].get("sandbox_trial") or {}
     tools = trial.get("tools") or []
-    n, k = len(tools), sum(1 for t in tools if t.get("read_only_hint"))
-    parts = [f"license {lic['spdx']} {lic['verdict']}", f"integrity {integrity}",
-            f"trial ok, {n} tools ({k} read-only)"]
+    parts = [f"license {lic['spdx']} {lic['verdict']}", f"integrity {integrity}", f"trial ok, {len(tools)} tools"]
     if trial.get("skipped"):  # what the loader will refuse, its names escaped where the trial read them
         parts[-1] += f", {len(trial['skipped'])} skipped ({', '.join(trial['skipped'])[:120]})"
+    if not_read := [x for t in tools for x in t.get("not_read", [])]:  # the map `Attach` will draft (Q3 (b))
+        parts.append("not read: " + ", ".join(not_read))
     if install.get("needs"):
         parts.append("needs: " + ", ".join(install["needs"]))
     if lic.get("warning"):
@@ -125,6 +125,20 @@ def brief(c: dict) -> str:
     if install.get("runtime"):
         parts.append("command: " + " ".join([install["runtime"], *install.get("args", [])]))
     return f"{catalog.oneline(c['name'])}@{catalog.oneline(c['version'])}  " + catalog.oneline(" · ".join(parts))  # registry text: one clean line
+
+
+def _not_read(name: str, definition: dict) -> list:
+    """What one tool's draft leaves not read, by name: `tool: grade` or `tool.value: grade`, and `asks` for
+    a tool or an enum value the draft leaves out (it asks as unknown)."""
+    entry = draft(definition)
+    if entry is None or entry.get("effect", "read") != "read":
+        return [f"{name}: {(entry or {}).get('effect', 'asks')}"]
+    out = []
+    for arg, table in (entry.get("effect_by") or {}).items():
+        grades = [(v, table.get(v, "asks") if isinstance(v, str) else "asks")
+                  for v in definition["inputSchema"]["properties"][arg]["enum"]]
+        out += [f"{name}.{visible(str(v))}: {grade}" for v, grade in grades if grade != "read"]
+    return out
 
 
 def _npm_lookup(pkg: dict, run) -> tuple:
@@ -295,7 +309,6 @@ class Installer:
             # so adding one later is all it takes - a required one keeps the server disabled until then
             "env_from_keychain": sorted(_keychain_env(pkg)),
             "args": list(pkg["args"]),
-            "permissions": [{"tool": t["name"], "grant": "allow" if t["read_only_hint"] else "ask"} for t in tools],
         })
         return candidate
 
@@ -335,11 +348,11 @@ class Installer:
             name = t.get("name", "")
             entry = Entry(server_id=sid, tool_name=name, qualified_name=qualify(sid, name), definition=t)
             if refused(entry):
-                skipped.append(visible(name))  # S5: never trialed further, never granted (the loader's own rule)
+                skipped.append(visible(name))  # S5: never trialed further, never drafted (the loader's own rule)
                 continue
             prints = mcp_pins.fingerprint(t)
             out.append({"name": entry.tool_name, "description_hash": prints["description"],
-                       "schema_hash": prints["inputSchema"], "read_only_hint": read_only(entry),
+                       "schema_hash": prints["inputSchema"], "not_read": _not_read(entry.tool_name, t),  # displayed, never written
                        "params": mcp_pins.param_names(t)})
         return out, skipped
 
@@ -382,7 +395,7 @@ class Installer:
                     + (f"; {more} more, give the full name" if more > 0 else "")}
         cand, item = (exact or suffixed or [(None, None)])[0]
         if cand is None:
-            return {"error": "no such server; try search_tools"}
+            return {"error": "no such server; try search_registry"}
         if cand["name"] != catalog.oneline(cand["name"], 200):  # what is shown must be what is installed
             return {"error": "the registry name holds characters that cannot be shown; not proposed: "
                     + catalog.oneline(cand["name"], 80)}
@@ -471,11 +484,10 @@ class Installer:
         if outcome["ok"]:
             tools = candidate["verification"]["sandbox_trial"]["tools"]
             names = [t["name"] for t in tools]
-            allowed = sum(1 for t in tools if t["read_only_hint"])
             self.record("install_done", id=id, name=candidate["name"], version=candidate["version"],
                         tools=names, backup=outcome["backup"])
             self.push_signal(Signal(sense="catalog", kind="install_done", key=f"install_done:{id}",
-                summary=f"Installed {candidate['name']}@{candidate['version']}: {len(names)} tools ({allowed} allowed)",
+                summary=f"Installed {candidate['name']}@{candidate['version']}: {len(names)} tools",
                 fields={"id": id, "tools": names}, trust="self", exempt=True))
         else:
             try:
@@ -504,9 +516,7 @@ class Installer:
     def _install_steps(self, id: str, candidate: dict) -> dict:
         pkg, install = candidate["package"], candidate["install"]
         pre_servers = config.load(self.home).get("mcp_servers") or {}
-        pre_grants = config.load(self.home).get("grants") or {}
-        out = {"ok": False, "done": [], "reason": "", "step": "", "backup": "",
-              "pre_servers": pre_servers, "pre_grants": pre_grants}
+        out = {"ok": False, "done": [], "reason": "", "step": "", "backup": ""}
 
         if id in pre_servers:  # S2: the id was decided once, at check - a clash fails, never a silent -2
             reason = f"server id already taken: {id}"
@@ -545,16 +555,6 @@ class Installer:
             self.record("install_step", id=id, step="pins", ok=False, detail=str(e))
             return {**out, "reason": str(e), "step": "pins"}
 
-        try:
-            allow = {f"mcp__{id}__{p['tool']}": "allow" for p in install["permissions"] if p["grant"] == "allow"}
-            if allow:
-                config.set(self.home, "grants", {**pre_grants, **allow})
-            self.record("install_step", id=id, step="grants", ok=True, detail=str(len(allow)))
-            out["done"].append("grants")
-        except Exception as e:
-            self.record("install_step", id=id, step="grants", ok=False, detail=str(e))
-            return {**out, "reason": str(e), "step": "grants"}
-
         out["ok"] = True
         return out
 
@@ -591,20 +591,29 @@ class Installer:
         from being attempted."""
         for step in reversed(outcome["done"]):
             try:
-                if step == "grants":
-                    config.set(self.home, "grants", outcome["pre_grants"])
-                elif step == "pins":
+                if step == "pins":
                     self.record("pin_revoke", server=id)
                 elif step == "claude_code":
                     # not the backup: the load step (a first npx download) sits between backup and
                     # rollback, and Claude Code may have written meanwhile (review 3)
                     self._remove_from_claude_json(id)
-                elif step == "mcp_servers":
-                    config.set(self.home, "mcp_servers", outcome["pre_servers"])
+                elif step == "mcp_servers":  # with the map the load step drafted, and any grant naming the server
+                    self._forget(id, "mcp_servers", "tools", "grants")
             except Exception as e:
                 self.record("install_step", id=id, step=f"rollback_{step}", ok=False, detail=str(e))
         if "mcp_servers" in outcome["done"]:  # nothing of ours was loaded otherwise (N1)
             self._unload(id)
+
+    def _forget(self, id: str, *keys: str) -> None:
+        """Drop the server from each config key - its `id` entry, or every `mcp__<id>__` grant (`*` too) - so a
+        stale map or server-scope allow never applies to a reinstall under the same id (`Attach` never
+        overwrites a map); the current file is read, so another server's later write survives."""
+        cfg = config.load(self.home)
+        for key in keys:
+            old = cfg.get(key) or {}
+            kept = {k: v for k, v in old.items() if not (k.startswith(f"mcp__{id}__") if key == "grants" else k == id)}
+            if len(kept) != len(old):
+                config.set(self.home, key, kept)
 
     # -- uninstall -------------------------------------------------------------------------
     async def uninstall(self, id: str) -> dict:
@@ -613,7 +622,7 @@ class Installer:
         taken; restoring it here would wipe every later write to `~/.claude.json`, another
         server's entry or Claude Code's own state, included). Reads the CURRENT file instead, pops
         this server's own entry, writes atomically, read-back deep-compares every other key.
-        Order: `mcp_servers` through `config.set`, then `grants`, then the foreign file, then
+        Order: `mcp_servers`, its `tools` map and grants through `config.set`, then the foreign file, then
         pins/unload, then `uninstalled` - each step guarded so a raise records what happened and
         stops there; the row then reads `installing` (B7 treats that like `installed` for a retry
         of this same reverse path)."""
@@ -624,23 +633,11 @@ class Installer:
             return await asyncio.to_thread(self._uninstall_steps, id, row)
 
     def _uninstall_steps(self, id: str, row: dict) -> dict:
-        cfg = config.load(self.home)
         try:
-            servers = {k: v for k, v in (cfg.get("mcp_servers") or {}).items() if k != id}
-            if len(servers) != len(cfg.get("mcp_servers") or {}):
-                config.set(self.home, "mcp_servers", servers)
+            self._forget(id, "mcp_servers", "tools", "grants")
             self.record("install_step", id=id, step="mcp_servers", ok=True, detail="")
         except Exception as e:
             self.record("install_step", id=id, step="mcp_servers", ok=False, detail=str(e))
-            return {"error": str(e)}
-
-        try:
-            grants = {k: v for k, v in (cfg.get("grants") or {}).items() if not k.startswith(f"mcp__{id}__")}
-            if len(grants) != len(cfg.get("grants") or {}):
-                config.set(self.home, "grants", grants)
-            self.record("install_step", id=id, step="grants", ok=True, detail="")
-        except Exception as e:
-            self.record("install_step", id=id, step="grants", ok=False, detail=str(e))
             return {"error": str(e)}
 
         try:

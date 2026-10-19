@@ -6,11 +6,10 @@ and `policy.py` here).
 A held tool (`pins.check`'s `held`, not `passed`) never becomes a spec - the daemon's
 `accept_pins` proposal is what surfaces it, never the tool menu (Mark.5's rule).
 
-`write=True, network=True` always: a `readOnlyHint` is the server's own word (the spec calls
-it non-binding), never a fact the policy table can trust on its own. D31's exemption for a
-read-only-hinted tool works through `config.grants`, which `policy.decide` already honors for
-user turns - this module makes no exception for it, and `origins` is left at `ToolSpec`'s
-default (the four turn origins, never `memory`)."""
+`effect` is the grade the tool's annotations give (`grade_of`); `policy.effect` reads it only after
+the owner's map `tools.<server>` (V6), which `draft` proposes from the same annotations and the
+verbs of an enum argument. `write=True, network=True` stay until U7b; `origins` is left at
+`ToolSpec`'s default."""
 from __future__ import annotations
 
 import logging
@@ -49,7 +48,7 @@ def specs(entries, servers, pins_report) -> dict[str, ToolSpec]:
 
 def refused(entry) -> str:
     """Why this tool will never be registered ("" if it will) - `installer._trial` asks the same, so a
-    trial never counts, grants or pins a tool the loader then drops."""
+    trial never counts, drafts or pins a tool the loader then drops."""
     if not _NAME_OK.match(entry.qualified_name):
         return "does not fit the provider naming rule"
     schema = entry.definition.get("inputSchema")
@@ -86,6 +85,7 @@ def _to_spec(servers, entry) -> ToolSpec:
         required=map_strings(required, _schema_text),
         handler=handler,
         write=True, network=True,
+        effect=grade_of(entry.definition.get("annotations")),
     )
 
 
@@ -127,11 +127,69 @@ def flatten(result: dict) -> str:
     return text
 
 
-def read_only(entry) -> bool:
-    """Whether the trial saw `readOnlyHint: true` - the installer's D31 grant, never the
-    policy table (which never reads it). One reader of the hint, here."""
-    annotations = entry.definition.get("annotations")
-    return isinstance(annotations, dict) and annotations.get("readOnlyHint") is True
+def grade_of(annotations) -> str:
+    """The grade a tool's annotations give: `readOnlyHint: true` -> read; else `destructiveHint: false` ->
+    write; else destructive (MCP's default when the hint is absent); no annotations -> unknown.
+    `openWorldHint` is not a send."""
+    if not isinstance(annotations, dict) or not annotations:
+        return "unknown"
+    if annotations.get("readOnlyHint") is True:
+        return "read"
+    return "write" if annotations.get("destructiveHint") is False else "destructive"
 
 
-__all__ = ["specs", "refused", "flatten", "read_only", "McpToolError", "MAX_DESCRIPTION"]
+# A word of an enum value -> its grade; a value's grade is the strictest of its words (Q3 (b)).
+_VERBS = {
+    "read": "get list query search info retrieve read status children me fetch find count",
+    "write": "create update append move duplicate set add edit rename archive restore complete upload",
+    "destructive": "delete remove destroy purge drop reset clear trash",
+    "external_send": "send post publish share invite reply forward notify",
+}
+_STRICTEST_FIRST = ("destructive", "external_send", "write", "read")
+_GRADE_OF_WORD = {word: grade for grade, words in _VERBS.items() for word in words.split()}
+
+
+def _verb_grade(value: str) -> str:
+    """The strictest grade over the words of an enum value, split at any non-letter and at camelCase
+    (`get_page-delete`, `deletePage` hide no word); "" when no word is listed."""
+    words = re.findall(r"[A-Z]?[a-z]+|[A-Z]+(?![a-z])|[0-9]+", value)
+    found = {_GRADE_OF_WORD.get(word.lower()) for word in words}
+    return next((grade for grade in _STRICTEST_FIRST if grade in found), "")
+
+
+def draft(definition: dict) -> dict | None:
+    """One tool's proposed map entry: `effect_by` on the first string-enum argument whose values the verb
+    table grades (only those values: the rest ask) - except that a `readOnlyHint: true` tool whose graded
+    values are all read drafts `{"effect": "read"}` (the server's "read-only" never hides an action that
+    says otherwise); else the annotations' grade when it is decisive; else None (it asks as unknown).
+    Fail-closed: when a value of another enum grades non-read, the one-argument map cannot key it, so the
+    whole tool takes the strictest grade found in any enum."""
+    annotations = definition.get("annotations")
+    schema = definition.get("inputSchema")
+    params = schema.get("properties") if isinstance(schema, dict) else None
+    tables = {}  # arg -> {value: grade}, every string-enum argument with a graded value, in schema order
+    for arg, param in (params if isinstance(params, dict) else {}).items():
+        values = param.get("enum") if isinstance(param, dict) else None
+        table = {v: _verb_grade(v) for v in values if isinstance(v, str) and _verb_grade(v)} \
+            if isinstance(values, list) else {}
+        if table:
+            tables[arg] = table
+    keyed, *others = tables or [None]
+    if any(g != "read" for arg in others for g in tables[arg].values()):
+        found = {g for table in tables.values() for g in table.values()}
+        return {"effect": next(g for g in _STRICTEST_FIRST if g in found)}
+    grade = grade_of(annotations)
+    if grade == "read" and not (keyed and set(tables[keyed].values()) - {"read"}):
+        return {"effect": "read"}
+    if keyed:
+        return {"effect_by": {keyed: tables[keyed]}}
+    return None if grade == "unknown" else {"effect": grade}
+
+
+def draft_server(definitions) -> dict:
+    """`draft` over a server's tool definitions: `{tool name: entry}`, a tool with no draft left out."""
+    return {d["name"]: entry for d in definitions if (entry := draft(d))}
+
+
+__all__ = ["specs", "refused", "flatten", "grade_of", "draft", "draft_server", "McpToolError",
+           "MAX_DESCRIPTION"]

@@ -1,6 +1,6 @@
 """pathfinder daemon | reindex | say TEXT | config get [KEY[.SUB]] |
 config set KEY VALUE | config set KEY.SUB JSON|off |
-approvals | approve ID | deny ID | interrupt |
+approvals | approve ID [--always tool|server|session] [--grade G] | deny ID | interrupt |
 listen | signal SENSE JSON | react up|down [ID] | rules | tools |
 memory | memory undo [N] |
 install NAME | uninstall ID | search TEXT | secret ID NAME |
@@ -18,6 +18,7 @@ from pathlib import Path
 from . import catalog, config, keychain, memory, mirror, tui
 from . import init as init_mod
 from . import installer as installer_mod
+from .clone import FLOOR, SCOPES
 from .daemon import SOCKET, Daemon, is_serving
 from .ledger import Ledger
 from .mcp import servers as mcp_servers
@@ -93,7 +94,9 @@ def approvals(home):
     try:
         for gate in state.open_gates():
             if gate["decision"] is None:  # a decided gate waits only for its report turn
-                print(visible(f"{gate['seq']}  {gate['tool']}  {json.dumps(gate['args'], ensure_ascii=False)}"))
+                title = f"  {gate['title']}" if gate["title"] else ""  # NULL on a P1 home's rows until a reindex
+                print(visible(f"{gate['seq']}  {gate['tool']}  {gate['effect']}{title}  "
+                              f"{json.dumps(gate['args'], ensure_ascii=False)}"))
         for row in state.pending():
             if row["tool"] == "edit_memory":
                 a = row["args"]
@@ -153,15 +156,52 @@ def mcp_tools_list(home):
     return 0
 
 
-def decide(home, kind, approval_id):
+def _flags(home, ref, scope, grade):
+    """(refusal, confirmation), each "" or one line, for `approve ID --always SCOPE / --grade G`: the gate's
+    row against Clone.decide's own rules, so a refusal records nothing and leaves the gate open."""
+    if scope not in SCOPES:
+        return "--always takes tool, server or session", ""
+    if grade and grade not in config.GRADES:
+        return f"--grade takes one of: {', '.join(config.GRADES)}", ""
+    state = State(home / "state.db")
+    try:
+        row = state.gate(int(ref)) if ref.isdecimal() else None
+    finally:
+        state.close()
+    if row is None or row["decision"] is not None:
+        return f"{ref} is not an open tool gate: --always and --grade apply to one", ""
+    tool, effect = row["tool"], row["effect"]
+    if scope and effect in FLOOR:
+        return f"gate {ref} ({tool}) is {effect}: no --always covers it; approve it once", ""
+    if scope == "server" and not tool.startswith("mcp__"):
+        return f"{tool} is a native tool: --always server is for an MCP server's tools (try --always tool)", ""
+    if grade and effect != "unknown":
+        return f"gate {ref} ({tool}) is graded {effect}: --grade answers only an unknown effect", ""
+    # config grants are read once per turn, the session's set per call
+    if scope == "server":  # the server form Clone.decide grants
+        return "", f"writes by any mcp__{tool.split('__', 2)[1]}__* tool run without asking from the next turn"
+    return "", {"": "", "tool": f"writes by {tool} run without asking from the next turn",
+                "session": f"writes by {tool} run without asking for the rest of this session"}[scope]
+
+
+def decide(home, kind, approval_id, scope="", grade=""):
     """approve/deny: send the decision; for a gate, print the root's report turn until it ends (V22).
+    `approve` may carry an "always allow" scope and an unknown gate's grade (Q5, Q3), checked here first.
     ponytail: it ends at the session's next turn.end, so a turn already running there when the decision
     lands ends it early; `listen` shows the report then."""
+    refusal, confirmation = _flags(home, approval_id, scope, grade) if scope or grade else ("", "")
+    if refusal:
+        print(f"pathfinder: {refusal}", file=sys.stderr)
+        return 1
     sock = _connect(home)
     if sock is None:
         return 1
     with sock:
-        return _stream(sock, [{"type": kind, "id": approval_id}])
+        code = _stream(sock, [{"type": kind, "id": approval_id, **({"scope": scope} if scope else {}),
+                               **({"grade": grade} if grade else {})}])
+    if confirmation and code == 0:  # only once the daemon took the decision and its report turn ended
+        print(f"pathfinder: {confirmation}", file=sys.stderr)
+    return code
 
 
 def interrupt(home):
@@ -439,6 +479,10 @@ def main(argv=None):
         return approvals(home)
     if len(args) == 2 and args[0] in ("approve", "deny"):
         return decide(home, args[0], args[1])
+    flags = dict(zip(args[2::2], args[3::2]))
+    if args[:1] == ["approve"] and len(args) in (4, 6) and len(flags) * 2 == len(args) - 2 \
+            and set(flags) <= {"--always", "--grade"}:
+        return decide(home, "approve", args[1], flags.get("--always", ""), flags.get("--grade", ""))
     if args == ["interrupt"]:
         return interrupt(home)
     if args == ["tui"]:

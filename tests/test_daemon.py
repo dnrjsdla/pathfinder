@@ -15,7 +15,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from pathfinder import config
+from pathfinder import config, search
 from pathfinder import tools as tools_mod
 from pathfinder import tui
 from pathfinder.broker import Broker
@@ -697,7 +697,7 @@ class RootTurnTest(DaemonHarness):
     def test_an_all_digit_v1_id_still_resolves(self):
         """U8a review: a v1 hex id can be all digits; no seq by that number means it is a v1 id."""
         async def scenario(daemon):
-            daemon.record("approval_pending", session="s1", origin="memory", id="123456789012", call_id="x",
+            daemon.record("approval_pending", session="s1", origin="system", id="123456789012", call_id="x",
                           tool="edit_memory", messages=[],
                           args={"target": "USER.md", "op": "add", "old": "", "new": "Likes tea.", "evidence": [1]})
             c = await Client.open(self.home)
@@ -1275,7 +1275,7 @@ class MemoryDaemonTest(DaemonHarness):
     def test_memory_approval_routes_to_manager(self):
         async def scenario(daemon):
             proposal = {"target": "USER.md", "op": "add", "old": "", "new": "Likes tea.", "evidence": [1]}
-            daemon.record("approval_pending", session="s1", origin="memory", id="appr1",
+            daemon.record("approval_pending", session="s1", origin="system", id="appr1",
                           call_id="appr1", tool="edit_memory", args=proposal, messages=[])
             c = await Client.open(self.home)
             c.send({"type": "approve", "id": "appr1"})
@@ -1298,7 +1298,7 @@ class MemoryDaemonTest(DaemonHarness):
 
         async def scenario(daemon):
             proposal = {"target": "RULES.md", "op": "replace", "old": old_row, "new": new_row, "evidence": [1]}
-            daemon.record("approval_pending", session="s1", origin="memory", id="appr2",
+            daemon.record("approval_pending", session="s1", origin="system", id="appr2",
                           call_id="appr2", tool="edit_memory", args=proposal, messages=[])
             c = await Client.open(self.home)
             c.send({"type": "approve", "id": "appr2"})
@@ -1469,7 +1469,7 @@ class McpDaemonTest(DaemonHarness):
     def test_proposal_table_routes_by_tool(self):
         async def scenario(daemon):
             proposal = {"target": "USER.md", "op": "add", "old": "", "new": "Likes tea.", "evidence": [1]}
-            daemon.record("approval_pending", session="s1", origin="memory", id="appr1",
+            daemon.record("approval_pending", session="s1", origin="system", id="appr1",
                           call_id="appr1", tool="edit_memory", args=proposal, messages=[])
             c = await Client.open(self.home)
             c.send({"type": "approve", "id": "appr1"})
@@ -1570,8 +1570,8 @@ class InstallerDaemonTest(DaemonHarness):
 class ProposalGateLineTest(DaemonHarness):
     def test_user_turn_proposal_sends_a_gate_line(self):
         """Live 2026-09-26: an install_server proposal from the owner's own turn never reached
-        the screen, so they typed "approve" into the chat and nothing was installed. A pass's
-        own proposal stays behind its `memory_proposed` notice (no line)."""
+        the screen, so they typed "approve" into the chat and nothing was installed. A proposal
+        recorded outside the owner's turn (origin system) sends no line."""
         cand = {"name": "io.github.acme/widget", "version": "1.0.0",
                 "verification": {"license": {"spdx": "MIT", "verdict": "ok"},
                                  "sandbox_trial": {"tools": [{"name": "echo", "read_only_hint": True}]}},
@@ -1581,7 +1581,7 @@ class ProposalGateLineTest(DaemonHarness):
             c = await Client.open(self.home)
             c.send({"type": "attach"})
             sid = (await c.recv())["session"]
-            daemon.record("approval_pending", session=sid, origin="memory", id="m1", call_id="m1",
+            daemon.record("approval_pending", session=sid, origin="system", id="m1", call_id="m1",
                           tool="edit_memory", args={"target": "USER.md"}, messages=[])
             proposal = daemon.record("approval_pending", session=sid, origin="user", id="a1", call_id="a1",
                                      tool="install_server", args=cand, messages=[])
@@ -1946,7 +1946,7 @@ class ChatApprovalTest(DaemonHarness):
         async def scenario(daemon):
             c, sid = await self._attach()
             [gate] = [m["id"] for m in await self.say(c, "write it") if m["type"] == "gate"]
-            daemon.record("approval_pending", session=sid, turn="t0", origin="memory", id="a1", call_id="a1",
+            daemon.record("approval_pending", session=sid, turn="t0", origin="system", id="a1", call_id="a1",
                           tool="edit_memory", args={"target": "USER.md"}, messages=[])
             requests = len(router.seen)
             seen = await self._say(c, "I'll approve.")
@@ -2261,6 +2261,51 @@ class SigtermTest(DaemonHarness):
         proc, sock_path = asyncio.run(main())
         self.assertIsNotNone(proc.poll())  # the child is dead, not orphaned
         self.assertFalse(sock_path.exists())
+
+
+class P2WiringTest(DaemonHarness):
+    def test_search_tools_runs_in_a_daemon_turn(self):
+        """The daemon imports search (registering search_tools) and binds its home: with no embed_model the
+        result is the tool name list, not a handler error."""
+        async def scenario(daemon):
+            c = await Client.open(self.home)
+            await self.say(c, "find a tool for notes")
+            c.close()
+
+        with mock.patch.object(search, "HOME", None):  # not a home bound by an earlier test
+            self.run_with(fake_model("ok", [call("c1", "search_tools", query="notes")]), scenario)
+        [result] = [e for e in self.events() if e["type"] == "result"]
+        self.assertTrue(result["ok"])
+        self.assertIn("search is unavailable", json.dumps(result["body"]))
+        self.assertIn("write_file", json.dumps(result["body"]))
+
+    def test_socket_approve_passes_scope_and_refuses_what_does_not_fit(self):
+        """`approve {scope}` reaches Clone.decide: a scope that does not fit (server on a native) is an error
+        line with nothing recorded and the gate still open; `session` is recorded and derived by the state."""
+        note = self.home / "note.txt"
+
+        async def scenario(daemon):
+            c = await Client.open(self.home)
+            await self.say(c, "please write a note")
+            [gate] = [e for e in self.events() if e["type"] == "gate"]
+            c.send({"type": "approve", "id": gate["seq"], "scope": "server"})
+            refused = await c.recv()
+            resumes = [e for e in self.events() if e["type"] == "resume"]
+            c.send({"type": "approve", "id": gate["seq"], "scope": "session"})
+            seen = await c.until("turn.end")
+            c.close()
+            return gate, refused, resumes, seen, daemon.state.session_grants(gate["session"])
+
+        gate, refused, resumes, seen, granted = self.run_with(
+            fake_model("Written.", [call("c1", "write_file", path=str(note), content="hi")], [text("I asked.")]), scenario)
+        self.assertEqual(refused["type"], "error")
+        self.assertEqual(refused["message"], f"approve {gate['seq']} was refused; nothing was recorded")
+        self.assertEqual(resumes, [])
+        self.assertEqual(seen[-1]["kind"], "answer")
+        self.assertEqual([(e["gate"], e["scope"]) for e in self.events() if e["type"] == "resume"],
+                         [(gate["seq"], "session")])
+        self.assertEqual(granted, {"write_file"})
+        self.assertEqual(note.read_text(), "hi")
 
 
 if __name__ == "__main__":

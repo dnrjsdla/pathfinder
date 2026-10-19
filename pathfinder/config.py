@@ -24,7 +24,9 @@ DEFAULTS = {
     "providers": {"ollama": {"base_url": "http://localhost:11434/v1", "api_key_env": ""}},  # + optional "api": "openai" (default) | "anthropic" (the official SDK; live only on the owner's go-ahead, D7), "effort" (anthropic only)
     "max_steps": 8,
     "session_resume_s": 7200,
-    "grants": {},
+    "approval_mode": "manual",  # the user row of policy.MODES: read-only | manual | auto
+    "tools": {},       # mcp server id -> tool -> {"effect": G} | {"effect_by": {arg: {value: G}}} (policy.effect)
+    "grants": {},      # tool name or mcp__<server>__* -> allow | ask | deny
     "senses": {},      # sense name -> options dict; present key = on (signals.load imports it)
     "schedules": [],   # [{id, at, repeat, text}], written only through schedule.py's tools
     "mcp_servers": {},  # server id -> {transport, command|url, env|headers, timeout, protocol}
@@ -37,6 +39,9 @@ _EFFORTS = ("low", "medium", "high", "xhigh", "max")
 
 _SCHEDULE_KEYS = {"id", "at", "repeat", "text"}
 _REPEATS = ("none", "daily", "weekly")
+
+GRADES = ("read", "write", "destructive", "external_send")  # what a tool call does; "unknown" is no grade
+_APPROVAL_MODES = ("read-only", "manual", "auto")  # policy.MODES's keys; policy builds its rows from GRADES
 
 _MCP_SERVER_ID = re.compile(r"^[a-z0-9][a-z0-9-]{0,31}$")
 _MCP_TRANSPORTS = ("stdio", "http")
@@ -153,6 +158,24 @@ def _check_mcp_servers(value):
             raise ConfigError(f"mcp_servers.{server_id}: unknown key(s) {sorted(extra)}")
 
 
+def _check_tools(value):
+    for server, table in value.items():
+        if not _MCP_SERVER_ID.match(server) or not isinstance(table, dict):
+            raise ConfigError(f"tools.{server} must be an object of tool -> map under an mcp server id")
+        for tool, entry in table.items():
+            where = f"tools.{server}.{tool}"
+            if not isinstance(entry, dict) or len(entry) != 1 or not entry.keys() <= {"effect", "effect_by"}:
+                raise ConfigError(f'{where} must be {{"effect": G}} or {{"effect_by": {{arg: {{value: G}}}}}}')
+            by = entry.get("effect_by")
+            if "effect_by" in entry and (not isinstance(by, dict) or len(by) != 1
+                                         or not isinstance(next(iter(by.values())), dict)):
+                raise ConfigError(f"{where}.effect_by must key one argument: {{arg: {{value: G}}}}")
+            grades = list(next(iter(by.values())).values()) if "effect_by" in entry else [entry["effect"]]
+            bad = [g for g in grades if g not in GRADES]
+            if bad:
+                raise ConfigError(f"{where}: a grade must be one of {GRADES}, got {bad}")
+
+
 def _check(key, value):
     """One validation for both doors: `config set` and a hand-edited config.json."""
     if key not in DEFAULTS:
@@ -168,6 +191,10 @@ def _check(key, value):
         bad = {k: v for k, v in value.items() if v not in ("allow", "ask", "deny")}
         if bad:  # a typo here would otherwise read as "never ask" - fail closed at the door
             raise ConfigError(f"grants values must be allow, ask or deny: {bad}")
+    if key == "approval_mode" and value not in _APPROVAL_MODES:
+        raise ConfigError(f"approval_mode must be one of {_APPROVAL_MODES}, got {value!r}")
+    if key == "tools":
+        _check_tools(value)
     if key == "providers":
         _check_providers(value)
     if key == "models":

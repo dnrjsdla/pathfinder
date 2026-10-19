@@ -130,6 +130,43 @@ class ConfigTest(unittest.TestCase):
         cfg = config.set(self.home, "mcp_servers", value)
         self.assertEqual(cfg["mcp_servers"], value)
 
+    def test_approval_mode_and_the_tool_map_are_validated(self):
+        self.assertEqual(config.load(self.home)["approval_mode"], "manual")
+        for mode in ("read-only", "manual", "auto"):
+            self.assertEqual(config.set(self.home, "approval_mode", mode)["approval_mode"], mode)
+        for bad in ("full-auto", "Manual", ""):
+            with self.assertRaises(config.ConfigError, msg=bad):
+                config.set(self.home, "approval_mode", bad)
+        good = {"srv": {"workspace": {"effect": "read"},
+                        "pages": {"effect_by": {"action": {"get": "read", "archive": "write", "drop": "destructive"}}},
+                        "files": {"effect": "external_send"}}}
+        self.assertEqual(config.set(self.home, "tools", good)["tools"], good)
+        for bad in (
+            {"bad_id": {"t": {"effect": "read"}}},                              # not a server id
+            {"srv": {"t": {"effect": "unknown"}}},                              # not a grade
+            {"srv": {"t": {"effect": "read", "effect_by": {}}}},                # both
+            {"srv": {"t": {}}},                                                 # neither
+            {"srv": {"t": {"effect_by": {"action": {"get": "reed"}}}}},         # a bad grade in the map
+            {"srv": {"t": {"effect_by": {"a": {"x": "read"}, "b": {"y": "read"}}}}},  # two arguments
+            {"srv": {"t": {"effect_by": {"action": "read"}}}},                  # no value table
+            {"srv": {"t": {"effect_by": None}}},                                # null
+            {"srv": ["t"]},
+        ):
+            with self.assertRaises(config.ConfigError, msg=json.dumps(bad)):
+                config.set(self.home, "tools", bad)
+        cfg = config.set(self.home, "grants", {"mcp__srv__*": "allow", "read_file": "deny"})
+        self.assertEqual(cfg["grants"]["mcp__srv__*"], "allow")
+
+    def test_config_set_one_server_of_the_tool_map(self):
+        """D75's KEY.SUB rule sets one server's map and keeps the others."""
+        from pathfinder.__main__ import config_cmd
+        config.set(self.home, "tools", {"a": {"t": {"effect": "read"}}})
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(config_cmd(self.home, ["set", "tools.b", '{"t": {"effect": "write"}}']), 0)
+        self.assertEqual(config.load(self.home)["tools"], {"a": {"t": {"effect": "read"}}, "b": {"t": {"effect": "write"}}})
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(config_cmd(self.home, ["set", "tools.c", '{"t": {"effect": "maybe"}}']), 1)
+
     def test_models_ship_empty_and_refs_are_checked(self):
         self.assertEqual(config.load(self.home)["models"], {})
         cfg = config.set(self.home, "models", {"root": ["ollama:fake-a", "ollama:fake:tag"], "summarize": ["ollama:b"]})

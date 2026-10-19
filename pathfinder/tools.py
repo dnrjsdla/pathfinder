@@ -4,6 +4,7 @@ ever checks policy or calls a handler - an uncast `escalate="false"` (a string,
 which Python treats as truthy) must not sail past the gate as an escalation."""
 from __future__ import annotations
 
+import json
 import os
 import re
 from dataclasses import dataclass
@@ -28,6 +29,9 @@ class ToolSpec:
     network: bool = False     # can send data out
     sandboxed: bool = False   # side effects are confined by exec.py
     reversible: bool = False  # a write the user can undo by deleting a row (D22) -> user: allow
+    # an explicit grade (config.GRADES); "" = write if `write` else read. An MCP tool's is set at load
+    # from its annotations; policy.effect reads it after the owner's map
+    effect: str = ""
     # which turn origins may call it (default: the four turn origins; `memory` - the consolidation
     # pass - is opt-in). D76: every origin sees every schema; the broker refuses the rest at the door
     origins: frozenset = frozenset({"user", "signal", "job", "system"})
@@ -86,6 +90,14 @@ def _cast(kind: str, value: Any) -> tuple:
         return None, "must be true or false"
     if kind == "string":
         return (value, "") if isinstance(value, str) else (None, "must be a string")
+    if kind in ("object", "array") and isinstance(value, str):
+        # a model often sends a nested value as JSON text: parsed here, refused when it is not one
+        try:
+            value = json.loads(value)
+        except (ValueError, RecursionError):  # RecursionError: nesting deeper than the parser's stack
+            pass
+        if not isinstance(value, dict if kind == "object" else list):
+            return None, f"must be an {kind}"
     return value, ""  # an undeclared type is passed through unchanged
 
 
@@ -256,6 +268,17 @@ TOOLS = {
         handler=_write_file, normalize=_absolute_path,
         write=True,
     ),
+}
+
+# The proxy for a tool search_tools found (a neutral spec): the broker unwraps it to the real tool, whose
+# coerce, policy and gate apply as if it had been called by name (Q4)
+CALL_TOOL = {
+    "name": "call_tool",
+    "description": ("Call a tool that search_tools found, by its exact name, with its arguments as that tool's "
+                    "schema declares them. The same approval applies as to a tool called directly."),
+    "parameters": {"type": "object", "properties": {
+        "name": {"type": "string", "description": "the tool's exact name, as search_tools gave it"},
+        "arguments": {"type": "object", "description": "the tool's arguments"}}, "required": ["name", "arguments"]},
 }
 
 OFF_TOOLS: dict = {}  # tool name -> its sense, for every sense not turned on (`signals.load` fills it)

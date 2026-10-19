@@ -49,6 +49,17 @@ class CoerceTest(unittest.TestCase):
         self.assertEqual(err, "")
         self.assertIs(args["b"], False)
 
+    def test_coerce_parses_json_for_object_and_array(self):
+        spec = ToolSpec(name="t", description="", required=[], handler=None,
+                        params={"o": {"type": "object"}, "a": {"type": "array"}})
+        self.assertEqual(coerce(spec, {"o": '{"Status": "Done"}', "a": "[1, 2]"}),
+                         ({"o": {"Status": "Done"}, "a": [1, 2]}, ""))
+        self.assertEqual(coerce(spec, {"o": {"k": 1}, "a": [3]}), ({"o": {"k": 1}, "a": [3]}, ""))  # as sent
+        for args, why in (({"o": "not json"}, "'o' must be an object"), ({"o": "[1]"}, "'o' must be an object"),
+                          ({"a": '{"k": 1}'}, "'a' must be an array"),
+                          ({"a": "[" * 10**6 + "]" * 10**6}, "'a' must be an array")):  # too deep: refused, not raised
+            self.assertIn(why, coerce(spec, args)[1])
+
 
 class LocalDatetimeNormalizeTest(unittest.TestCase):
     def test_local_datetime_normalize(self):

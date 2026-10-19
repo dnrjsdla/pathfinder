@@ -10,7 +10,6 @@ from .tools import CALL_TOOL, OFF_TOOLS, ToolSpec, coerce
 
 USER_DENIED_TEXT = ("The user looked at this call and declined it. This is their decision, not an "
                     "error: do not ask again, retry, or route around it - tell them briefly and stop.")
-ORIGINS = ("user", "signal", "system")  # the origins `policy.verdict` has a row for; any other is refused
 # call_tool's own arguments, cast like any tool's (an `arguments` sent as JSON text is parsed)
 _CALL = ToolSpec(CALL_TOOL["name"], CALL_TOOL["description"], CALL_TOOL["parameters"]["properties"],
                  CALL_TOOL["parameters"]["required"], handler=None)
@@ -78,7 +77,7 @@ class Broker:
             off = f" (the {OFF_TOOLS[name]} sense is off)" if name in OFF_TOOLS else ""
             near = difflib.get_close_matches(name, list(self.tools), n=3)  # list(): one atomic copy of the keys
             return self._refuse(f"no such tool: {name}{off}" + (f"; nearest: {', '.join(near)}" if near else ""))
-        if self.origin not in spec.origins or self.origin not in ORIGINS:  # D76: origin selects policy, not the list
+        if self.origin not in spec.origins or self.origin not in policy.ORIGINS:  # D76: origin selects policy, not the list
             return self._refuse(f"{name} is not available in a {self.origin} turn")
 
         coerced, error = coerce(spec, args)

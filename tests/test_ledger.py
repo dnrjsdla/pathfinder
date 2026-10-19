@@ -28,6 +28,9 @@ class LedgerClosedVocabTest(unittest.TestCase):
             self.ledger.append("not_a_type")
         with self.assertRaises(ValueError):
             self.ledger.append("user", origin="not_an_origin")
+        for retired in ("job", "memory"):  # P2 U7c: no new writer; old events still replay
+            with self.assertRaises(ValueError):
+                self.ledger.append("user", origin=retired)
         with self.assertRaises(ValueError):
             self.ledger.append("user", trust="not_a_trust")
 
@@ -277,6 +280,23 @@ class SurrogateTest(unittest.TestCase):
         self.assertEqual(state.catch_up(led), 2)
         self.assertRegex(state.history("s")[0]["content"], "^hi �+$")
         self.assertEqual(self._state("rebuilt.db").rebuild(led), 2)  # reindex
+
+    def test_old_ledger_with_job_and_memory_origins_still_rebuilds(self):
+        """P2 U7c: `job` and `memory` are no longer appendable, but a ledger written before still replays,
+        and their events still do not keep a session alive."""
+        (self.home / "events").mkdir()
+        base = 1_700_000_000.0
+        lines = [{"seq": 1, "ts": base, "type": "session_start", "session": "s", "turn": "", "origin": "system", "trust": "self"},
+                 {"seq": 2, "ts": base + 1, "type": "user", "session": "s", "turn": "t", "origin": "user", "trust": "user", "text": "hi"},
+                 {"seq": 3, "ts": base + 50, "type": "error", "session": "s", "turn": "", "origin": "memory", "trust": "self", "message": "x"},
+                 {"seq": 4, "ts": base + 60, "type": "result", "session": "s", "turn": "", "origin": "job", "trust": "self"}]
+        (self.home / "events" / f"{ledger_mod.partition(base)}.jsonl").write_text(
+            "".join(json.dumps(e) + "\n" for e in lines))
+        led = Ledger(self.home)
+        self.assertEqual([e["origin"] for e in led.read()], ["system", "user", "memory", "job"])
+        state = self._state()
+        self.assertEqual(state.rebuild(led), 4)
+        self.assertEqual(state.session("s")["last_ts"], base + 1)
 
     def test_astral_characters_untouched(self):
         led = Ledger(self.home)

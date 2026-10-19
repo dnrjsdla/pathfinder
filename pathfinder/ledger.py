@@ -27,7 +27,7 @@ TYPES = frozenset({
     "thought", "self_note", "summary", "result", "spawn", "progress", "gate", "resume", "return",
     "triage", "task_open", "task_wake", "task_update", "task_close",
 })
-ORIGINS = frozenset({"user", "signal", "job", "system", "memory"})
+ORIGINS = frozenset({"user", "signal", "system"})
 TRUST = frozenset({"user", "self", "third_party"})
 RESERVED = frozenset({"seq", "ts", "type", "session", "turn", "origin", "trust"})
 

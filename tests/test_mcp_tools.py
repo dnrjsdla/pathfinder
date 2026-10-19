@@ -15,7 +15,6 @@ import json
 import unittest
 from pathlib import Path
 
-from pathfinder import policy
 from pathfinder.broker import Broker
 from pathfinder.mcp import pins as mcp_pins
 from pathfinder.mcp import tools as mcp_tools
@@ -103,9 +102,9 @@ class SpecsTest(unittest.TestCase):
         self.assertIn("line one", spec.description)
         self.assertIn("\n", spec.description)
 
-    def test_write_and_network_true_regardless_of_read_only_hint(self):
+    def test_network_true_write_false_regardless_of_read_only_hint(self):
         spec = _spec_for(_entry(annotations={"readOnlyHint": True}))
-        self.assertTrue(spec.write)
+        self.assertFalse(spec.write)
         self.assertTrue(spec.network)
         self.assertEqual(spec.effect, "read")  # what policy.effect reads when the map has no entry
         self.assertEqual(_spec_for(_entry()).effect, "unknown")
@@ -187,20 +186,6 @@ class DraftTest(unittest.TestCase):
                                    ("config", "setup_status", "read"), ("config", "setup_reset", "destructive"),
                                    ("config", "cache_clear", "destructive"), ("file_uploads", "send", "external_send")]:
             self.assertEqual(mixed[tool][value], grade, (tool, value))
-
-
-class PolicyTest(unittest.TestCase):
-    def setUp(self):
-        self.spec = _spec_for(_entry())
-
-    def test_user_with_grant_allows(self):
-        self.assertEqual(policy.decide(self.spec, "user", {}, {self.spec.name: "allow"}), "allow")
-
-    def test_user_without_grant_asks(self):
-        self.assertEqual(policy.decide(self.spec, "user", {}, {}), "ask")
-
-    def test_signal_asks_even_with_the_grant(self):
-        self.assertEqual(policy.decide(self.spec, "signal", {}, {self.spec.name: "allow"}), "ask")
 
 
 class FlattenTest(unittest.TestCase):

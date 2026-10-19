@@ -1,3 +1,4 @@
+import json
 import os
 import tempfile
 import threading
@@ -6,7 +7,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from pathfinder import exec as pexec, tools
+from pathfinder import exec as pexec, results, tools
 from types import SimpleNamespace
 
 
@@ -94,6 +95,19 @@ class ExecTest(unittest.TestCase):
         """A tool that runs and fails is ok=true - the exit code IS the answer."""
         result = pexec.run_command("grep nothing-to-find-here /dev/null", escalate=True)
         self.assertEqual(result["exit_code"], 1)
+
+    @unittest.skipUnless(pexec.available(), "needs sandbox-exec")
+    def test_store_cut_keeps_everything_but_stdouts_tail(self):
+        """No clip in exec: a body over the store cap is cut from the end, so stdout goes last and the exit
+        code, stderr, the kill and the sandbox hint survive the cut."""
+        result = pexec.run_command(f"head -c 400000 /dev/zero | tr '\\0' x; touch {Path.home()}/pf-no; sleep 5",
+                                   timeout=1)
+        self.assertTrue(result["killed"])
+        self.assertIn("hint", result)
+        cut_text, cut = results.cap(result)
+        self.assertEqual(cut, {"chars": len(json.dumps(result, ensure_ascii=False, separators=(",", ":")))})
+        for key in ("exit_code", "stderr", "killed", "hint"):
+            self.assertIn(json.dumps({key: result[key]}, ensure_ascii=False, separators=(",", ":"))[1:-1], cut_text)
 
 
 if __name__ == "__main__":

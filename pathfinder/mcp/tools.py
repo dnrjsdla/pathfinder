@@ -8,8 +8,8 @@ A held tool (`pins.check`'s `held`, not `passed`) never becomes a spec - the dae
 
 `effect` is the grade the tool's annotations give (`grade_of`); `policy.effect` reads it only after
 the owner's map `tools.<server>` (V6), which `draft` proposes from the same annotations and the
-verbs of an enum argument. `write=True, network=True` stay until U7b; `origins` is left at
-`ToolSpec`'s default."""
+verbs of an enum argument. `network=True` is an attribute (it reaches outside the machine), not a
+grade; `write` and `origins` are left at `ToolSpec`'s defaults."""
 from __future__ import annotations
 
 import logging
@@ -84,7 +84,7 @@ def _to_spec(servers, entry) -> ToolSpec:
         params=map_strings(params, _schema_text),  # descriptions and enum values are the server's words
         required=map_strings(required, _schema_text),
         handler=handler,
-        write=True, network=True,
+        network=True,
         effect=grade_of(entry.definition.get("annotations")),
     )
 

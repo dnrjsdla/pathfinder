@@ -1,8 +1,9 @@
 """The shell in a box: a macOS Seatbelt profile for `run_command`, plus the
-process plumbing (timeout, interrupt, output clipping) around it.
+process plumbing (timeout, interrupt) around it. Its output is not clipped here: the
+result store caps a body at 256 KB and the model sees a rendered summary (`results`).
 
-The sandbox is an execution method, not a policy input - `policy.decide()` still
-looks only at (tool, origin) and `escalate`. This is why the shell can run
+The sandbox is an execution method, not a policy input - `policy` still
+looks only at the declared facts, the origin and `escalate`. This is why the shell can run
 without parsing: instead of telling `ls` from `rm -rf ~` in Python (a losing
 game against `;`, backticks, `$( )`), both run, but the sandbox stops the
 second one from deleting anything. The kernel does the telling.
@@ -24,8 +25,6 @@ from pathlib import Path
 from . import config
 
 SANDBOX_EXEC = Path("/usr/bin/sandbox-exec")
-
-MAX_CHARS = 8000  # output clip: an unbounded `cat` could push the whole prompt out of cache
 
 # Home-relative secrets. A directory is denied with everything under it; ".env"
 # also covers ".env.local" etc. via regex (Seatbelt has no glob on file names).
@@ -142,14 +141,6 @@ def _wrap(command: str, ws: Path) -> list:
     ]
 
 
-def _clip(text: str) -> tuple:
-    if len(text) <= MAX_CHARS:
-        return text, False
-    head = tail = MAX_CHARS // 2
-    dropped = len(text) - head - tail
-    return f"{text[:head]}\n...({dropped} characters omitted)...\n{text[-tail:]}", True
-
-
 def _kill_group(proc: subprocess.Popen) -> None:
     try:
         os.killpg(proc.pid, signal.SIGKILL)
@@ -203,15 +194,14 @@ def run_command(command: str, escalate: bool = False, *, control=None, timeout: 
         watcher.join()
 
     interrupted = control is not None and control.interrupt.is_set()
-    out_text, cut_out = _clip(stdout or "")
-    err_text, cut_err = _clip(stderr or "")
-    result = {"exit_code": proc.returncode, "stdout": out_text, "stderr": err_text, "sandboxed": not bare}
-    if cut_out or cut_err:
-        result["truncated"] = True
+    err_text = stderr or ""
+    result = {"exit_code": proc.returncode, "stderr": err_text, "sandboxed": not bare}
     if timed_out or interrupted:
         result["killed"] = True
     # A sandbox block reads like a plain failure unless we say so - otherwise the
     # model just retries the same command.
     if not bare and proc.returncode and "not permitted" in err_text.lower():
         result["hint"] = BLOCKED_HINT
+    # stdout last: a body over the store cap is cut from the end, so it is the only part that can be lost.
+    result["stdout"] = stdout or ""
     return result

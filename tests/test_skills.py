@@ -156,7 +156,7 @@ class SkillsTest(unittest.TestCase):
 
     def test_read_skill_description_carries_the_index(self):
         spec = tools_mod.TOOLS["read_skill"]
-        self.assertEqual(spec.origins, {"user", "job"})
+        self.assertEqual(spec.origins, {"user"})
         for origin in ("signal", "memory"):  # D76: refused at the door, not left out of the list
             self.assertEqual(Broker(tools_mod.TOOLS, origin, {}, session_grants=set, control=None).call("c1", "read_skill", {})["error"],
                              f"read_skill is not available in a {origin} turn")

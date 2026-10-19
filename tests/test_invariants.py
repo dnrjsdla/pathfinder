@@ -134,11 +134,12 @@ class SourceInvariants(unittest.TestCase):
     def test_module_ceilings(self):
         """v2 partition 1's Shape table (§6 x 1.3: ledger, state, results, assemble, clone, the router + llm
         pool and its two per-file rows, daemon kept at 780 until partition 6) and D49's rows for the rest
-        (partition 8, U17; D56's 200 for mirror.py, §6's allocation for mcp/). A `+` row is one ceiling over
-        the files together."""
+        (partition 8, U17; D56's 200 for mirror.py, §6's allocation for mcp/); v2 partition 2's Shape table for the
+        tool layer (tools 325, policy 195, broker + exec 520 - the `broker+policy` row split - and search 195).
+        A `+` row is one ceiling over the files together."""
         ceilings = {"ledger.py": 260, "state.py": 780, "results.py": 390, "assemble.py": 520, "clone.py": 520,
                     "router.py+llm/**/*.py": 715, "llm/openai_compat.py": 260, "llm/rename.py": 105,
-                    "daemon.py": 780, "broker.py+policy.py": 455, "tools.py": 390, "exec.py": 390,
+                    "daemon.py": 780, "tools.py": 325, "policy.py": 195, "broker.py+exec.py": 520, "search.py": 195,
                     "deliver.py": 325, "signals.py+rules.py": 585, "mirror.py": 200, "mcp/**/*.py": 1858}
         for row, ceiling in ceilings.items():
             with self.subTest(row):
@@ -148,9 +149,10 @@ class SourceInvariants(unittest.TestCase):
                 self.assertLessEqual(n, ceiling, f"{row} is {n} lines, over its ceiling of {ceiling}")
 
     def test_core_under_6000(self):
-        """v2 §6: the core rows, the v2 modules among them, capped at 6,000 together (D49's 5,500 before)."""
+        """v2 §6: the core rows, the v2 modules among them (search from partition 2), capped at 6,000 together
+        (D49's 5,500 before)."""
         core = ["ledger", "state", "daemon", "clone", "assemble", "results", "router", "llm/*", "broker", "policy",
-                "exec", "tools", "memory", "rules", "signals", "deliver"]
+                "exec", "tools", "search", "memory", "rules", "signals", "deliver"]
         files = [list(SRC.glob(f"{m}.py")) for m in core]
         self.assertTrue(all(files), "a core row matches no file; a renamed module stays in the core")
         n = sum(len(p.read_text(encoding="utf-8").splitlines()) for ps in files for p in ps)
@@ -197,10 +199,11 @@ class SourceInvariants(unittest.TestCase):
     def test_coupling_ceilings(self):
         """V14 (blueprint §6): at most 8 package imports and 8 importers (value-only modules exempt from the
         second), no function-level package import. Partition 1's modules - the Shape table's rows and the
-        modules its columns name; `NOT_YET` is not under the ceilings yet and is empty by partition 6."""
+        modules its columns name, and partition 2's `policy` and `search`; `NOT_YET` is not under the ceilings yet
+        and is empty by partition 6."""
         p1 = ["ledger", "state", "results", "assemble", "clone", "router", "llm", "llm.anthropic",
               "llm.openai_compat", "llm.rename", "daemon", "keychain", "clock", "tools", "broker", "init",
-              "__main__", "memory", "senses.catalog"]
+              "__main__", "memory", "senses.catalog", "policy", "search"]
         not_yet, value_only = {"daemon", "tools", "keychain", "memory", "__main__"}, {"clock", "config"}
         imports = package_imports()
         edges = {mod: {m for m, _, _ in found} - {mod} for mod, found in imports.items()}

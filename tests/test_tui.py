@@ -507,7 +507,7 @@ class TuiCase(unittest.TestCase):
             state.apply(Ledger(Path(tmp)).append("approval_pending", session="s1", origin="user", id="a2",
                                                 call_id="c1", tool="send\u200b", args=args, messages=[]))
             memory = {"target": "memory", "op": "replace", "old": "typed \\u200b", "new": "real \u200b"}
-            state.apply(Ledger(Path(tmp)).append("approval_pending", session="s1", origin="memory", id="a3",
+            state.apply(Ledger(Path(tmp)).append("approval_pending", session="s1", origin="user", id="a3",
                                                 call_id="c2", tool="edit_memory", args=memory, messages=[]))
             state.close()
             out = io.StringIO()

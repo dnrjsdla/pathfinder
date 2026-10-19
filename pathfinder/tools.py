@@ -32,9 +32,9 @@ class ToolSpec:
     # an explicit grade (config.GRADES); "" = write if `write` else read. An MCP tool's is set at load
     # from its annotations; policy.effect reads it after the owner's map
     effect: str = ""
-    # which turn origins may call it (default: the four turn origins; `memory` - the consolidation
-    # pass - is opt-in). D76: every origin sees every schema; the broker refuses the rest at the door
-    origins: frozenset = frozenset({"user", "signal", "job", "system"})
+    # which turn origins may call it (default: all three). D76: every origin sees every schema; the
+    # broker refuses the rest at the door
+    origins: frozenset = frozenset({"user", "signal", "system"})
     # Runs after coerce and before policy: what the gate shows is what will happen. A relative
     # path becomes absolute here; a local_datetime param is canonicalized by normalize_local_datetime.
     # May raise ValueError with a message the model can act on - the broker turns it into a tool error.

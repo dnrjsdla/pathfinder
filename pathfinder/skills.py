@@ -114,7 +114,7 @@ TOOLS = {
         description="Read a skill: a procedure the owner approved for one task. Before doing a task "
                     "a skill below covers, read it and follow it. Skills:",
         params={"name": {"type": "string", "description": "the skill's name, as listed"}},
-        required=["name"], handler=_read_skill, origins=frozenset({"user", "job"}),
+        required=["name"], handler=_read_skill, origins=frozenset({"user"}),
     ),
 }
 tools_mod.TOOLS.update(TOOLS)

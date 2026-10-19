@@ -68,7 +68,7 @@ class GateTest(MemoryHarness):
     def test_vet_refuses_unknown_rule_word(self):
         mgr = self.manager()
         proposal, error = mgr.vet("RULES.md", "replace", "| always | - | silence | |",
-                                  "| frobnicate | 1 | speak | note |", [], "user", {}, "s1")
+                                  "| frobnicate | 1 | speak | note |", "s1")
         self.assertIsNone(proposal)
         self.assertIn("frobnicate", error)
         self.assertEqual((self.home / "RULES.md").read_text(encoding="utf-8"), RULES_MD)
@@ -77,49 +77,41 @@ class GateTest(MemoryHarness):
         mgr = self.manager()
         (self.home / "wiki").mkdir()
         (self.home / "wiki" / "Coffee.md").write_text("# Coffee\nline one\nline one\n", encoding="utf-8")
-        proposal, error = mgr.vet("wiki/Coffee.md", "replace", "not here", "new", [], "memory", {}, "")
+        proposal, error = mgr.vet("wiki/Coffee.md", "replace", "not here", "new", "s1")
         self.assertIsNone(proposal)
         self.assertIn("does not match", error)
-        proposal, error = mgr.vet("wiki/Coffee.md", "replace", "line one", "new", [], "memory", {}, "")
+        proposal, error = mgr.vet("wiki/Coffee.md", "replace", "line one", "new", "s1")
         self.assertIsNone(proposal)
         self.assertIn("more than one", error)
 
-    def test_user_facts_need_a_user_or_reaction_line(self):
+    def test_user_facts_cite_the_last_user_message(self):
         mgr = self.manager()
-        allowed = {
-            10: {"seq": 10, "type": "assistant", "origin": "user"},  # origin "user" but not the user's words
-            11: {"seq": 11, "type": "reaction", "origin": "user"},
-            12: {"seq": 12, "type": "user", "origin": "user"},
-        }
-        proposal, error = mgr.vet("USER.md", "add", "", "- likes coffee", [10], "memory", allowed, "")
+        proposal, error = mgr.vet("USER.md", "add", "", "- likes coffee", "s1")
         self.assertIsNone(proposal)
-        self.assertIn("user's own words", error)
-        proposal, error = mgr.vet("USER.md", "add", "", "- likes coffee", [11], "memory", allowed, "")
+        self.assertEqual(error, "no user message to cite")
+        self.record("session_start", session="s1")
+        last = self.record("user", session="s1", turn="t1", origin="user", trust="user", text="I like coffee")
+        proposal, error = mgr.vet("USER.md", "add", "", "- likes coffee", "s1")
         self.assertIsNone(error)
-        self.assertEqual(proposal["evidence"], [11])
-        proposal, error = mgr.vet("USER.md", "add", "", "- likes coffee", [12], "memory", allowed, "")
-        self.assertIsNone(error)
-        self.assertEqual(proposal["evidence"], [12])
+        self.assertEqual(proposal["evidence"], [last["seq"]])
 
     def test_vet_checks_every_section_with_the_full_vocabulary(self):
         """RULES.md's vocabulary comes from every module under `pathfinder/senses/`, not from
         which senses this home has turned on - a Manager built with none loaded still knows the
         `mail` sense's `sender_in` word."""
         mgr = self.manager(senses=[])
-        allowed = {1: {"seq": 1, "type": "signal", "origin": "signal"}}
-        proposal, error = mgr.vet("RULES.md", "add", "", "| sender_in | USER.waiting_for | speak | |",
-                                  [1], "memory", allowed, "")
+        self.record("session_start", session="s1")
+        self.record("user", session="s1", turn="t1", origin="user", trust="user", text="hi")
+        proposal, error = mgr.vet("RULES.md", "add", "", "| sender_in | USER.waiting_for | speak | |", "s1")
         self.assertIsNone(error)
-        proposal, error = mgr.vet("RULES.md", "add", "", "| frobnicate | 1 | speak | |",
-                                  [1], "memory", allowed, "")
+        proposal, error = mgr.vet("RULES.md", "add", "", "| frobnicate | 1 | speak | |", "s1")
         self.assertIsNone(proposal)
         self.assertIn("frobnicate", error)
 
     def test_rules_frontmatter_is_not_editable(self):
         mgr = self.manager()
-        allowed = {1: {"seq": 1, "type": "signal", "origin": "signal"}}
         proposal, error = mgr.vet("RULES.md", "replace", "consolidate_min_events: 1",
-                                  "consolidate_min_events: 2", [1], "memory", allowed, "")
+                                  "consolidate_min_events: 2", "s1")
         self.assertIsNone(proposal)
         self.assertIn("frontmatter", error)
         self.assertEqual((self.home / "RULES.md").read_text(encoding="utf-8"), RULES_MD)
@@ -129,10 +121,11 @@ class GateTest(MemoryHarness):
         (self.home / "wiki").mkdir()
         (self.home / "wiki" / "Coffee.md").write_text(
             "# Coffee\nDon't forget to stop the streaming.\n", encoding="utf-8")
-        allowed = {1: {"seq": 1, "type": "signal", "origin": "signal"}}
+        self.record("session_start", session="s1")
+        self.record("user", session="s1", turn="t1", origin="user", trust="user", text="hi")
         proposal, error = mgr.vet(
             "wiki/Coffee.md", "replace", "Don't forget to stop the streming.",
-            "Don't forget to stop the recording.", [1], "memory", allowed, "")
+            "Don't forget to stop the recording.", "s1")
         self.assertIsNone(error)
         reason = mgr.apply(proposal)
         self.assertEqual(reason, "")
@@ -152,16 +145,14 @@ class ApplyTest(MemoryHarness):
 
     def test_wiki_applies_at_once(self):
         mgr = self.manager()
-        control = types.SimpleNamespace()
-        p = {"since": 0, "upto": 5, "lines": [], "allowed": {5: {"seq": 5, "origin": "user"}},
-            "read": 0, "applied": 0, "proposed": 0, "pages": [], "session": "s1"}
-        control.memory_pass, control.session = p, "s1"
-        result = mgr.edit("wiki/Coffee.md", "add", "", "# Coffee\nCoffee is good.", [5], control)
+        self.record("session_start", session="s1")
+        self.record("user", session="s1", turn="t1", origin="user", trust="user", text="I like coffee")
+        control = types.SimpleNamespace(session="s1")
+        result = mgr.edit("wiki/Coffee.md", "add", "", "# Coffee\nCoffee is good.", [], control)
         self.assertEqual(result, "applied")
         self.assertEqual((self.home / "wiki" / "Coffee.md").read_text(encoding="utf-8"),
                          "# Coffee\nCoffee is good.")
         self.assertEqual(len(self.events("memory_apply")), 1)
-        self.assertEqual((p["applied"], p["pages"]), (1, ["wiki/Coffee.md"]))
         self.assertEqual([pg["path"] for pg in mgr.state.pages()], ["wiki/Coffee.md"])
 
     def test_user_and_rules_go_to_the_box(self):
@@ -201,15 +192,6 @@ class ApplyTest(MemoryHarness):
         self.assertEqual(result, "applied")
         self.assertIn("likes coffee", (self.home / "USER.md").read_text(encoding="utf-8"))
 
-        p = {"since": 0, "upto": 1, "lines": [], "allowed": {}, "read": 0,
-            "applied": 0, "proposed": 0, "pages": [], "session": "s1"}
-        control2 = types.SimpleNamespace()
-        control2.memory_pass, control2.session = p, "s1"
-        last = self.record("user", session="s1", turn="t2", origin="user", trust="user", text="tea too")
-        p["allowed"][last["seq"]] = last
-        result2 = mgr.edit("USER.md", "add", "", "- likes tea", [last["seq"]], control2)
-        self.assertTrue(result2.startswith("queued"))
-
     SKILL = "---\nname: foo\ndescription: Weekly report steps\n---\nCollect the notes.\nSend them.\n"
 
     def _skill_control(self):
@@ -233,24 +215,12 @@ class ApplyTest(MemoryHarness):
         self.assertEqual(path.stat().st_mode & 0o777, 0o600)
         self.assertIn("- foo: Weekly report steps", skills.index(self.home))
 
-    def test_skill_edit_from_pass_signal_or_job_is_refused(self):
-        mgr = self.manager()
-        p = {"since": 0, "upto": 5, "lines": [], "allowed": {}, "read": 0, "applied": 0, "proposed": 0,
-             "pages": [], "session": "s1"}
-        control = types.SimpleNamespace()
-        control.memory_pass, control.session = p, "s1"
-        with self.assertRaises(ValueError):
-            mgr.edit("skills/foo.md", "add", "", self.SKILL, [], control)
-        self.assertFalse((self.home / "skills").exists())
-        self.assertEqual(self.state.pending(), [])
-        self.assertEqual(tools_mod.TOOLS["edit_memory"].origins, {"user", "memory"})  # D76: the rest refused
-
     def test_third_party_text_cannot_become_a_skill(self):
         mgr = self.manager()
         token = "ghp_" + "A" * 36
         for text in ("no frontmatter", self.SKILL.replace("name: foo", "name: bar"),
                      self.SKILL + f"use {token}\n"):
-            proposal, error = mgr.vet("skills/foo.md", "add", "", text, [], "user", {}, "s1")
+            proposal, error = mgr.vet("skills/foo.md", "add", "", text, "s1")
             self.assertIsNone(proposal)
             self.assertTrue(error)
             with self.assertRaises(ValueError):
@@ -312,13 +282,8 @@ class ApplyTest(MemoryHarness):
         mgr.apply({"target": "skills/foo.md", "op": "add", "old": "", "new": self.SKILL.rstrip("\n"), "evidence": []})
         with self.assertRaisesRegex(ValueError, "cannot be emptied"):
             mgr.edit("skills/foo.md", "remove", self.SKILL.rstrip("\n"), "", [], control)
-        p = {"since": 0, "upto": 1, "lines": [], "allowed": {}, "read": 0, "applied": 0, "proposed": 0,
-             "pages": [], "session": "s1"}
-        passed = types.SimpleNamespace()
-        passed.memory_pass, passed.session = p, "s1"
-        for ctl in (control, passed):
-            with self.assertRaisesRegex(ValueError, "read_skill"):
-                memory._read_memory("skills/foo.md", ctl)
+        with self.assertRaisesRegex(ValueError, "read_skill"):
+            memory._read_memory("skills/foo.md", control)
 
     def test_rules_apply_calls_on_rules_changed(self):
         mgr = self.manager()
@@ -396,13 +361,13 @@ class ApplyTest(MemoryHarness):
         mgr = self.manager()
         proposal = {"target": "RULES.md", "op": "replace", "old": "| always | - | silence | |",
                    "new": "| frobnicate | 1 | speak | note |", "evidence": []}
-        self.record("approval_pending", session="s1", origin="memory", id="ap1", call_id="ap1",
+        self.record("approval_pending", session="s1", origin="user", id="ap1", call_id="ap1",
                     tool="edit_memory", args=proposal, messages=[])
         mgr.decide("ap1", "approved")
         self.assertEqual((self.home / "RULES.md").read_text(encoding="utf-8"), RULES_MD)
         errors = self.events("error")
         self.assertEqual(len(errors), 1)
-        self.assertEqual(errors[0]["origin"], "memory")
+        self.assertEqual(errors[0]["origin"], "system")
         self.assertIn("frobnicate", errors[0]["message"])
 
 
@@ -496,9 +461,9 @@ class ContextTest(MemoryHarness):
 
 
 class ToolRegistryTest(unittest.TestCase):
-    def test_memory_origin_tools_are_opt_in(self):
-        pass_tools = {name for name, spec in tools_mod.TOOLS.items() if "memory" in spec.origins}
-        self.assertEqual(pass_tools, {"search_memory", "read_memory", "edit_memory"})
+    def test_no_tool_names_the_retired_memory_origin(self):
+        self.assertFalse([name for name, spec in tools_mod.TOOLS.items() if "memory" in spec.origins])
+        self.assertEqual(tools_mod.TOOLS["edit_memory"].origins, {"user"})
         user_tools = {name for name, spec in tools_mod.TOOLS.items() if "user" in spec.origins}
         self.assertTrue({"search_memory", "read_memory", "edit_memory"} <= user_tools)
         self.assertNotIn("read_ledger", user_tools)

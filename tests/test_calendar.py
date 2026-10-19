@@ -290,7 +290,7 @@ class ReminderWriteTest(unittest.TestCase):
     def test_both_ask_the_user_first(self):
         from pathfinder import policy
         for name in ("complete_reminder", "delete_reminder"):
-            self.assertEqual(policy.decide(reminders_sense.TOOLS[name], "user"), "ask")
+            self.assertEqual(policy.verdict(reminders_sense.TOOLS[name], "user", {}, {}, set())[0], "ask")
 
 
 class AgendaContextTest(unittest.TestCase):

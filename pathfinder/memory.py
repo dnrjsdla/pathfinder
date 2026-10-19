@@ -13,7 +13,7 @@ import threading
 import uuid
 from pathlib import Path
 
-from . import clock, config, ledger
+from . import clock, config
 from . import rules as rules_mod
 from . import skills as skills_mod
 from . import tools as tools_mod
@@ -112,15 +112,8 @@ def _apply_edit(text: str, op: str, old: str, new: str, idx: int | None) -> str:
         return "\n".join(head + new.split("\n") + tail)
     return "\n".join(head + tail)  # remove
 
-def _coerce_seq(item):
-    """Accept `12`, `"12"` or `"#12"` - what the model actually sends for a cited seq."""
-    if isinstance(item, int) and not isinstance(item, bool):
-        return item
-    s = item.strip().lstrip("#") if isinstance(item, str) else ""
-    return int(s) if s.isdigit() else None
 
-
-# -- the tools (opt-in per origin) ------------------------------------------------------------
+# -- the tools ------------------------------------------------------------
 
 _manager: "Manager | None" = None
 
@@ -154,14 +147,14 @@ TOOLS = {
         name="search_memory",
         description="Search the memory vault (USER.md, RULES.md, wiki pages) for pages matching a query.",
         params={"query": {"type": "string", "description": "search text"}},
-        required=["query"], handler=_search_memory, origins=frozenset(ledger.ORIGINS),
+        required=["query"], handler=_search_memory,
     ),
     "read_memory": ToolSpec(
         name="read_memory",
         description="Read one file of the memory vault: wiki/<name>.md (exactly as search_memory "
                     "or the page list names it), USER.md or RULES.md.",
         params={"path": {"type": "string", "description": "wiki/<name>.md, USER.md or RULES.md"}},
-        required=["path"], handler=_read_memory, origins=frozenset(ledger.ORIGINS),
+        required=["path"], handler=_read_memory,
     ),
     "edit_memory": ToolSpec(
         name="edit_memory",
@@ -183,7 +176,7 @@ TOOLS = {
                         "description": "the #seq numbers you read that support this edit"},
         },
         required=["target", "op"], handler=_edit_memory,
-        origins=frozenset({"user", "memory"}), write=True, reversible=True,
+        origins=frozenset({"user"}), write=True, reversible=True,
     ),
 }
 tools_mod.TOOLS.update(TOOLS)
@@ -293,32 +286,11 @@ class Manager:
                     return f"USER.md frontmatter must keep {key} as a list"
         return None
 
-    def _vet_evidence(self, evidence, origin, allowed, session, target):
-        if origin == "user":
-            seq = self.state.last_user_seq(session)
-            if seq is None:
-                return None, "no user message to cite"
-            seqs = [seq]
-        else:
-            seqs = []
-            for item in (evidence or []):
-                n = _coerce_seq(item)
-                if n is None:
-                    return None, f"bad evidence value: {item!r}"
-                seqs.append(n)
-            if not seqs:
-                return None, "evidence is required"
-            for n in seqs:
-                if n not in allowed:
-                    return None, f"evidence #{n} was not in the lines you read"
-        if target == "USER.md" and origin == "memory":
-            # every event whose text is the user's own: a chat line (steer included - a steer
-            # is still the user's own words) or a reaction, never an assistant/approval line
-            # just because it happens to carry origin "user" (B4: those three carry it too).
-            for n in seqs:
-                if allowed[n].get("type") not in ("user", "reaction"):
-                    return None, "USER.md takes only the user's own words (a user or reaction line)"
-        return seqs, None
+    def _vet_evidence(self, session):
+        seq = self.state.last_user_seq(session)
+        if seq is None:
+            return None, "no user message to cite"
+        return [seq], None
 
     def _vet_file(self, target, op, old, new):
         """The file-side half of `vet`: does the edit apply, and does the result still parse?
@@ -357,11 +329,11 @@ class Manager:
             return None, reason
         return {"target": target, "op": op, "old": old, "new": new}, None
 
-    def vet(self, target, op, old, new, evidence, origin, allowed, session):
+    def vet(self, target, op, old, new, session):
         proposal, reason = self._vet_file(target, op, old, new)
         if reason:
             return None, reason
-        evidence_seqs, reason = self._vet_evidence(evidence, origin, allowed, session, target)
+        evidence_seqs, reason = self._vet_evidence(session)
         if reason:
             return None, reason
         proposal["evidence"] = evidence_seqs
@@ -373,34 +345,24 @@ class Manager:
             return self._edit(target, op, old, new, evidence, control)
 
     def _edit(self, target, op, old, new, evidence, control):
-        p = getattr(control, "memory_pass", None)
-        origin = "memory" if p else "user"
         session = getattr(control, "session", "") or ""
-        allowed = p["allowed"] if p else {}
-        if isinstance(target, str) and target.startswith("skills/") and origin != "user":
-            raise ValueError("a skill is proposed only from the user's own turn, never by the memory pass")
-        proposal, error = self.vet(target, op, old, new, evidence, origin, allowed, session)
+        proposal, error = self.vet(target, op, old, new, session)
         if error:
             raise ValueError(error)  # a refusal is a failed call, not "ok" in the record
         if target.startswith("wiki/"):
-            self.apply(proposal, origin=origin)
-            if p is not None:
-                p["applied"] += 1
-                p["pages"].append(target)
+            self.apply(proposal, origin="user")
             return "applied"
         cfg = config.load(self.home)
         # a skill is an instruction (D61): never granted, a user turn can be steered by a page it just read
-        if origin == "user" and cfg["grants"].get("edit_memory") == "allow" and not target.startswith("skills/"):
+        if cfg["grants"].get("edit_memory") == "allow" and not target.startswith("skills/"):
             self.apply(proposal, origin="user")
             return "applied"
         if any(r["args"].get("target") == target and r["args"].get("new") == proposal["new"]
                for r in self.state.pending_memory()):  # live: one pass proposed the same fact three times
             return "already queued for the user's approval - do not propose it again"
         id = uuid.uuid4().hex[:12]
-        self.record("approval_pending", session=session, origin=origin, id=id, call_id=id,
+        self.record("approval_pending", session=session, origin="user", id=id, call_id=id,
                     tool="edit_memory", args=proposal, messages=[])
-        if p is not None:
-            p["proposed"] += 1
         return f"queued for your approval as {id}"
 
     def apply(self, proposal, approval=None, origin="user"):
@@ -444,12 +406,12 @@ class Manager:
             proposal, reason = self._vet_file(args.get("target"), args.get("op"),
                                               args.get("old", ""), args.get("new", ""))
             if reason:
-                self.record("error", origin="memory", message=reason)
+                self.record("error", origin="system", message=reason)
                 return
             proposal["evidence"] = args.get("evidence") or []
             reason = self.apply(proposal, approval=approval_id)
             if reason:
-                self.record("error", origin="memory", message=reason)
+                self.record("error", origin="system", message=reason)
         # denied: nothing to do - the daemon already recorded the `approval` event
 
     def undo(self, n: int = 1) -> list:

@@ -107,7 +107,10 @@ class StateTest(unittest.TestCase):
         self._record("session_start", session="s1")
         self._record("user", session="s1", turn="t1", origin="user", trust="user", text="hi")
         before = self.state.session("s1")["last_ts"]
-        self._record("memory_apply", session="s1", origin="memory", target="wiki/a.md", op="add", old=None, new="x")
+        # P2 U7c: origin "memory" can no longer be appended, but a ledger written before still carries it
+        old = {"seq": 99, "ts": before + 60, "type": "memory_apply", "session": "s1", "origin": "memory",
+               "target": "wiki/a.md", "op": "add", "old": None, "new": "x"}
+        self.state.apply(old)
         after = self.state.session("s1")["last_ts"]
         self.assertEqual(before, after)  # a pass's own writing must not look like the user is still there
 
@@ -325,7 +328,7 @@ class MemoryStateTest(unittest.TestCase):
     def test_reindex_restores_applies(self):
         self._record("session_start", session="s1")
         self._record("user", session="s1", turn="t1", origin="user", trust="user", text="hi")
-        self._record("memory_apply", origin="memory", target="wiki/a.md", op="add", old=None, new="x")
+        self._record("memory_apply", origin="user", target="wiki/a.md", op="add", old=None, new="x")
 
         rebuilt = self._reopen()
         applies = rebuilt.memory_applies_after(0)
@@ -384,7 +387,7 @@ class CloneIndexTest(unittest.TestCase):
         self._record("turn_end", session="s1", turn="t2", kind="interrupted", steps=0, usage={})
         self._record("user", trust="user", text="elsewhere", turn="t3", session="s2", origin="user")
         open_gate = self._gate("c4", "t3")
-        proposal = self.ledger.append("approval_pending", session="s1", origin="memory", id="m1", call_id="m1",
+        proposal = self.ledger.append("approval_pending", session="s1", origin="user", id="m1", call_id="m1",
                                       tool="edit_memory", args={"op": "add"}, messages=[])
         self.state.apply(proposal)
         return dict(read=read, first=first, second=second, ran=ran, fold=fold, open=open_gate, proposal=proposal)

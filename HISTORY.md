@@ -1825,3 +1825,236 @@ Haiku 5.5 as root and summarizer, api-default effort, 47 requests, about $0.035.
   until P2; the mid-stream steer cut until the TUI (P6); M2's in-place resume path with the children (P3).
 
 Anthropic credit used: about $0.20 before the M6 re-run and about $0.08 for the re-run.
+
+## 2026-10-19 — Partition 2 of the v2 rebuild: the tool layer
+
+Partition 2 (contract `docs/plans/v2-partition-2.md`) replaced v1's category table with four effect grades (read,
+write, destructive, external_send, plus unknown) and one policy table (`policy.verdict`: grade, then the origin's row,
+then grants, then the floors); gave MCP servers an effect map that `Attach` drafts once at a server's first load;
+added the core tool `search_tools` over local embeddings and the `call_tool` proxy, so no MCP tool is ever in the
+sent list; and gave gates an effect and a title taken from results the model has seen. "It runs" was judged by M3
+(the owner's 10-14 Notion session replayed offline, PASS), the M5 re-check (PASS), M5b (Haiku through `call_tool`,
+PASS on its Haiku rule), the §15-7 test (green), and the live check (not yet run: the owner's go-ahead). 745 tests at
+the end, from 715 at P1's close. Commits fd6aa6c (the contract draft) through f57824f.
+
+### The units
+
+- R2 `bench/v2/fake_notion_mcp.py` (131 lines): a stdio MCP server serving the fixture's 11 real Notion specs over
+  `fake_notion`'s world, persisted to a JSON file so an archive can be seen landing.
+- U1 `ToolSpec.effect`, the neutral `CALL_TOOL` spec, `coerce` parsing JSON text for an object/array parameter;
+  `config.GRADES`, `approval_mode` (read-only / manual / auto), the `tools` map validated; `policy.effect` and
+  `verdict` beside v1's `decide`.
+- U0 v1's registry search becomes `search_registry`; `delete_reminder` destructive; `add_schedule` external_send.
+- U4 `results.INLINE` = {read_result, search_tools}; `results.title` names a gated object from seen results only;
+  gate rows gain `title`, `recipient`, `scope`; `state.session_grants`.
+- U3 `search.py` (134 lines): cosine ranking over name + description + parameter names + enum values, top 3 as full
+  schemas within 6,000 chars, the rest one line; "search is unavailable (reason)" plus every tool's name and first line
+  when the embed model is down, unset or errors. `openai_compat.embed` turns every failure into `LLMError`.
+- U2a `mcp.tools.grade_of`, `draft`, `draft_server`; the install approval lists every non-read value (26 for the
+  fixture); install writes neither grants nor `tools`; uninstall and rollback drop `mcp_servers.<id>`, `tools.<id>` and
+  every `mcp__<id>__` grant through one helper. D31's install-time grants are gone.
+- U2b `Attach` is the one writer of a drafted map (once, never overwriting); `pins.FIELDS` gains annotations; a pre-P2
+  pin adopts the current annotations digest once, silently.
+- U5 (the switch): the door runs on `policy.verdict`; `call_tool` unwrapped first; unknown names get ≤ 3 nearest; the
+  batch stops at the first refusal or error, not at a gate; `decide(gate, decision, by, scope, grade)`; the tool list
+  is hashed per session and a change advances the thinking epoch.
+- U6 `approve N [--always tool|server|session] [--grade G]` with every floor refused in one line and re-checked in
+  `Clone.decide`; `approvals` prints effect and title (a P1 row's NULL title tolerated); the daemon imports `search` and
+  binds `search.HOME`; the live-check driver `bench/v2/p2_runs.py` + `p2_checks.py`.
+- U7a–c (one commit, joint review): `policy.decide`, `_TABLE`, `_category` deleted; exec's 8,000-char clip gone;
+  MCP specs lose `write=True`; the ledger's `ORIGINS` = user, signal, system; `search` joins the core and coupling
+  lists of `test_invariants.py`.
+- R1 `bench/v2/m3_gates.py` (201 lines), `bench/v2/m5_registry.py` (117), `bench/v2/m5b_proxy.py` (200).
+
+### Size against the ceilings
+
+| row | ceiling | before P2 (62f4f57) | after P2 (f57824f) | contract estimate |
+|---|---|---|---|---|
+| core (17 rows, `search` added) | 6,000 | 4,351 | 4,643 | ~4,680 |
+| state.py | 780 | 582 | 598 | ~595 |
+| daemon.py | 780 | 558 | 561 | — |
+| clone.py | 520 | 405 | 465 | ~455 |
+| assemble.py | 520 | 190 | 194 | — |
+| results.py | 390 | 253 | 283 | ~285 |
+| router.py + llm/** | 715 | 556 | 561 | — |
+| tools.py | 325 (was 390) | 261 | 284 | ~280 |
+| policy.py | 195 | 58 | 92 | ~140 |
+| broker.py + exec.py | 520 (`broker+policy` 455 split) | 109 + 217 | 140 + 207 | ~135 + ~200 |
+| search.py | 195 | — | 134 | ~110 |
+| mcp/** | 1,858 | 1,615 | 1,698 | ~1,705 |
+| installer.py | 700 | 699 | 697 | ≤ 700 |
+
+- memory.py, a core row, fell 467 → 429 (the consolidation pass's dead branches, U7c).
+- `NOT_YET` in `test_coupling_ceilings` is unchanged (daemon, tools, keychain, memory, `__main__`); `policy` and
+  `search` are under the coupling ceilings.
+
+### Measurements
+
+**M3 — the effect map cuts the Notion gates: PASS** (`docs/measurements/v2-m3-2026-10-19.json`, 0 model requests).
+The owner's 10-14 v1 session read in place: 31 call ids = 30 tool calls + 1 install; through the real `verdict`
+with Notion specs built by `mcp/tools.py` from the fixture.
+
+| map arm | grades read / write | v1 | manual | manual + owner grants | auto |
+|---|---|---|---|---|---|
+| no map (the home before P2's first start) | 11 / 19 | 19 | 19 | 19 | 0 |
+| drafted (what `Attach` writes) | 16 / 14 | 19 | 14 | 14 | 0 |
+| home | re-run after P2's first daemon start in the owner's home | | | | |
+
+- Drafted arm, manual: 0 of 16 reads gated; all 14 writes asked (`pages.archive` 12, `pages.restore` 2); 0 unknown;
+  `auto` 0 ≤ 4. Every figure equals the contract's expectation; nothing was tuned.
+- Without a map, `pages.get` (4) and `config.status` (1) grade write by annotations: the motive for the first-load draft.
+- The owner's four D31 grants (all on read tools) change nothing in either arm.
+- The record holds counts per (tool, action verb, grade, decision) only: no arguments, ids or content.
+
+**M5 re-check — search on the real registry: PASS** (`docs/measurements/v2-m5-registry-2026-10-19.json`, local
+embeddings, 0 credits). The 20 pre-registered M5 queries through the product's `search.find` over 32 tools (21
+natives + the 11 fixture Notion tools); none dropped.
+
+- Top-3 19/20 (EN 10/10, KO 9/10) against M5's 18/20; top-1 EN 9/10, KO 6/10.
+- The miss is a Korean Notion-database query.
+- Output size: max 5,960, median 4,980.5 chars against the 6,000 limit.
+- Latency: the first search indexes everything (2,797 ms); median after it 18 ms.
+- Truncation probe: the longest `text(spec)` is 1,237 chars; whole against half, cosine 0.976: not truncated.
+
+**M5b — the proxy call: PASS on the Haiku rule** (`docs/measurements/v2-m5b-claude-haiku-5-5-2026-10-19.json`).
+M1's nine Notion tasks (store arm) with no Notion tool in the list: `read_result` + `search_tools` + `call_tool`.
+
+| measure | M5b | pass line |
+|---|---|---|
+| passes | 6/9 (N1 N2 N4 N5 N9 N10) | ≥ M1 store arm 5/9 |
+| fabricated IDs | 0 | 0 |
+| first-call argument errors | 1 (N6) | ≤ 2 |
+| requests | 57 (cap 60) | estimate ~45 |
+| cost | $0.0361 (303,472 in, 11,508 out) | estimate ~$0.03 |
+
+- N1 and N2 newly pass against M1's store arm; N3 fails on the scorer's item order, N6 on the 8-step cap, N7 as in M1.
+- Seen: natives can take the three full-schema slots; a tool shown only as a one-line entry was called without its
+  schema (N6's argument error); the search answer runs near the 6,000-char limit.
+- gemma4 (3 runs, 2 requests each): 1 of 3 reached a proxied call, and its nested `properties` arrived intact; runs 1
+  and 3 ended after `search_tools`. The contract's fourth condition ("arrives on all 3") is not met; live-check step 4
+  re-tests it.
+
+**The live check: not yet run — waits for the owner's go-ahead.** From the worktree, after the free
+`python3 bench/v2/p2_runs.py --dry-run` (each check also shown to FAIL on a broken copy):
+
+```
+python3 bench/v2/p2_runs.py --root-model anthropic:$ROOT_MODEL --fallback-model ollama:$FALLBACK_MODEL --embed-model ollama:$EMBED_MODEL
+```
+
+- Expected: ~12 root requests at effort xhigh ≈ $0.03, ~3 requests on the Ollama fallback model, 0 credits for
+  embeddings (local). Home `/tmp/pf2` (0700), venv `/tmp/pf2-venv`; the daemon is stopped by its pid only; both are
+  removed when every check passes.
+- U6's local mechanics run (an Ollama root, no paid request) already confirmed the start, the one-time draft, ranked
+  search and the fallback.
+
+| step | what | checks |
+|---|---|---|
+| 1 | start; "when was the page '휴가 계획' last edited?" | the draft (`pages` get read, archive write); one `config_set {key: tools}`; a `search_tools` result naming fake-notion tools; an ok `call_tool` to workspace/pages get or search; no gate; fabricated IDs 0; the final text holds the world's time (7) |
+| 2 | "Archive that page.", `approvals`, `approve N` | a pages gate with effect write; its title names the page; `approvals` prints the title; fabricated IDs 0; `result {gate: N}` ok, then the report turn ends answer; the world marks the page archived (6) |
+| 3 | `embed_model` set to a missing model; a Notion search | `search_tools` says search is unavailable and lists the tools; then an ok `call_tool` to workspace; the turn ends answer; no error event (4) |
+| 4 | the root switched to the Ollama model; create a page with Status = Done | a pages `call_tool` whose recorded arguments hold `properties`; gated, and the approved call ran ok; the fake server got the properties unchanged (3) |
+| 5 | stop | the daemon exits on SIGTERM (1) |
+
+### What changed against the plan
+
+- **The live check moved from "after U6" to after U7**, and U7b's separate step-1 re-run (~4 requests) folded into
+  that one run.
+- **M5b's gemma4 condition** was 1/3, not 3/3 (above); the Haiku pass rule stands, and step 4 carries the check.
+- **The draft is stricter than the contract's rule** (lead decision, U2a review): `readOnlyHint: true` drafts read
+  only while no enum value grades non-read (then `effect_by` as usual), and a non-read word in any enum other than the
+  keyed one makes the whole tool its strictest grade. Both fail closed.
+- **A partly held server is drafted only after the hold is accepted** (U2b review); the contract's row was corrected.
+- **U7a, U7b and U7c landed as one commit** under one joint review, not three.
+- **Search output carries a provenance note**: MCP lines quote the server's own description after one note saying so
+  (U3); its header tells the model to look a one-line entry up by name before calling it (U5, from M5b).
+- **Sizes**: policy.py 92 against ~140; search.py 134 against ~110; clone.py 465 against ~455; core 4,643 against
+  ~4,680. The truncation probe's longest text was 1,237 chars, not the ~3,000 the contract guessed.
+- **Tests**: 715 → 745 (the U1–U6 tests added, U7a's and U7c's v1 cases retired as `verdict` rows or deleted).
+
+### Owner decisions (2026-10-19, the contract's Decisions)
+
+1. Q1 = (a): the V17 gate fields now (effect, `arg: title`, recipient, one-line brief, unknown); no waiting machinery
+   and no gate timeout in P2 — both come with the children in P3.
+2. Q2 = (a): four grades; `sandboxed`, `network`, `reversible` stay attributes, so `manual` behaves as v1 did;
+   escalate / no sandbox and `delete_reminder` are destructive; origins user / signal / system.
+3. Q3 = (b), archive = write: `Attach` drafts `tools.<server>` once at a server's first load (installed and
+   hand-configured alike, the owner's Notion server included); the installer only displays it. Accepted cost: a
+   hand-configured server's draft is written without review.
+4. Q4 = (b): a found tool is called through `call_tool`, its schema delivered as text; the list never changes. M5b
+   approved.
+5. Q5 = (a) with (i): `approval_mode` read-only / manual / auto and the tool / server / session "always allow"
+   scopes; `full-auto` stays out until P3.
+6. Q6 = (b): M3 passes when `manual` gates 0 of 16 reads and asks all 14 writes with 0 unknown, and `auto` ≤ 4.
+7. Q7 = (a): a batch stops at the first refusal or error; a gate does not stop it; ≤ 3 nearest names; the third
+   unknown-name refusal in a turn stops tool use.
+8. Q8 = (a): a change in the hashed tool list advances the thinking epoch (one cache rewrite). This answers P1's
+   "D76's residual".
+9. Q9 = (a): `add_schedule` is external_send until P5's `schedule` origin re-decides it; no grant lifts it.
+
+### Lead decisions during the partition
+
+- U0: v1's `search_tools` becomes `search_registry`, freeing the name (Deviation 6).
+- U5: `call_tool`'s inner name resolves against the live registry, not the turn's snapshot, so a tool attached
+  mid-turn that search lists can be called; the sent list is unchanged, so D76 holds.
+- U5: an origin with no policy row (`job`, `memory`) is refused at the door in D76's wording, not a `KeyError`.
+- U5: `--grade` on a miss with no string value writes nothing to the map; `resume {grade}` is recorded and the call
+  runs once.
+- U5: a proxied call refused on its arguments names the tool's parameters and which are required (from M5b).
+- U5: `SKIPPED` results carry `skipped: true` and count toward neither `FAILS_TO_STOP` nor the unknown-name cap.
+- U5 → U6: no deploy between the two (the daemon imported `search` only from U6); moot since U6 landed.
+- U7a: `policy.ORIGINS = ("user", *_ROWS)` is the one source the broker reads; a test pins it equal to
+  `ledger.ORIGINS` and `ToolSpec`'s default origins, so P5's `schedule` row is one edit.
+
+### Defects found, by whom
+
+- **Lead, after U1:** `policy.verdict` raised `KeyError` for the origins `job` and `memory` → refused at U5's door;
+  U7c closed `ORIGINS`.
+- **Lead, before U2b:** `draft_server` raised `KeyError` on a definition with no name → definitions are filtered
+  through `refused()` first, as `register` does.
+- **U3 review (2 HIGH):** a non-list enum broke every search; embed failures escaped the fallback. Also 1 MEDIUM, 3 LOW.
+  All fixed.
+- **U3 review question:** are parameter descriptions and enum values in `search_tools` output cleaned? Yes:
+  `mcp/tools.py` passes them through `clean` at load. No defect.
+- **U1 review:** 2 MEDIUM, 4 LOW, all fixed. **U2a review:** 2 MEDIUM, 4 LOW, all fixed.
+- **U4 review:** no HIGH or MEDIUM; `_title` now reads a real Notion page's title property, and two pinning tests
+  were added.
+- **U2b review:** a partly held server could be drafted from its passed tools alone, leaving a held tool on
+  annotations → drafted after the accept. 1 MEDIUM fixed, 3 LOW kept (below).
+- **U5 review:** skipped calls counted toward the failure stop and the unknown-name cap. 1 MEDIUM, 4 LOW (3 fixed; the
+  `ORIGINS` duplication went to U7a).
+- **U6 review (MEDIUM):** an unchecked config switch could have spent Anthropic credit on the Ollama step → every
+  switch is checked. 5 LOW fixed.
+- **U7 joint review:** a store cut of `run_command` output could lose `exit_code`, stderr, `killed` and the sandbox
+  hint → stdout goes last. 1 MEDIUM, 3 LOW, all fixed.
+- **M5b (the model):** a tool shown as a one-line entry was called without its schema → U5's search header and the
+  parameter-naming refusal.
+- **The contract, against the blueprint:** "19 → ≤ 4" read the 19 Notion gates as reads; the ledger says 5 reads and
+  14 writes (Deviation 1, Q6).
+
+### Left open on purpose
+
+- **The live check** waits for the owner's go-ahead (above).
+- **M3's home arm** is re-run after P2's first daemon start in the owner's home and must equal the drafted arm.
+- **gemma4's nested `properties`** through `call_tool`: 1/3 in M5b; live-check step 4.
+- **Gate title (U4, LOW):** the newest seen result with that id from any tool names it, so a third-party result could
+  relabel a real page id; the raw arguments are shown beside the title.
+- **U2b LOW, kept:** a pre-P2 pending `accept_pins` hold is re-proposed once on the first P2 start (its dedupe key
+  gained `annotations_hash`).
+- **U2b LOW, kept:** a `config.load`/`set` failure inside `Attach.register` on the installer path rolls back an otherwise good install.
+- **U2b LOW, kept:** no lock around `config.set` (shared by every caller).
+- **A list sent for an object parameter passes `coerce` unchanged** (pre-existing; only a string is parsed).
+- **Search:** KO top-1 is 6/10; the answer runs near its 6,000-char limit.
+- **Piece 2** is ~9,100 chars with every sense on (Deviation 4, not re-measured), over §7-1's 8,000.
+- **`effect_by` keys one argument** (Deviation 7): `pages.update {archived: true}` archives through `update`.
+- **full-auto:** the P3 contract must put V17 against §11 to the owner, with the spawn override (the owner asked that
+  this not be forgotten).
+- **P3:** waiting clones, gate expiry, M2's in-place resume with the children.
+- **P4:** `edit_memory`'s `evidence` parameter is unused since U7c; dropping it changes the tool schema, so it goes
+  with P4's memory rework.
+- **P4:** when the consolidation pass returns, its `skills/` guard (a skill only from the owner's own turn) and the
+  USER.md evidence rule return with it; the night clone's map proposals from gate history.
+- **P5:** the `schedule` origin (and `add_schedule`'s grade with it).
+- **P6:** multi-id approve and `list_approvals`; ARCHITECTURE.md and ARCHITECTURE.ko.md still describe D31's install
+  grants, `policy.decide` and the 8,000-char exec clip (rewritten in P6).
+
+Anthropic credit used: about $0.036 for M5b (57 requests); about $0.36 in all, from about $0.32 before P2.

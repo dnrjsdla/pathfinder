@@ -94,7 +94,11 @@ def live(root, fallback, embed):
         step(1)
         step(2)
         setting("embed_model", "ollama:no-such-model")
+        # a fresh session: step 1 left the workspace schema in the window, so the model skipped search_tools
+        setting("session_resume_s", 1)
+        time.sleep(2)
         step(3)
+        setting("session_resume_s", 7200)
         setting("models", {"root": [fallback]})  # a failure here would leave step 4 on the root model
         c["pages0"] = len(world()["pages"])
         step(4)

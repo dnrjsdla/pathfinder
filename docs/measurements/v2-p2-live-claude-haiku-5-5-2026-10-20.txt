@@ -1,0 +1,28 @@
+run 2 (bench/v2/p2_runs.py with step 3 in a fresh session) - the verdict
+step      result    checks
+1         PASS      all 7 passed
+2         PASS      all 6 passed
+3         PASS      all 4 passed
+4         PASS      all 3 passed
+5         PASS      all 1 passed
+step 1 final text: "Notion 페이지 '휴가 계획'은 2026년 9월 6일(일) 오전 11시 15분(한국 시간)에 마지막으로 수정되었습니다. Notion의 원본 시각은 2026-09-06 02:15 UTC입니다."
+removed /tmp/pf2 /tmp/pf2-venv
+
+run 1 (the same driver before the fix)
+step      result    checks
+1         PASS      all 7 passed
+2         PASS      all 6 passed
+3         FAIL      search_tools says search is unavailable and lists the tools; then a call_tool to workspace, ok
+4         PASS      all 3 passed
+5         PASS      all 1 passed
+step 1 final text: 'The Notion page "휴가 계획" was last edited on 2026-09-06 at 11:15 KST (02:15 UTC).'
+
+why run 1's step 3 failed: steps 1-3 shared one session, and step 1 had fetched the workspace schema with
+search_tools by exact name; in step 3 the model called call_tool on workspace twice straight away (both ok, 0 results:
+step 2 had archived the page) and answered, so search_tools never ran and the embeddings-down path was not reached.
+The product behaved correctly; the check's premise was wrong. Fix: the driver sets session_resume_s to 1 and waits 2 s
+before step 3 (a fresh session, no schema in the window), then restores 7200.
+
+root: Haiku 5.5 at effort xhigh (steps 1-3); step 4 on gemma4 31b cloud through Ollama; embeddings bge-m3, local.
+the world is bench/v2/fake_notion.py's fake workspace (the page title is fixture data). requests were not counted by
+the driver: about 12 root requests per run by the contract's estimate, about $0.06 for both runs.

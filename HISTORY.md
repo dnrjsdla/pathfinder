@@ -1834,8 +1834,9 @@ then grants, then the floors); gave MCP servers an effect map that `Attach` draf
 added the core tool `search_tools` over local embeddings and the `call_tool` proxy, so no MCP tool is ever in the
 sent list; and gave gates an effect and a title taken from results the model has seen. "It runs" was judged by M3
 (the owner's 10-14 Notion session replayed offline, PASS), the M5 re-check (PASS), M5b (Haiku through `call_tool`,
-PASS on its Haiku rule), the §15-7 test (green), and the live check (not yet run: the owner's go-ahead). 745 tests at
-the end, from 715 at P1's close. Commits fd6aa6c (the contract draft) through f57824f.
+PASS on its Haiku rule), the §15-7 test (green), and the live check (5/5 on Haiku 5.5 and gemma4, 2026-10-20, on its
+second run). 745 tests at the end, from 715 at P1's close. Commits fd6aa6c (the contract draft) through the live-check
+record.
 
 ### The units
 
@@ -1934,8 +1935,16 @@ M1's nine Notion tasks (store arm) with no Notion tool in the list: `read_result
   and 3 ended after `search_tools`. The contract's fourth condition ("arrives on all 3") is not met; live-check step 4
   re-tests it.
 
-**The live check: not yet run — waits for the owner's go-ahead.** From the worktree, after the free
-`python3 bench/v2/p2_runs.py --dry-run` (each check also shown to FAIL on a broken copy):
+**The live check: 5/5 on the second run (2026-10-20, the owner's go-ahead).** Record:
+`docs/measurements/v2-p2-live-claude-haiku-5-5-2026-10-20.txt`. The first run passed steps 1, 2, 4 and 5 and failed
+step 3: steps 1–3 shared one session, step 1 had fetched the workspace schema by exact name, so in step 3 the model
+called `call_tool` on workspace twice straight away (both ok) and answered — `search_tools` never ran and the
+embeddings-down path was never reached. The product was right; the check's premise was wrong. The driver now runs
+step 3 in a fresh session (`session_resume_s` 1 for that step, then 7200), and the second run passed all five steps:
+step 4's gemma4 `call_tool` carried `properties` and the fake server received them unchanged, which closes M5b's open
+gemma4 condition. Requests were not counted by the driver; about $0.06 for both runs by the contract's estimate.
+Run from the worktree, after the free `python3 bench/v2/p2_runs.py --dry-run` (each check also shown to FAIL on a
+broken copy):
 
 ```
 python3 bench/v2/p2_runs.py --root-model anthropic:$ROOT_MODEL --fallback-model ollama:$FALLBACK_MODEL --embed-model ollama:$EMBED_MODEL
@@ -2033,9 +2042,9 @@ python3 bench/v2/p2_runs.py --root-model anthropic:$ROOT_MODEL --fallback-model 
 
 ### Left open on purpose
 
-- **The live check** waits for the owner's go-ahead (above).
 - **M3's home arm** is re-run after P2's first daemon start in the owner's home and must equal the drafted arm.
-- **gemma4's nested `properties`** through `call_tool`: 1/3 in M5b; live-check step 4.
+- **The live check's step 3 depends on a fresh session:** a model that has already seen a tool's schema in the
+  window calls it without searching, so the embeddings-down fallback is exercised only when the window holds no schema.
 - **Gate title (U4, LOW):** the newest seen result with that id from any tool names it, so a third-party result could
   relabel a real page id; the raw arguments are shown beside the title.
 - **U2b LOW, kept:** a pre-P2 pending `accept_pins` hold is re-proposed once on the first P2 start (its dedupe key
@@ -2057,4 +2066,5 @@ python3 bench/v2/p2_runs.py --root-model anthropic:$ROOT_MODEL --fallback-model 
 - **P6:** multi-id approve and `list_approvals`; ARCHITECTURE.md and ARCHITECTURE.ko.md still describe D31's install
   grants, `policy.decide` and the 8,000-char exec clip (rewritten in P6).
 
-Anthropic credit used: about $0.036 for M5b (57 requests); about $0.36 in all, from about $0.32 before P2.
+Anthropic credit used: about $0.036 for M5b (57 requests) and about $0.06 for the two live-check runs (estimate); about
+$0.42 in all, from about $0.32 before P2.
